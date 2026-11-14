@@ -54,31 +54,59 @@ converted, so a conversion is never mistaken for a pass.
 A file listed as blocked but converted is executed by the test anyway and must be
 shown *not* to pass. That is what stops the count from going green by accident.
 
-Today: seven convert, seven run. `silo` matches all 200 scans, including rung 4's two
+Today: eight convert, eight run. `silo` matches all 200 scans, including rung 4's two
 coils on parallel branches — the importer turns such a rung into one rung per coil
 and the scan evaluates them in order, so a `Vec<Coil>` model turned out not to be
 needed. Four converted files each hold a timer on a rung with no coil, which the
 importer emits instead of dropping. `traffic-lights` is the largest: six timers
-chained through `.DN` contacts. `timer-counter` is the one that exercises `.TT`, and
-`start-stop` is the one that writes a bit of a word.
+chained through `.DN` contacts. `timer-counter` is the one that exercises `.TT`,
+`start-stop` is the one that writes a bit of a word, and `traffic-lights-routines` is
+three routines in one file, called by name, with a timer whose preset is an array
+element.
 
-The five that remain are named in the manifest, and the reason has changed twice: the
-converter and the importer both accept declared types, and a bit of a declared word is
-an operand, so no file is refused for its *types* or its bit-of-word tags any more.
-Each one stops at the construct behind them. This table is what the manifest diff
-records, and what the next step has to answer:
+The four that remain are named in the manifest, and the reason has changed each time a
+gate lifted: the importer accepts declared types, a bit of a declared word is an
+operand, several routines import, a call names its POU, and a word write is a compute
+coil. Each file now stops at the construct behind those:
 
 | file | the type it declares | the construct that stops it |
 | --- | --- | --- |
-| `motor-starters-function-block` | `MotorStarter` twice | the file also declares the function block body, as a second program |
+| `motor-starters-function-block` | `MotorStarter` twice | the file also declares a function block body, which is a type with its own data |
 | `silo-function-block` | `FillStation` | the same, for `FillStation` |
-| `traffic-lights-routines` | `DINT`, `DINT[6]`, `TIMER` | three programs and two `JSR` calls |
-| `recipes-data-type-ld` | `Recipe[3]`, `DINT`, `TIMER` | `MOV`: a word write has no PLCopen form yet |
+| `recipes-data-type-ld` | `Recipe[3]`, `DINT`, `TIMER` | `Recipes[Sel].FillTime`: a member of an array element |
 | `two-tanks-cascade` | `REAL`, `PID` twice | `SCP`, a scale instruction, then `PID` |
 
-Behind two of those, the type work is what the file needs next:
-`Recipes[Sel].FillTime` in `recipes` is a member of an array element, and
-`Durations[Phase]` in `traffic-lights-routines` is an array indexed by a variable.
+### Routines, calls, and writes that are not coils
+
+`traffic-lights-routines` needed four things LiNC did not have, and none of them is a
+new block:
+
+* **several POUs.** Every ladder or subroutine body in the source becomes a `<pou>`, and
+  the importer gives each body's section its own name so two bodies can coexist. The
+  entry routine is MAIN and a call is a `Call` coil — LiNC inlines the callee under the
+  rung's power, so a subroutine has no locals of its own, which is what a scan-based PLC
+  means by a call.
+* **`JSR` by name.** The call coil carries the POU's name, and validation checks it
+  against the project's POUs rather than a number.
+* **`MOV` and `ADD`.** A word write is a compute coil: `MOV,0,Phase` becomes
+  `phase = 0` and `ADD,Phase,1,Phase` becomes `phase = phase + 1`, both through the
+  expression engine that already existed. A `.ACC` member is the timer's `ET`, so
+  `MOV,0,StepTimer.ACC` zeroes the elapsed time.
+* **a preset read from an array.** `TON,StepTimer,Durations[Phase]` sets `PT` from one
+  element of a declared array, read every scan. A literal index is folded at compile
+  time and refused if the array has no such element; a computed index is read and
+  clamped into the array by the scan, because a value is worth more than a stopped PLC
+  (the same choice `POW` makes for a negative exponent).
+
+The declaration's initial values came with it: `Durations` carries
+`<initialValue><arrayValue>`, the model keeps them additively and skips them when
+empty, and a reset returns the scan image to them rather than to zero.
+
+One timer rule came out of this file and is now the model: **a done timer holds its
+elapsed time.** The program zeroes `ET` on the done scan, and the timer still reports
+done on the next one, so it does not add time that scan — which is why each phase lasts
+`PT` plus one scan, and why the trace's transitions are at 601, 802, 903. The reference
+engine holds it the same way; this is the model, not a tolerance.
 
 ### A bit of a word
 

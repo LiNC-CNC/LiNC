@@ -383,7 +383,11 @@ fn import_interface(
                         comment: String::new(),
                     });
                 }
-                None => vars.push(VarDecl::typed(name, ty)),
+                None => {
+                    let mut decl = VarDecl::typed(name, ty);
+                    decl.init = initial_values(variable, path, diagnostics);
+                    vars.push(decl);
+                }
             }
         }
     }
@@ -439,6 +443,57 @@ fn read_type(kind: &Element) -> Option<VarType> {
             })
         }
         _ => None,
+    }
+}
+
+/// A declaration's `<initialValue>`: the numbers a word variable starts with.
+///
+/// The standard writes a scalar as `<simpleValue value="5"/>` or `<value>5</value>`,
+/// and an array as `<arrayValue>` around the element values. A value that is not a
+/// number is refused by name rather than skipped: a declaration whose initial value
+/// this build cannot read would silently start at zero.
+fn initial_values(variable: &Element, path: &str, diagnostics: &mut Vec<Diagnostic>) -> Vec<i32> {
+    let Some(initial) = variable.child("initialValue") else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    collect_values(initial, &mut values);
+    let mut numbers = Vec::with_capacity(values.len());
+    for value in values {
+        match value.trim().parse::<i32>() {
+            Ok(number) => numbers.push(number),
+            Err(_) => {
+                let name = variable.attribute("name").unwrap_or("?");
+                diagnostics.push(error(
+                    "plcopen_unsupported_element",
+                    format!(
+                        "variable '{name}' has an initial value '{value}' that is not a number"
+                    ),
+                    format!("{path}.interface.{name}"),
+                ));
+                return Vec::new();
+            }
+        }
+    }
+    numbers
+}
+
+/// Collect the `<value>` texts and `value` attributes under one initial value.
+fn collect_values(element: &Element, values: &mut Vec<String>) {
+    if let Some(attribute) = element.attribute("value") {
+        values.push(attribute.to_string());
+    }
+    for child in &element.children {
+        match child.name.as_str() {
+            "value" | "simpleValue" => {
+                if let Some(attribute) = child.attribute("value") {
+                    values.push(attribute.to_string());
+                } else if !child.text.trim().is_empty() {
+                    values.push(child.text.trim().to_string());
+                }
+            }
+            _ => collect_values(child, values),
+        }
     }
 }
 
@@ -535,7 +590,9 @@ fn import_ld(
         return Err(diagnostics);
     }
 
-    let mut section = Section::new("main");
+    // The section is named after its POU: a file with several POUs has several
+    // bodies, and a section name has to be unique across the project.
+    let mut section = Section::new(operand_name(pou.name.as_str()));
     for (index, terminator) in terminators.iter().enumerate() {
         let end = elements[terminator];
         if end.name == "block" {
@@ -571,13 +628,10 @@ fn import_ld(
                 Ok(logic) => logic,
                 Err(()) => continue,
             };
-            let logic = match (feeding, block) {
-                (feeding @ Logic::Const { value: true }, block) => {
-                    let _ = feeding;
-                    block
-                }
-                (feeding, block) => Logic::series(vec![feeding, block]),
-            };
+            // A block consumes the power bit and pushes its `Q`, so the rung keeps
+            // the bit that feeds it even when that bit is the rail's true: a bare
+            // block would be handed an empty stack and never see its input high.
+            let logic = Logic::series(vec![feeding, block]);
             let mut rung = Rung::without_coil(logic);
             if let Some(documentation) = end.child("documentation") {
                 rung.comment = plain_text(documentation);
@@ -586,21 +640,47 @@ fn import_ld(
             continue;
         }
         let coil_element = end;
-        let Some(variable) = coil_element.child("variable") else {
-            diagnostics.push(error(
-                "plcopen_unsupported_element",
-                "a <coil> has no <variable>",
-                format!("{path}.body.LD.coil[{index}]"),
-            ));
-            continue;
+        let kind = coil_kind(coil_element);
+        // A compute coil carries an assignment instead of a bit: `<expression>`
+        // holds `target = value`, and the coil has no `<variable>`.
+        let assignment = if kind == CoilKind::Compute {
+            let text = coil_element
+                .child("expression")
+                .map(plain_text)
+                .unwrap_or_default();
+            if text.is_empty() {
+                diagnostics.push(error(
+                    "plcopen_unsupported_element",
+                    "a compute coil has no <expression>",
+                    format!("{path}.body.LD.coil[{index}]"),
+                ));
+                continue;
+            }
+            Some(text)
+        } else {
+            None
         };
-        let Some(operand) = operand_text(variable) else {
-            diagnostics.push(error(
-                "plcopen_unsupported_element",
-                "a <coil> names no operand",
-                format!("{path}.body.LD.coil[{index}]"),
-            ));
-            continue;
+        let operand = match &assignment {
+            Some(_) => String::new(),
+            None => {
+                let Some(variable) = coil_element.child("variable") else {
+                    diagnostics.push(error(
+                        "plcopen_unsupported_element",
+                        "a <coil> has no <variable>",
+                        format!("{path}.body.LD.coil[{index}]"),
+                    ));
+                    continue;
+                };
+                let Some(operand) = operand_text(variable) else {
+                    diagnostics.push(error(
+                        "plcopen_unsupported_element",
+                        "a <coil> names no operand",
+                        format!("{path}.body.LD.coil[{index}]"),
+                    ));
+                    continue;
+                };
+                operand
+            }
         };
         let mut visiting = HashSet::new();
         let logic = match resolve_input(
@@ -616,8 +696,9 @@ fn import_ld(
             Ok(logic) => logic,
             Err(()) => continue,
         };
-        let kind = coil_kind(coil_element);
-        let mut rung = Rung::new(logic, Coil::new(operand, kind));
+        let mut coil = Coil::new(operand, kind);
+        coil.expr = assignment;
+        let mut rung = Rung::new(logic, coil);
         if let Some(documentation) = coil_element.child("documentation") {
             rung.comment = plain_text(documentation);
         }
@@ -658,6 +739,16 @@ fn operand_text(variable: &Element) -> Option<String> {
 /// after the dot there is a number, not a member.
 pub fn operand_spelling(raw: &str) -> String {
     let raw = raw.trim();
+    // An array element read, `Durations[Phase]`: the array and the index are both
+    // declared names, so both are spelled the way their declarations are and the
+    // bracket stays. A literal index stays a number.
+    if let Some(operand) = crate::model::ArrayElement::parse(raw) {
+        return format!(
+            "{}[{}]",
+            operand_name(&operand.array),
+            array_index_spelling(&operand.index)
+        );
+    }
     if let Some(operand) = crate::model::WordBit::parse(raw) {
         if crate::profile::resolve::marker_word_slot(&operand.word).is_some() {
             // The marker word's spelling is the profile's, and this form is one.
@@ -691,6 +782,16 @@ pub fn operand_spelling(raw: &str) -> String {
     operand_name(raw)
 }
 
+/// The index of an array element: a declared name spelled the way its declaration
+/// is, or a literal left as it was written.
+fn array_index_spelling(index: &str) -> String {
+    let index = index.trim();
+    if index.parse::<i64>().is_ok() {
+        return index.to_string();
+    }
+    operand_name(index)
+}
+
 fn coil_kind(coil: &Element) -> CoilKind {
     let negated = coil
         .attribute("negated")
@@ -699,6 +800,10 @@ fn coil_kind(coil: &Element) -> CoilKind {
     match coil.attribute("storage").unwrap_or("none") {
         "set" => CoilKind::Set,
         "reset" => CoilKind::Reset,
+        // LiNC's own two coil forms. A call names a POU and inlines it under the
+        // rung's power; a compute coil carries an assignment in `<expression>`.
+        "call" => CoilKind::Call,
+        "compute" => CoilKind::Compute,
         _ if negated => CoilKind::Negated,
         _ => CoilKind::Normal,
     }
@@ -807,7 +912,11 @@ fn resolve_input(
         )?;
         visiting.remove(&reference);
         let combined = match (upstream, inner) {
-            (Logic::Const { value: true }, inner) => inner,
+            // A contact carries its own input, so a true bit in front of it says
+            // nothing. A block does not: it consumes the power bit and pushes its
+            // `Q`, so a block the rail feeds keeps the true bit in front of it or it
+            // would be handed an empty stack.
+            (Logic::Const { value: true }, inner) if !matches!(inner, Logic::Block { .. }) => inner,
             (upstream, Logic::Const { value: true }) => upstream,
             (upstream, inner) => Logic::series(vec![upstream, inner]),
         };

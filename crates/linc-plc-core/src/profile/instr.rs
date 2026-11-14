@@ -76,12 +76,18 @@ pub enum Instr<'a> {
         /// The rung also draws a compute cell, so it leaves no power bit.
         compute_cell: bool,
     },
-    /// A bit coil's target: the operand side, and the counter-member rule.
-    Coil { var: &'a str },
+    Coil {
+        var: &'a str,
+    },
     /// One block of an FBD grid.
-    Fbd { block: &'a FbdBlock },
+    Fbd {
+        block: &'a FbdBlock,
+    },
     /// One line of the line-form FBD body (`pou.fbd`), at `index` in it.
-    FbdLine { line: &'a FbdLine, index: usize },
+    FbdLine {
+        line: &'a FbdLine,
+        index: usize,
+    },
 }
 
 /// What one check found, plus the two decisions only the rule can make.
@@ -539,12 +545,26 @@ fn check_logic(logic: &Logic, ctx: &Ctx) -> Vec<Diagnostic> {
             instance,
             preset,
         } => {
-            if crate::compile::parse_block(block, instance, preset).is_none() {
-                diagnostics.push(Diagnostic::error(
+            // The block and the instance first, with the empty preset that every kind
+            // has a default for, so an unreadable preset is not reported as an
+            // unknown block.
+            let timer = crate::compile::parse_block(block, instance, "")
+                .map(|(kind, _, _)| kind.is_timer());
+            match timer {
+                None => diagnostics.push(Diagnostic::error(
                     "unknown_block",
                     format!("`{block}` is not a block; use TON/TOF/TP/CTU/CTD/SR/RS/RT/RF"),
                     format!("{path}.block"),
-                ));
+                )),
+                Some(timer) => {
+                    if let Err(message) = check_preset(preset, timer, ctx) {
+                        diagnostics.push(Diagnostic::error(
+                            "cal_arg",
+                            message,
+                            format!("{path}.preset"),
+                        ));
+                    }
+                }
             }
         }
         Logic::Compare {
@@ -687,6 +707,46 @@ fn check_label_coil(kind: CoilKind, var: &str, compute_cell: bool, ctx: &Ctx) ->
             }
         }
         _ => Vec::new(),
+    }
+}
+
+/// Is this text a preset the scan can read? A literal, a time, a marker word, a
+/// declared word, or one element of a declared array.
+///
+/// `Err` carries the sentence, so a literal index past the array says which array and
+/// how long it is instead of "not a valid preset".
+fn check_preset(text: &str, timer: bool, ctx: &Ctx) -> Result<(), String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(());
+    }
+    if crate::compile::preset_source(text, timer).is_some()
+        || ctx.word_slots.contains_key(&text.to_ascii_lowercase())
+    {
+        return Ok(());
+    }
+    let Some(operand) = crate::model::ArrayElement::parse(text) else {
+        return Err(format!("'{text}' is not a valid preset or a declared word"));
+    };
+    let lower = operand.array.to_ascii_lowercase();
+    let Some(var) = ctx
+        .word_vars
+        .iter()
+        .find(|var| var.name.to_ascii_lowercase() == lower)
+    else {
+        return Err(format!("'{}' is not a declared array", operand.array));
+    };
+    let elements = var.ty.elements();
+    match operand.literal() {
+        Some(number) if number < 0 || number >= i64::from(elements) => Err(format!(
+            "'{text}' is element {number} of `{}` ({}), which has {elements} elements",
+            var.name,
+            var.ty.label()
+        )),
+        Some(_) => Ok(()),
+        // A declared index is read at run time and clamped into the array by the
+        // scan, so there is nothing static to refuse.
+        None => Ok(()),
     }
 }
 

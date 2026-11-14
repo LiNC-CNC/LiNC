@@ -4566,6 +4566,7 @@ mod compare_window_tests {
             name: "seal".into(),
             kind: linc_plc_core::model::VarKind::Bit,
             ty: linc_plc_core::model::VarType::Bool,
+            init: Vec::new(),
             retain: false,
             comment: String::new(),
         });

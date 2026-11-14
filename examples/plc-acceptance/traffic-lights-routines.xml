@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://www.plcopen.org/xml/tc6_0201">
+<fileHeader company="converted" product="plcy2plcopen" version="1"/>
+<contentHeader name="traffic-lights-routines"/>
+<types><dataTypes/></types>
+<instances><configurations/></instances>
+<addData/>
+<pous><pou name="MAIN" pouType="program">
+<interface><outputVars><variable name="%Q0.0"><type><BOOL/></type></variable><variable name="%Q0.1"><type><BOOL/></type></variable><variable name="%Q0.2"><type><BOOL/></type></variable><variable name="%Q0.4"><type><BOOL/></type></variable><variable name="%Q0.5"><type><BOOL/></type></variable><variable name="%Q0.6"><type><BOOL/></type></variable></outputVars><localVars><variable name="Durations"><type><array><baseElementType><DINT/></baseElementType><dimension lower="0" upper="5"/></array></type><initialValue><arrayValue><value>6000</value><value>2000</value><value>1000</value><value>6000</value><value>2000</value><value>1000</value></arrayValue></initialValue></variable><variable name="Phase"><type><DINT/></type></variable></localVars></interface>
+<body><LD>
+<leftPowerRail localId="0"/>
+<coil localId="10" storage="call"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>SEQUENCE</variable></coil>
+<coil localId="11" storage="call"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>LIGHTS</variable></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou><pou name="SEQUENCE" pouType="program">
+<interface/>
+<body><LD>
+<leftPowerRail localId="0"/>
+<block localId="10" typeName="TON"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>Durations[Phase]</expression></variable></inputVariables></block>
+<contact localId="11"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>TON0.Q</variable></contact>
+<coil localId="12" storage="compute"><connectionPointIn><connection refLocalId="11"/></connectionPointIn><expression>TON0.ET = 0</expression></coil>
+<coil localId="13" storage="compute"><connectionPointIn><connection refLocalId="11"/></connectionPointIn><expression>Phase = Phase + 1</expression></coil>
+<block localId="14" typeName="GT"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>Phase</expression></variable><variable formalParameter="IN"><expression>5</expression></variable></inputVariables></block>
+<coil localId="15" storage="compute"><connectionPointIn><connection refLocalId="14"/></connectionPointIn><expression>Phase = 0</expression></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou><pou name="LIGHTS" pouType="program">
+<interface/>
+<body><LD>
+<leftPowerRail localId="0"/>
+<block localId="10" typeName="EQ"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>Phase</expression></variable><variable formalParameter="IN"><expression>0</expression></variable></inputVariables></block>
+<coil localId="11" storage="none"><connectionPointIn><connection refLocalId="10"/></connectionPointIn><variable>%Q0.2</variable></coil>
+<block localId="12" typeName="EQ"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>Phase</expression></variable><variable formalParameter="IN"><expression>1</expression></variable></inputVariables></block>
+<coil localId="13" storage="none"><connectionPointIn><connection refLocalId="12"/></connectionPointIn><variable>%Q0.1</variable></coil>
+<block localId="14" typeName="GE"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>Phase</expression></variable><variable formalParameter="IN"><expression>2</expression></variable></inputVariables></block>
+<coil localId="15" storage="none"><connectionPointIn><connection refLocalId="14"/></connectionPointIn><variable>%Q0.0</variable></coil>
+<block localId="16" typeName="EQ"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>Phase</expression></variable><variable formalParameter="IN"><expression>3</expression></variable></inputVariables></block>
+<coil localId="17" storage="none"><connectionPointIn><connection refLocalId="16"/></connectionPointIn><variable>%Q0.6</variable></coil>
+<block localId="18" typeName="EQ"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>Phase</expression></variable><variable formalParameter="IN"><expression>4</expression></variable></inputVariables></block>
+<coil localId="19" storage="none"><connectionPointIn><connection refLocalId="18"/></connectionPointIn><variable>%Q0.5</variable></coil>
+<block localId="20" typeName="LT"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>Phase</expression></variable><variable formalParameter="IN"><expression>3</expression></variable></inputVariables></block>
+<block localId="21" typeName="EQ"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="IN"><expression>Phase</expression></variable><variable formalParameter="IN"><expression>5</expression></variable></inputVariables></block>
+<coil localId="22" storage="none"><connectionPointIn><connection refLocalId="20"/><connection refLocalId="21"/></connectionPointIn><variable>%Q0.4</variable></coil>
+<rightPowerRail localId="9999"/>
+</LD></body></pou></pous></project>

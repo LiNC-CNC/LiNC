@@ -796,6 +796,53 @@ fn a_bit_of_a_word_is_checked_against_its_declaration() {
     );
 }
 
+/// A timer's preset may be one element of a declared array: an element the index
+/// cannot reach is refused with the array and its length in the sentence, and an
+/// index the program computes is accepted because the scan clamps it.
+#[test]
+fn an_array_element_preset_is_checked_against_the_array() {
+    use linc_plc_core::model::VarType;
+
+    let project = |preset: &str| {
+        let mut project = ld_project();
+        let mut durations = VarDecl::typed(
+            "durations",
+            VarType::Array {
+                base: Box::new(VarType::Dint),
+                len: 3,
+            },
+        );
+        durations.init = vec![100, 200, 300];
+        project.vars = vec![durations, VarDecl::typed("index", VarType::Dint)];
+        project.pous[0].sections[0].rungs[0] = Rung::without_coil(Logic::Series {
+            items: vec![
+                Logic::Const { value: true },
+                Logic::Block {
+                    block: "TON".into(),
+                    instance: "TON0".into(),
+                    preset: preset.into(),
+                },
+            ],
+        });
+        project
+    };
+
+    // A declared index is read at run time, so there is nothing static to refuse.
+    assert!(codes(&project("durations[index]")).is_empty());
+    // A literal in range is a fixed slot.
+    assert!(codes(&project("durations[2]")).is_empty());
+
+    let text = messages(&project("durations[3]")).join("\n");
+    assert!(
+        text.contains("'durations[3]' is element 3 of `durations` (DINT[3]), which has 3 elements"),
+        "{text}"
+    );
+    assert!(codes(&project("durations[3]")).contains(&"cal_arg".to_string()));
+
+    let text = messages(&project("nope[0]")).join("\n");
+    assert!(text.contains("'nope' is not a declared array"), "{text}");
+}
+
 /// A structured declaration is readable and refused: this build has no storage for
 /// it, and the refusal says which variable and which type.
 #[test]

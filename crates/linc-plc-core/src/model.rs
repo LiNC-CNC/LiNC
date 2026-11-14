@@ -351,6 +351,14 @@ pub struct VarDecl {
     /// move.
     #[serde(default, skip_serializing_if = "VarType::is_bool")]
     pub ty: VarType,
+    /// Initial word values, in element order, for a declaration that owns bank
+    /// slots: the six durations of a `DINT[6]` are six of these.
+    ///
+    /// Additive and skipped when empty, so a project that declares no initial
+    /// values serialises exactly as it did. A bit variable has none: a bit image
+    /// starts false, and a retained bit is what a store is for.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub init: Vec<i32>,
     #[serde(default)]
     pub retain: bool,
     #[serde(default)]
@@ -501,6 +509,41 @@ impl WordBit {
             element,
             bit,
         })
+    }
+}
+
+/// One element of a declared array, read as an operand: `Durations[Phase]`.
+///
+/// The array and the index are separate so each is resolved against its own
+/// declaration: the array decides the slot and the element count, the index is
+/// either a number or a declared word read each scan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArrayElement {
+    pub array: String,
+    pub index: String,
+}
+
+impl ArrayElement {
+    /// Read one operand's spelling. The bracket has to be the whole tail, so
+    /// `Bits[0].0` is a bit of a word and not this form.
+    pub fn parse(text: &str) -> Option<Self> {
+        let text = text.trim();
+        let inner = text.strip_suffix(']')?;
+        let (array, index) = inner.split_once('[')?;
+        let array = array.trim();
+        let index = index.trim();
+        if array.is_empty() || index.is_empty() || index.contains(['[', ']']) {
+            return None;
+        }
+        Some(Self {
+            array: array.to_string(),
+            index: index.to_string(),
+        })
+    }
+
+    /// The element number, when the index is a literal.
+    pub fn literal(&self) -> Option<i64> {
+        self.index.parse::<i64>().ok()
     }
 }
 
@@ -760,6 +803,7 @@ impl VarDecl {
             name: name.into(),
             kind: VarKind::Bit,
             ty: VarType::Bool,
+            init: Vec::new(),
             retain: false,
             comment: String::new(),
         }

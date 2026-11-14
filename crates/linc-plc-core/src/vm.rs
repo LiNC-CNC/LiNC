@@ -124,7 +124,15 @@ impl Vm {
             outputs: compiled.outputs.clone(),
             prev: vec![false; slots],
             next: vec![false; slots],
-            words: vec![0; compiled.program.word_count as usize],
+            words: {
+                let mut words = vec![0; compiled.program.word_count as usize];
+                for (slot, value) in &compiled.program.init {
+                    if let Some(cell) = words.get_mut(*slot as usize) {
+                        *cell = *value;
+                    }
+                }
+                words
+            },
             dt_ms: DEFAULT_DT_MS,
             blocks: vec![FbState::default(); compiled.program.fb_count as usize],
             edge_prev: vec![false; compiled.program.edge_count as usize],
@@ -171,6 +179,13 @@ impl Vm {
         self.prev.fill(false);
         self.next.fill(false);
         self.words.fill(0);
+        // A declaration's initial values are part of the program, so a reset comes
+        // back to them rather than to an image the project never described.
+        for (slot, value) in &self.program.init {
+            if let Some(cell) = self.words.get_mut(*slot as usize) {
+                *cell = *value;
+            }
+        }
         self.blocks.fill(FbState::default());
         self.edge_prev.fill(false);
         self.output_image.fill(false);
@@ -424,10 +439,7 @@ impl Vm {
                     let input = pop(&stack, &mut depth);
                     // A word source is read every scan, so a recipe word drives
                     // the block; a literal is the value it was compiled with.
-                    let preset = match preset {
-                        PresetSource::Const(value) => value,
-                        PresetSource::Word(slot) => self.word(slot),
-                    };
+                    let preset = self.preset_value(preset);
                     let q = run_block(
                         &mut self.blocks,
                         instance as usize,
@@ -444,10 +456,7 @@ impl Vm {
                     rule,
                 } => {
                     let input = pop(&stack, &mut depth);
-                    let preset = match preset {
-                        PresetSource::Const(value) => value,
-                        PresetSource::Word(slot) => self.word(slot),
-                    };
+                    let preset = self.preset_value(preset);
                     let q = run_counter(&mut self.blocks, instance as usize, input, preset, rule);
                     push(&mut stack, &mut depth, q);
                 }
@@ -472,11 +481,7 @@ impl Vm {
                 Op::FbLoad { instance, preset } => {
                     let power = pop(&stack, &mut depth);
                     if power {
-                        let preset = match preset {
-                            PresetSource::Const(value) => value,
-                            PresetSource::Word(slot) => self.word(slot),
-                        }
-                        .max(0);
+                        let preset = self.preset_value(preset).max(0);
                         if let Some(state) = self.blocks.get_mut(instance as usize) {
                             state.value = preset;
                             state.preset = preset;
@@ -692,6 +697,24 @@ impl Vm {
     pub fn hold_outputs(&mut self, previous: &[bool]) {
         for (slot, value) in previous.iter().take(self.output_image.len()).enumerate() {
             self.output_image[slot] = *value;
+        }
+    }
+
+    /// A block's preset for this scan. An array element's index is read from its
+    /// slot and clamped into the declaration, so a scan cannot read past the array
+    /// and cannot stop deriving a value either.
+    fn preset_value(&self, preset: PresetSource) -> i32 {
+        match preset {
+            PresetSource::Const(value) => value,
+            PresetSource::Word(slot) => self.word(slot),
+            PresetSource::Indexed { base, index, len } => {
+                let element = if len == 0 {
+                    0
+                } else {
+                    self.word(index).clamp(0, i32::from(len) - 1) as u16
+                };
+                self.word(base.saturating_add(element))
+            }
         }
     }
 
@@ -979,7 +1002,15 @@ fn run_block(
                 // real PLC report.
                 if !state.input {
                     state.value = 0;
-                } else {
+                } else if !state.q {
+                    // While the block reports done, elapsed is its output and is
+                    // held: a TON that has finished has no more time to own. The
+                    // one place that shows is a program that writes `ET` itself
+                    // (`MOV,0,Timer.ACC` on the done scan): the timer is still
+                    // reporting done on the next scan, so it holds the elapsed
+                    // time it was given and only counts again after that. The
+                    // reference engine holds it the same way, and a trace records
+                    // the scan, so this is the model and not a tolerance.
                     state.value = state.value.saturating_add(dt).min(preset);
                 }
                 state.q = state.value >= preset;

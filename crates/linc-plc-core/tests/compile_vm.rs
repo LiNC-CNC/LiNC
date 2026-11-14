@@ -719,6 +719,142 @@ fn a_marker_words_bit_is_an_operand_too() {
     assert_eq!(vm.outputs(), &[true], "and a contact reads it back");
 }
 
+/// A TON holds its elapsed time while it reports done. A program that writes `ET`
+/// itself on the done scan (the reference corpus does: `MOV,0,StepTimer.ACC`) sees
+/// one scan where the timer still reports done and does not count, and only then
+/// starts again — the model the traces were recorded against.
+#[test]
+fn a_done_timer_holds_its_elapsed_time_for_one_scan() {
+    use linc_plc_core::model::{Rung, Section};
+
+    let mut project = Project::new("hold");
+    project.pous = vec![linc_plc_core::model::Pou {
+        name: "MAIN".into(),
+        language: linc_plc_core::PouLanguage::Ld,
+        sections: vec![Section {
+            name: "main".into(),
+            rungs: vec![
+                Rung::without_coil(Logic::Series {
+                    items: vec![
+                        Logic::Const { value: true },
+                        Logic::Block {
+                            block: "TON".into(),
+                            instance: "TON0".into(),
+                            preset: "T#100ms".into(),
+                        },
+                    ],
+                }),
+                Rung::new(
+                    Logic::Contact {
+                        var: "TON0.Q".into(),
+                        negated: false,
+                    },
+                    linc_plc_core::model::Coil::compute("TON0.ET = 0"),
+                ),
+            ],
+        }],
+        ..linc_plc_core::model::Pou::new("MAIN", linc_plc_core::PouLanguage::Ld)
+    }];
+    let compiled = compile(&project).expect("the hold compiles");
+    let mut vm = Vm::new(&compiled);
+
+    for _ in 0..11 {
+        vm.scan_with_dt(&[], 10);
+    }
+    assert!(vm.block_q(0), "100 ms of 10 ms scans is the 11th");
+    assert_eq!(vm.block_value(0), 0, "the program zeroed the elapsed time");
+
+    // The timer still reports done, so it holds the zero it was handed.
+    vm.scan_with_dt(&[], 10);
+    assert_eq!(vm.block_value(0), 0, "held while done");
+    assert!(!vm.block_q(0), "and no longer done, since the time is gone");
+
+    // From the scan after that it counts again.
+    vm.scan_with_dt(&[], 10);
+    assert_eq!(vm.block_value(0), 10, "counting from the held value");
+}
+
+/// A timer's preset can be one element of a declared array, and the element is read
+/// each scan: `Durations[Phase]` moves when `Phase` does.
+#[test]
+fn a_preset_read_from_an_array_element_moves_with_the_index() {
+    use linc_plc_core::model::{Rung, Section, VarDecl, VarType};
+
+    let mut project = Project::new("indexed");
+    let mut durations = VarDecl::typed(
+        "durations",
+        VarType::Array {
+            base: Box::new(VarType::Dint),
+            len: 3,
+        },
+    );
+    durations.init = vec![100, 300, 900];
+    project.vars = vec![durations, VarDecl::typed("index", VarType::Dint)];
+    project.pous = vec![linc_plc_core::model::Pou {
+        name: "MAIN".into(),
+        language: linc_plc_core::PouLanguage::Ld,
+        sections: vec![Section {
+            name: "main".into(),
+            rungs: vec![
+                // A block rung with no coil: the block is series the rail's true bit.
+                Rung::without_coil(Logic::Series {
+                    items: vec![
+                        Logic::Const { value: true },
+                        Logic::Block {
+                            block: "TON".into(),
+                            instance: "TON0".into(),
+                            preset: "durations[index]".into(),
+                        },
+                    ],
+                }),
+            ],
+        }],
+        ..linc_plc_core::model::Pou::new("MAIN", linc_plc_core::PouLanguage::Ld)
+    }];
+    let compiled = compile(&project).expect("an indexed preset compiles");
+    let words = compiled.program.words;
+    let index = words.dint_base() + 3;
+    let mut vm = Vm::new(&compiled);
+
+    // The declaration's initial values are where the scan starts.
+    assert_eq!(vm.word(words.dint_base()), 100, "the first element's value");
+    vm.set_word(index, 1);
+    for _ in 0..31 {
+        vm.scan_with_dt(&[], 10);
+    }
+    assert_eq!(vm.block_value(0), 300, "the element `index` names");
+    assert!(vm.block_q(0), "and it is the preset that expired");
+
+    // A block rung with no coil still ran: the rail's true bit reached the block.
+    vm.reset();
+    assert_eq!(
+        vm.word(words.dint_base()),
+        100,
+        "a reset is the declaration"
+    );
+    for _ in 0..10 {
+        vm.scan_with_dt(&[], 10);
+    }
+    assert_eq!(vm.block_value(0), 90, "the timer counts from the reset");
+
+    // An index past the array is clamped into it rather than read from the slot
+    // after it: a scan keeps deriving a value, and the value is the last element's.
+    let before = vm.block_value(0);
+    vm.set_word(index, 99);
+    for _ in 0..15 {
+        vm.scan_with_dt(&[], 10);
+    }
+    assert_eq!(
+        vm.block_value(0),
+        before + 150,
+        "counting with no question asked"
+    );
+    assert!(
+        !vm.block_q(0),
+        "900 ms is the clamped preset, so this has not expired it"
+    );
+}
+
 /// `.TT` is the timing bit: enabled this scan and not yet done. It is **not**
 /// `ET < PT`, which is also true of a timer that has just been reset and is idle —
 /// one scan of difference, and a trace records it.

@@ -124,6 +124,37 @@ fn a_version_1_variable_decodes_to_bool_and_serialises_unchanged() {
     assert!(!written.contains("\"ty\""));
 }
 
+/// A declaration's initial values are part of the project and part of its hash: they
+/// serialise when they exist and are absent when they do not, so a project without
+/// them keeps its bytes.
+#[test]
+fn initial_values_round_trip_and_stay_out_of_a_plain_project() {
+    let mut project = base_project();
+    assert!(
+        !serde_json::to_string(&project)
+            .expect("serialize")
+            .contains("\"init\""),
+        "a variable with no initial value writes no key"
+    );
+
+    let mut durations = VarDecl::typed(
+        "durations",
+        linc_plc_core::model::VarType::Array {
+            base: Box::new(linc_plc_core::model::VarType::Dint),
+            len: 3,
+        },
+    );
+    durations.init = vec![6000, 2000, 1000];
+    project.vars.push(durations);
+    let text = serde_json::to_string(&project).expect("serialize");
+    assert!(text.contains("\"init\":[6000,2000,1000]"), "{text}");
+    let again: Project = serde_json::from_str(&text).expect("decode");
+    assert_eq!(
+        again.vars.last().map(|var| var.init.clone()),
+        Some(vec![6000, 2000, 1000])
+    );
+}
+
 /// A typed declaration serialises its type, and an array keeps its length and its
 /// element type.
 #[test]

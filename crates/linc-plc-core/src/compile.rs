@@ -67,6 +67,17 @@ struct Lookup {
     /// The typed declarations, so a bit-of-word operand (`Bits[0].0`) resolves its
     /// element and its width against the same declaration the bank laid out.
     word_vars: Vec<crate::profile::layout::WordVar>,
+    /// The declared arrays, by lowercased name: an element read (`Durations[Phase]`)
+    /// needs the first slot and the element count.
+    arrays: HashMap<String, ArraySlot>,
+}
+
+/// A declared array as an operand sees it: the first element's slot and how many
+/// elements there are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArraySlot {
+    pub slot: u16,
+    pub elements: u16,
 }
 
 impl Lookup {
@@ -79,6 +90,7 @@ impl Lookup {
             word: HashMap::new(),
             word_types: HashMap::new(),
             word_vars: Vec::new(),
+            arrays: HashMap::new(),
         }
     }
 
@@ -118,6 +130,14 @@ impl Lookup {
     /// The type a slot was declared with, if it has one.
     fn slot_type(&self, slot: u16) -> Option<crate::profile::layout::WordType> {
         self.word_types.get(&slot).copied()
+    }
+
+    /// A declared array, by any spelling of its name.
+    fn array(&self, name: &str) -> Option<ArraySlot> {
+        self.arrays
+            .get(name)
+            .or_else(|| self.arrays.get(&name.to_ascii_lowercase()))
+            .copied()
     }
 
     /// A bit of a declared word: the slot its element lives in, and the bit. `None`
@@ -257,6 +277,20 @@ pub use crate::profile::resolve::parse_preset;
 pub enum PresetSource {
     Const(i32),
     Word(u16),
+    /// One element of a declared array, read each scan: `Durations[Phase]` sets a
+    /// timer's `PT`, so the element moves with `Phase`.
+    ///
+    /// `index` is the slot the element number is read from, and `len` is the
+    /// declaration's element count. The scan clamps the index into `0..len`: a scan
+    /// that reads the wrong element is a program fault, and a deterministic value is
+    /// worth more than an stopped PLC (see `Op::Pow` for the same reasoning). A
+    /// literal index is folded at compile time, and an out-of-range literal is
+    /// refused by validation, so only a variable index reaches the clamp.
+    Indexed {
+        base: u16,
+        index: u16,
+        len: u16,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -427,6 +461,10 @@ pub struct Program {
     pub fb_count: u16,
     /// Previous-value slots for edge contacts.
     pub edge_count: u16,
+    /// The values a declaration says its words start with: slot and value. A scan
+    /// image starts zeroed, and these are applied once, at construction and at
+    /// reset.
+    pub init: Vec<(u16, i32)>,
     pub input_count: u16,
     pub output_count: u16,
 }
@@ -557,6 +595,16 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
     // the name does.
     lookup.word_vars = bank.vars.clone();
     for var in &bank.vars {
+        // The name addresses element 0, and the declaration says how many follow.
+        lookup.arrays.insert(
+            var.name.to_ascii_lowercase(),
+            ArraySlot {
+                slot: var.slot,
+                elements: var.ty.elements(),
+            },
+        );
+    }
+    for var in &bank.vars {
         intern(
             &mut symbols,
             &mut lookup,
@@ -632,6 +680,7 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         words,
         fb_count: FB_PER_TYPE * 9,
         edge_count: edges,
+        init: initial_words(&bank.vars),
         ops,
         var_count: bit_count,
         input_count: inputs.len() as u16,
@@ -654,6 +703,21 @@ pub fn compile(project: &Project) -> Result<Compiled, Vec<Diagnostic>> {
         hash: project_hash(project),
         warnings,
     })
+}
+
+/// The initial word values a project declares, by bank slot: element `n` of a
+/// declaration lands in `slot + n`.
+fn initial_words(vars: &[crate::profile::layout::WordVar]) -> Vec<(u16, i32)> {
+    let mut init = Vec::new();
+    for var in vars {
+        for (offset, value) in var.init.iter().enumerate() {
+            let slot = var.slot.saturating_add(offset as u16);
+            if offset < usize::from(var.ty.slots()) {
+                init.push((slot, *value));
+            }
+        }
+    }
+    init
 }
 
 /// The project's word bank and every declared word or float point, in ABI order.
@@ -1008,7 +1072,7 @@ fn lower_fbd_grid_block(
             ops.push(Op::Not);
         }
         _ => {
-            if let Some((kind, instance, preset)) = parse_block(&name, &name, &block.preset) {
+            if let Some((kind, instance, preset)) = block_of(&name, &name, &block.preset, lookup) {
                 if kind.is_latch() {
                     lower_fbd_grid_bit(
                         inputs.first().map(String::as_str).unwrap_or("FALSE"),
@@ -1037,7 +1101,7 @@ fn lower_fbd_grid_block(
                     ops,
                     0,
                 );
-                push_block(ops, lookup, kind, instance, PresetSource::Const(preset));
+                push_block(ops, lookup, kind, instance, preset);
             } else if let Some(compare) = compare_op(&name) {
                 let (Some(left), Some(right)) = (
                     resolve_word(inputs.first().map(String::as_str).unwrap_or("0"), lookup),
@@ -1186,7 +1250,7 @@ fn lower_fbd_block(
             ops.push(Op::Not);
         }
         _ => {
-            if let Some((kind, instance, preset)) = parse_block(&block, &block, &line.preset) {
+            if let Some((kind, instance, preset)) = block_of(&block, &block, &line.preset, lookup) {
                 if kind.is_latch() {
                     lower_fbd_bit(
                         line.inputs.first().map(String::as_str).unwrap_or("FALSE"),
@@ -1215,7 +1279,7 @@ fn lower_fbd_block(
                     ops,
                     depth,
                 );
-                push_block(ops, lookup, kind, instance, PresetSource::Const(preset));
+                push_block(ops, lookup, kind, instance, preset);
             } else if let Some(compare) = compare_op(&block) {
                 let (Some(left), Some(right)) = (
                     resolve_word(
@@ -1310,8 +1374,8 @@ fn lower_cells(
                 if !has_power {
                     ops.push(Op::PushConst(true));
                 }
-                if let Some((kind, instance, preset)) = parse_block(block, instance, preset) {
-                    push_block(ops, lookup, kind, instance, PresetSource::Const(preset));
+                if let Some((kind, instance, preset)) = block_of(block, instance, preset, lookup) {
+                    push_block(ops, lookup, kind, instance, preset);
                 } else {
                     // Validation refused this cell; keep the rung alive.
                     ops.push(Op::PushConst(false));
@@ -1618,10 +1682,39 @@ fn resolve_word(text: &str, lookup: &Lookup) -> Option<WordOperand> {
 /// Resolve a preset in a context that has the symbol table: a declared word
 /// point becomes a live source, everything else goes through `preset_source`.
 fn resolve_preset(text: &str, timer: bool, lookup: &Lookup) -> Option<PresetSource> {
+    if let Some(source) = indexed_word(text, lookup) {
+        return Some(source);
+    }
     lookup
         .word(text)
         .map(PresetSource::Word)
         .or_else(|| preset_source(text, timer))
+}
+
+/// Split `name[index]` when the text is one array element read, and resolve both
+/// halves against the declarations.
+///
+/// A literal index folds into the element's slot, so the scan reads a fixed slot and
+/// validation has already refused one past the array. A declared index stays a slot:
+/// the scan reads it, clamps, and adds it to the base.
+fn indexed_word(text: &str, lookup: &Lookup) -> Option<PresetSource> {
+    let operand = crate::model::ArrayElement::parse(text)?;
+    let var = lookup.array(&operand.array.to_ascii_lowercase())?;
+    let element = match lookup.word(&operand.index) {
+        Some(slot) => PresetSource::Indexed {
+            base: var.slot,
+            index: slot,
+            len: var.elements,
+        },
+        None => {
+            let number = operand.literal()?;
+            if number < 0 || number >= i64::from(var.elements) {
+                return None;
+            }
+            PresetSource::Word(var.slot + number as u16)
+        }
+    };
+    Some(element)
 }
 
 /// A preset that needs no symbol table: a marker word, a time (`T#4s`), or a
@@ -1675,6 +1768,23 @@ pub fn compare_op_for(name: CompareName) -> Op {
 ///
 /// The profile parses the name and counts the instances; this maps its kind onto
 /// the compiler's enum.
+/// A block with its preset resolved through the symbol table: a literal, a time, a
+/// marker word, a declared word, or one element of a declared array.
+///
+/// The kind and the instance come from the block's own spelling; the preset is a
+/// separate operand and is resolved like any other, because `Durations[Phase]`
+/// moves with the index and cannot be a compile-time number.
+fn block_of(
+    block: &str,
+    instance: &str,
+    preset: &str,
+    lookup: &Lookup,
+) -> Option<(FbKind, u16, PresetSource)> {
+    let (kind, index, _) = parse_block(block, instance, "")?;
+    let source = resolve_preset(preset, kind.is_timer(), lookup).unwrap_or(PresetSource::Const(0));
+    Some((kind, index, source))
+}
+
 pub fn parse_block(block: &str, instance: &str, preset: &str) -> Option<(FbKind, u16, i32)> {
     let (name, index, preset) = crate::profile::resolve::parse_block(block, instance, preset)?;
     Some((FbKind::from_name(name), index, preset))
@@ -1884,10 +1994,8 @@ fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op
             block,
             instance,
             preset,
-        } => match parse_block(block, instance, preset) {
-            Some((kind, instance, preset)) => {
-                push_block(ops, lookup, kind, instance, PresetSource::Const(preset))
-            }
+        } => match block_of(block, instance, preset, lookup) {
+            Some((kind, instance, preset)) => push_block(ops, lookup, kind, instance, preset),
             None => ops.push(Op::PushConst(false)),
         },
         Logic::Series { items } => {
@@ -1905,9 +2013,9 @@ fn lower_logic(logic: &Logic, lookup: &Lookup, edges: &mut u16, ops: &mut Vec<Op
                         if !powered {
                             ops.push(Op::PushConst(true));
                         }
-                        match parse_block(block, instance, preset) {
+                        match block_of(block, instance, preset, lookup) {
                             Some((kind, instance, preset)) => {
-                                push_block(ops, lookup, kind, instance, PresetSource::Const(preset))
+                                push_block(ops, lookup, kind, instance, preset)
                             }
                             None => ops.push(Op::PushConst(false)),
                         }

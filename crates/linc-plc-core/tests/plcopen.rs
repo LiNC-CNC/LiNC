@@ -361,6 +361,80 @@ fn a_bit_of_a_word_keeps_its_operand_shape() {
     assert_eq!(vm.outputs().last(), Some(&true), "and the contact read it");
 }
 
+/// Several POUs in one file: every routine imports, a call names its POU, a compute
+/// coil carries an assignment, and a preset may be one element of a declared array.
+#[test]
+fn a_routine_per_pou_imports_with_calls_and_compute_coils() {
+    let xml = r#"<?xml version="1.0"?>
+<project>
+  <contentHeader name="routines"/>
+  <types><pous>
+  <pou name="MAIN" pouType="program">
+    <interface><localVars>
+      <variable name="Durations"><type><array><baseElementType><DINT/></baseElementType><dimension lower="0" upper="2"/></array></type><initialValue><arrayValue><value>100</value><value>200</value><value>300</value></arrayValue></initialValue></variable>
+      <variable name="Phase"><type><DINT/></type></variable>
+    </localVars>
+    <outputVars><variable name="Y"><type><BOOL/></type></variable></outputVars></interface>
+    <body><LD>
+      <leftPowerRail localId="0"/>
+      <rightPowerRail localId="99"/>
+      <coil localId="1" storage="call"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>SEQUENCE</variable></coil>
+      <coil localId="2" storage="compute"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><expression>Phase = Phase + 1</expression></coil>
+      <contact localId="3"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><variable>Phase</variable></contact>
+    </LD></body>
+  </pou>
+  <pou name="SEQUENCE" pouType="program">
+    <interface/>
+    <body><LD>
+      <leftPowerRail localId="0"/>
+      <rightPowerRail localId="99"/>
+      <block localId="4" typeName="TON"><connectionPointIn><connection refLocalId="0"/></connectionPointIn><inputVariables><variable formalParameter="PT"><expression>Durations[Phase]</expression></variable></inputVariables></block>
+      <coil localId="5" storage="compute"><connectionPointIn><connection refLocalId="4"/></connectionPointIn><expression>Phase = 0</expression></coil>
+    </LD></body>
+  </pou>
+  </pous></types>
+</project>"#;
+    let project = imported(xml);
+    let pous = project.all_pous();
+    assert_eq!(pous.len(), 2, "both routines import");
+    assert_eq!(pous[0].name, "MAIN");
+    assert_eq!(pous[1].name, "SEQUENCE");
+    assert_eq!(
+        project.vars[0].init,
+        vec![100, 200, 300],
+        "the declaration's starting values survived the import"
+    );
+    let rungs = &pous[0].sections[0].rungs;
+    assert_eq!(rungs[0].coil().kind, linc_plc_core::model::CoilKind::Call);
+    assert_eq!(
+        rungs[1].coil().kind,
+        linc_plc_core::model::CoilKind::Compute
+    );
+    assert_eq!(
+        rungs[1].coil().expr.as_deref(),
+        Some("Phase = Phase + 1"),
+        "a compute coil keeps its assignment"
+    );
+    assert_eq!(
+        pous[1].sections[0].name, "sequence",
+        "each body's section is named after its POU, so two bodies can coexist"
+    );
+
+    // It compiles and runs: the call inlines the routine, the array element sets the
+    // timer's preset, and the assignment moves `Phase`.
+    let compiled = compile(&project).expect("the routines compile");
+    assert_eq!(
+        compiled.program.init,
+        vec![(16, 100), (17, 200), (18, 300)],
+        "the initial values are part of the program"
+    );
+    let mut vm = Vm::new(&compiled);
+    vm.scan(&[true, false]);
+    let phase = compiled.program.words.dint_base() + 3;
+    assert_eq!(vm.word(phase), 1, "the compute coil ran");
+    assert_eq!(vm.block_value(0), 0, "the timer saw the rail's true bit");
+}
+
 #[test]
 fn a_type_with_no_width_is_refused_by_name() {
     let xml = r#"<?xml version="1.0"?>
@@ -504,10 +578,20 @@ fn the_coil_field_is_optional_and_backwards_compatible() {
 fn two_timers_in_one_program_get_their_own_instances() {
     let xml = include_str!("fixtures/two-timers.ld.xml");
     let project = imported(xml);
+    // A block rung is the block series its feeding bit: the block consumes the
+    // power bit and pushes its `Q`, so a bare block would be handed an empty stack.
+    let block_of = |logic: &Logic| match logic {
+        Logic::Block { instance, .. } => Some(instance.clone()),
+        Logic::Series { items } => items.iter().find_map(|item| match item {
+            Logic::Block { instance, .. } => Some(instance.clone()),
+            _ => None,
+        }),
+        _ => None,
+    };
     let mut instances = Vec::new();
     for rung in &project.all_pous()[0].sections[0].rungs {
-        if let Logic::Block { instance, .. } = &rung.logic {
-            instances.push(instance.clone());
+        if let Some(instance) = block_of(&rung.logic) {
+            instances.push(instance);
         }
     }
     instances.sort();

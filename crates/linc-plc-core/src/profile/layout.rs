@@ -353,6 +353,8 @@ pub struct WordVar {
     pub name: String,
     pub slot: u16,
     pub ty: VarType,
+    /// The initial values the declaration carried, in element order.
+    pub init: Vec<i32>,
 }
 
 impl WordVar {
@@ -519,6 +521,7 @@ pub fn word_points(project: &Project) -> WordBank {
             name: var.name.clone(),
             slot,
             ty: var.ty.clone(),
+            init: var.init.clone(),
         });
     }
     WordBank { layout, io, vars }
