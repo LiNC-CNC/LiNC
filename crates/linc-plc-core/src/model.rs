@@ -4,6 +4,45 @@ use serde::{Deserialize, Serialize};
 
 use crate::SCHEMA_VERSION;
 
+/// Which PLC family's semantics a project is written in.
+///
+/// One document, two meanings. `iec` is the semantics this tree shipped with:
+/// ZX's grid, the marker-word bank, and a counter whose `Q` is `CV >= PV`.
+/// `classicladder`
+/// is the one the `.clp` importer now speaks: its counter's `done` is equality,
+/// it wraps at 0..9999, it carries empty and full outputs, and its addresses are
+/// `%B`/`%I`/`%Q`/`%W` — so an imported program means what it meant upstream
+/// instead of being translated into something with the same shape.
+///
+/// The name is the project's, not the UI's: switching notation (III.3) changes no
+/// byte of the document, and this field is a statement about meaning, not display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Dialect {
+    #[default]
+    #[serde(rename = "iec")]
+    Iec,
+    #[serde(rename = "classicladder")]
+    ClassicLadder,
+}
+
+impl Dialect {
+    /// The name the document uses, and the one diagnostics print.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Iec => "iec",
+            Self::ClassicLadder => "classicladder",
+        }
+    }
+
+    /// Omitted from the JSON when it is `iec`, so an iec project's bytes — and
+    /// the program hash over them — are exactly what they were before this field
+    /// existed. A retained store is keyed by that hash; adding a field must not
+    /// invalidate every store on the machine.
+    fn is_default(&self) -> bool {
+        *self == Self::Iec
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub schema: u32,
@@ -24,6 +63,9 @@ pub struct Project {
     /// language. Empty means the version-1 shape: `sections` is `MAIN`.
     #[serde(default)]
     pub pous: Vec<Pou>,
+    /// Which dialect's semantics every instruction in this project has.
+    #[serde(default, skip_serializing_if = "Dialect::is_default")]
+    pub profile: Dialect,
 }
 
 /// One program organisation unit, as the POU list shows it.
@@ -422,6 +464,7 @@ impl Project {
             watch: Vec::new(),
             sections: Vec::new(),
             pous: Vec::new(),
+            profile: Dialect::Iec,
         }
     }
 

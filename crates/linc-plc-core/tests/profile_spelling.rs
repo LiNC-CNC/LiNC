@@ -38,6 +38,69 @@ fn no_module_outside_the_profile_spells_a_marker_word() {
     }
 }
 
+/// The document says which semantics it means. An `iec` project serialises
+/// without the field, so its bytes — and the program hash a retained store is
+/// keyed by — are exactly what they were before the field existed. A
+/// `classicladder` one carries its name, and the name in the JSON is the name
+/// diagnostics print.
+#[test]
+fn a_projects_dialect_is_written_only_when_it_is_not_iec() {
+    use linc_plc_core::{Dialect, Project};
+
+    let iec = Project::new("plain");
+    assert_eq!(
+        iec.profile,
+        Dialect::Iec,
+        "the default is the shipped semantics"
+    );
+    let json = serde_json::to_string(&iec).expect("serialize");
+    assert!(
+        !json.contains("profile"),
+        "an iec project must not grow a field, or every hash changes: {json}"
+    );
+    let back: Project = serde_json::from_str(&json).expect("decode");
+    assert_eq!(back.profile, Dialect::Iec);
+
+    let mut classic = Project::new("cl");
+    classic.profile = Dialect::ClassicLadder;
+    let json = serde_json::to_string(&classic).expect("serialize");
+    assert!(
+        json.contains("\"classicladder\""),
+        "the document name is `classicladder`: {json}"
+    );
+    let back: Project = serde_json::from_str(&json).expect("decode");
+    assert_eq!(back.profile, Dialect::ClassicLadder);
+    assert_eq!(
+        Dialect::ClassicLadder.label(),
+        "classicladder",
+        "the document name and the printed name cannot drift"
+    );
+
+    // A name the tree does not know is a decode error, not a silent default.
+    let mut value: serde_json::Value = serde_json::from_str(&json).expect("json");
+    value["profile"] = serde_json::json!("plc5");
+    assert!(
+        serde_json::from_value::<Project>(value).is_err(),
+        "an unknown profile must not be guessed"
+    );
+
+    // Until its semantics exist, a classicladder project is refused loudly
+    // rather than validated as iec.
+    let diagnostics = linc_plc_core::validate(&classic);
+    assert!(
+        diagnostics.iter().any(|item| item.code == "profile"
+            && item.path == "profile"
+            && item.message.contains("not implemented yet")),
+        "{diagnostics:?}"
+    );
+    assert!(
+        !linc_plc_core::validate(&iec)
+            .iter()
+            .any(|item| item.code == "profile"),
+        "an iec project says nothing about profiles"
+    );
+}
+
 /// M4's acceptance: the validator names no instruction and no operand format.
 /// The rules are `profile/instr.rs`'s; `validate.rs` walks the document and
 /// checks its structure, so a new mnemonic or a changed operand spelling cannot

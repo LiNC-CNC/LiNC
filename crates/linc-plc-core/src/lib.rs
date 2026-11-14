@@ -31,8 +31,8 @@ pub use compile::{
 };
 pub use grid::{Cell, POSITIONS};
 pub use model::{
-    Coil, CoilKind, IoDirection, IoKind, IoPoint, Logic, Pou, PouLanguage, Project, Rung, Section,
-    VarDecl, VarKind,
+    Coil, CoilKind, Dialect, IoDirection, IoKind, IoPoint, Logic, Pou, PouLanguage, Project, Rung,
+    Section, VarDecl, VarKind,
 };
 pub use protocol::{ProtocolError, Request, Response, RunState, StateSnapshot};
 pub use validate::{validate, Diagnostic, Severity};

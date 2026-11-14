@@ -84,6 +84,19 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
         ));
     }
 
+    // The document says which semantics it means. `classicladder` is declared in
+    // the model and refused here until its counter rules and addresses exist:
+    // validating it as `iec` would quietly change what the program does.
+    if project.profile == crate::model::Dialect::ClassicLadder {
+        diagnostics.push(Diagnostic::error(
+            "profile",
+            "profile `classicladder` is not implemented yet; its counter rules (done = equality, \
+             wrap at 0..9999, empty and full outputs) and its `%B`/`%I`/`%Q`/`%W` addresses land \
+             with the second semantics, so a project is written in `iec` until then",
+            "profile",
+        ));
+    }
+
     let symbol_count = project.io.len() + project.vars.len();
     if symbol_count > MAX_SYMBOLS {
         diagnostics.push(Diagnostic::error(
