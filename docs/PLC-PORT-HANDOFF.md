@@ -881,6 +881,176 @@ running to the cell edges so neighbours show no joint, `CONDUCTOR_Y` named.
 UI only, apart from the `block_span` rule. Doing this before III.6 is right: typed
 data grows the block body, and it is cheaper to grow a body that already has rows.
 
+## III.10 Getting all twelve to pass
+
+Five of twelve convert and match their traces today. This is the ladder to twelve,
+one gate per step, in the order the refusals actually occur. Every step is one
+commit that raises the `CONVERTIBLE` array in
+`crates/linc-plc-core/tests/acceptance.rs` by name, so progress is a visible diff
+and a file cannot join it quietly.
+
+**Rules for every step.**
+
+- The converter emits the construct *and* LiNC accepts it *and* the run matches
+  after every scan. Two out of three is not a step.
+- **Never edit a trace to make a test pass.** A trace is a recording, not an
+  opinion. If the reference engine is wrong, IEC 61131-3 wins, and the trace is
+  re-derived deliberately with the disagreement written down.
+- A converted file that is still blocked must keep failing, which the corpus test
+  already enforces: it asserts `run(...).is_err()` for every `converted` file with
+  `runs: false`.
+- One gate at a time. Fix the first refusal, re-run, read the next one from
+  `manifest.json`. The type gate in step 1 hides five later blockers; guessing
+  past it is how a file gets "supported" and then fails on values.
+
+### Step 0 — converter: the five mappings that need no LiNC change
+
+All in the out-of-tree converter, so LiNC does not move.
+
+| construct | emit as | unblocks |
+| --- | --- | --- |
+| `RES,Counters[0]` | the counter block with its `R` input driven | `timer-counter` |
+| `.TT` on a `TON` | a compare `ET < PT` on the same instance | `timer-counter` |
+| `.TT` on `TOF`/`TP` | refuse, for now: `TT` means timing *down* there | — |
+| `ONS,tag` | an `R_TRIG` block, which already exists in `profile/spec.rs` | `start-stop` |
+| `X[1]` | a scalar, since a length-1 array has no indices to choose between | `start-stop` |
+| typed tags | `<types><dataTypes>` plus typed `<interface><localVars>` | gates step 1 |
+
+**Result: `timer-counter` passes, 6 of 12.** Nothing else can join yet: every
+other blocked file hits LiNC's type gate first.
+
+### Step 1 — importer: accept declared types (the III.6 widening)
+
+The single check at `plcopen.rs` `is_bool` refuses every declared type that is not
+`BOOL`, and it fires before anything else can be reported. Replace it with a type
+reader, then carry the type through:
+
+| file | change |
+| --- | --- |
+| `plcopen.rs` | type reader → `Bool`, `Int`, `Dint`, `Real`, `Time`, `Derived(name)`, `Array(base, len)`; `is_bool` gate deleted; `plcopen_unsupported_element` kept for types still unknown |
+| `model.rs` | `VarDecl` gains `ty`, defaulting to `Bool` so version-1 projects decode |
+| `profile/layout.rs` | `WordLayout` grows named typed regions over the existing bank, never a second bank — inserting a region renumbers every slot after it, and `retain::layout_hash` must notice |
+| `compile.rs` | loads and stores carry width and signedness; `REAL` reinterprets the same 32 bits |
+| `validate.rs` | a type error names the variable and the expected type |
+
+**Result: still 6 of 12** — and that is the success condition. The gate has moved:
+every remaining file now refuses at its *real* blocker, and the `blocker` strings in
+`manifest.json` change from "tag types: …" to the actual construct. Commit that
+diff; it is the evidence step 1 worked.
+
+### Step 2 — bit-of-word operands
+
+`start-stop` uses `Bits[0].0`: bit 0 of the first element of `Bits`, an `INT[1]`.
+Add an operand form for a bit within a typed word, then map `%MWn.b`.
+
+| file | change |
+| --- | --- |
+| `model.rs` | an operand kind for `word.bit`, with the bit range checked against the type |
+| `compile.rs` | a bit extract and insert op, folded into the existing compare/store path |
+| `validate.rs` | bit index out of range names the variable and the width |
+
+**Result: 7 of 12.**
+
+### Step 3 — several POUs, `JSR`, and expressions over words
+
+`traffic-lights-routines` is three POUs, two `JSR` calls, a `DINT` counter, a
+`DINT[6]` array indexed by that counter, and arithmetic on it.
+
+| part | change |
+| --- | --- |
+| multiple POUs | `Project.pous` already exists and `plcopen.rs` already loops over `<pou>`; the converter must emit all of them and LiNC must compile each |
+| `JSR` | the `Call` coil already exists (`CoilKind::Call`); bind it to the POU by name instead of by number |
+| `MOV,x,y` and `ADD,a,b,c` | no new block: `expr.rs` already evaluates expressions, so emit a compute cell assigning `y := x` and `c := a + b` |
+| `StepTimer.ACC` write | a write to a timer member; `MOV,0,StepTimer.ACC` resets the elapsed time |
+| `Durations[Phase]` | the declared-array load from III.6, bounds-checked |
+
+**Result: 8 of 12.**
+
+### Step 4 — user function blocks with formal parameters
+
+`motor-starters-function-block` and `silo-function-block` both declare a POU of
+their own and call it with named arguments:
+`CALL,Pump1,Start:=%I0.0,Run=>%Q0.0`.
+
+| part | change |
+| --- | --- |
+| POU kind | import `pouType="functionBlock"` and keep its variable interface, not just its body |
+| instance data | a `derived` variable in `localVars` becomes an instance: `Pump1` of type `MotorStarter` |
+| locals | `#Start`, `#Run`, `#Delay` resolve against the POU's own interface, at compile time — never by renaming at run time (II.7) |
+| call binding | `CALL` carries `in`/`out` pin pairs; the compiler emits argument loads and result stores around the callee |
+| instance fields | `Station.Filling` reads a member of an instance as a contact operand |
+
+**Result: 10 of 12.** Two callers of one FB is the point of the file: `Pump2`'s
+`Ready` must stay off while `Pump1`'s is on, which is what catches an instance
+register shared between call sites.
+
+### Step 5 — struct types, and an array of them
+
+`recipes-data-type-ld` declares `Recipe { FillTime, MixTime, Lamp }` and
+`Recipes: Recipe[3]`, then uses `Recipes[Sel].FillTime` as a **timer preset**.
+
+| part | change |
+| --- | --- |
+| struct types | `<types><dataTypes><dataType name="Recipe"><struct>` → a layout: field name, type, offset |
+| array of struct | `Recipe[3]` is three of those layouts, contiguous in the typed region |
+| indexed field as a preset | `Cell::Block`'s preset is already a `String` that `expr.rs` evaluates; the operand must resolve `Recipes[Sel].FillTime` to a checked offset |
+| `MOV,0,Sel` | a compute cell, as in step 3 |
+
+**Result: 11 of 12.**
+
+### Step 6 — analogue blocks, and the hole in this file's trace
+
+`two-tanks-cascade` needs `REAL` words, `SCP` (scale), `MOV`, and two `PID`
+instances with `?` placeholder operands.
+
+**Read the trace before implementing this one.** It holds only `%Q0.2`:
+
+```
+outputs: ["%Q0.2"]   changes: scan 51 → 1, scan 151 → 0
+```
+
+`%Q0.2` comes from rung 5, `XIC,%I0.2` or `XIC,%I0.3` — two digital inputs. It does
+not depend on the PID loops at all. So a stub `PID` that returns zero would make
+this file pass its trace, which means the trace proves the blocks *compile*, not
+that they *control*.
+
+Do it in this order:
+
+1. `REAL` words and `SCP`/`MOV`; implement `PID` per the reference's algorithm, and
+   say in the commit which algorithm that is.
+2. Add a **second trace** for this file that records `Setpoint` and `OuterOut` as
+   real values with a declared tolerance in `manifest.json`, e.g.
+   `"tolerance": {"OuterOut": 0.5}`. The alarm bit stays exact.
+3. Only then add the file to `CONVERTIBLE`.
+
+Without step 2 the twelfth file is a compile test wearing a trace. With it, the
+corpus test needs one new rule: a numeric output compares within its declared
+tolerance, and a missing tolerance means exact.
+
+**Result: 12 of 12.**
+
+### Where this leaves the numbers
+
+| after step | passing | the file that joined |
+| --- | --- | --- |
+| today | 5 | — |
+| 0 | 6 | timer-counter |
+| 1 | 6 | none — the gate moved, and the manifest says so |
+| 2 | 7 | start-stop |
+| 3 | 8 | traffic-lights-routines |
+| 4 | 10 | motor-starters-function-block, silo-function-block |
+| 5 | 11 | recipes-data-type-ld |
+| 6 | 12 | two-tanks-cascade |
+
+### What this does not include
+
+- **Structured text.** 19 of the 41 sampled files are ST only (III.1). They are
+  counted in `manifest.json` and are not part of the twelve.
+- **FBD.** 7 FBD-only and 3 FBD+LD files, excluded deliberately: this corpus is
+  the ladder target.
+- **The editor.** Steps 1–6 change what the importer accepts and what the compiler
+  emits; §III.9 is what makes the symbols on screen show it.
+
 # Part IV — Appendices
 
 ## Appendix A — `.clp` refusal codes, as shipped
