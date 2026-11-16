@@ -726,12 +726,22 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
             if compute_cell {
                 continue;
             }
-            // A blank coil is the linked continuation row: the row holds the
+            // A blank coil is the linked continuation row: the row holds a
             // branch under the `Link` above it and the link's row carries the
             // coil. A blank coil anywhere else is still an error.
+            //
+            // The rows under one link can be several deep: a branch that is
+            // itself a parallel is distributed over one row per branch, and
+            // every one of them hangs from the same `Link`. So walk back over
+            // the run of blank-coil rows and stop at the row that carries the
+            // link, rather than looking at the row directly above.
+            let mut start = rung_index;
+            while start > 0 && section.rungs[start - 1].coil().var.trim().is_empty() {
+                start -= 1;
+            }
             let linked_continuation = rung.coil().var.trim().is_empty()
-                && rung_index > 0
-                && section.rungs[rung_index - 1]
+                && start > 0
+                && section.rungs[start - 1]
                     .cells
                     .iter()
                     .any(|cell| matches!(cell, crate::grid::Cell::Link));

@@ -1,0 +1,706 @@
+{
+  "schema": 1,
+  "name": "traffic-lights-routines",
+  "description": "",
+  "io": [
+    {
+      "name": "n__q0_0",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_1",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_2",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_4",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_5",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_6",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    }
+  ],
+  "vars": [
+    {
+      "name": "durations",
+      "kind": "bit",
+      "ty": {
+        "array": {
+          "base": "dint",
+          "len": 6
+        }
+      },
+      "init": [
+        6000,
+        2000,
+        1000,
+        6000,
+        2000,
+        1000
+      ],
+      "retain": false,
+      "comment": ""
+    },
+    {
+      "name": "phase",
+      "kind": "bit",
+      "ty": "dint",
+      "retain": false,
+      "comment": ""
+    }
+  ],
+  "watch": [],
+  "sections": [],
+  "pous": [
+    {
+      "name": "MAIN",
+      "language": "ld",
+      "kind": "program",
+      "vars": [],
+      "comment": "",
+      "sections": [
+        {
+          "name": "main",
+          "rungs": [
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "sequence",
+                "kind": "call",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "lights",
+                "kind": "call",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    },
+    {
+      "name": "SEQUENCE",
+      "language": "ld",
+      "kind": "program",
+      "vars": [],
+      "comment": "",
+      "sections": [
+        {
+          "name": "sequence",
+          "rungs": [
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "const",
+                    "value": true
+                  },
+                  {
+                    "op": "block",
+                    "block": "TON",
+                    "instance": "TON0",
+                    "preset": "Durations[Phase]"
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "TON0.Q",
+                "negated": false
+              },
+              "coil": {
+                "var": "",
+                "kind": "compute",
+                "expr": "TON0.ET = 0"
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON0.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "TON0.Q",
+                "negated": false
+              },
+              "coil": {
+                "var": "",
+                "kind": "compute",
+                "expr": "Phase = Phase + 1"
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON0.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "compare",
+                "operator": "GT",
+                "left": "Phase",
+                "right": "5"
+              },
+              "coil": {
+                "var": "",
+                "kind": "compute",
+                "expr": "Phase = 0"
+              },
+              "cells": [
+                {
+                  "cell": "compare",
+                  "op": "GT",
+                  "left": "Phase",
+                  "right": "5"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    },
+    {
+      "name": "LIGHTS",
+      "language": "ld",
+      "kind": "program",
+      "vars": [],
+      "comment": "",
+      "sections": [
+        {
+          "name": "lights",
+          "rungs": [
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "compare",
+                "operator": "EQ",
+                "left": "Phase",
+                "right": "0"
+              },
+              "coil": {
+                "var": "n__q0_2",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "compare",
+                  "op": "EQ",
+                  "left": "Phase",
+                  "right": "0"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "compare",
+                "operator": "EQ",
+                "left": "Phase",
+                "right": "1"
+              },
+              "coil": {
+                "var": "n__q0_1",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "compare",
+                  "op": "EQ",
+                  "left": "Phase",
+                  "right": "1"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "compare",
+                "operator": "GE",
+                "left": "Phase",
+                "right": "2"
+              },
+              "coil": {
+                "var": "n__q0_0",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "compare",
+                  "op": "GE",
+                  "left": "Phase",
+                  "right": "2"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "compare",
+                "operator": "EQ",
+                "left": "Phase",
+                "right": "3"
+              },
+              "coil": {
+                "var": "n__q0_6",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "compare",
+                  "op": "EQ",
+                  "left": "Phase",
+                  "right": "3"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "compare",
+                "operator": "EQ",
+                "left": "Phase",
+                "right": "4"
+              },
+              "coil": {
+                "var": "n__q0_5",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "compare",
+                  "op": "EQ",
+                  "left": "Phase",
+                  "right": "4"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "parallel",
+                "items": [
+                  {
+                    "op": "compare",
+                    "operator": "LT",
+                    "left": "Phase",
+                    "right": "3"
+                  },
+                  {
+                    "op": "compare",
+                    "operator": "EQ",
+                    "left": "Phase",
+                    "right": "5"
+                  }
+                ]
+              },
+              "coil": {
+                "var": "n__q0_4",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "compare",
+                  "op": "LT",
+                  "left": "Phase",
+                  "right": "3"
+                },
+                {
+                  "cell": "link"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "branch of n__q0_4",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "compare",
+                  "op": "EQ",
+                  "left": "Phase",
+                  "right": "5"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    }
+  ]
+}

@@ -1,0 +1,475 @@
+{
+  "schema": 1,
+  "name": "timer-counter",
+  "description": "",
+  "io": [
+    {
+      "name": "n__i0_0",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__i0_1",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_0",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_1",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    }
+  ],
+  "vars": [],
+  "watch": [],
+  "sections": [
+    {
+      "name": "main",
+      "rungs": [
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "n__i0_0",
+                    "negated": false
+                  },
+                  {
+                    "op": "contact",
+                    "var": "TON1.Q",
+                    "negated": true
+                  }
+                ]
+              },
+              {
+                "op": "block",
+                "block": "TON",
+                "instance": "TON0",
+                "preset": "T#3000ms"
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON0.Q",
+                "negated": false
+              },
+              {
+                "op": "block",
+                "block": "TON",
+                "instance": "TON1",
+                "preset": "T#2000ms"
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "TON0.TT",
+            "negated": false
+          },
+          "coil": {
+            "var": "n__q0_0",
+            "kind": "normal",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON0.TT",
+              "negated": false
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON0.Q",
+                "negated": false
+              },
+              {
+                "op": "block",
+                "block": "CTU",
+                "instance": "CTU0",
+                "preset": "5"
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "CTU0.Q",
+            "negated": false
+          },
+          "coil": {
+            "var": "n__q0_1",
+            "kind": "normal",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "CTU0.Q",
+              "negated": false
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "n__i0_1",
+            "negated": false
+          },
+          "coil": {
+            "var": "CTU0.R",
+            "kind": "reset",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "n__i0_1",
+              "negated": false
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "pous": [
+    {
+      "name": "MAIN",
+      "language": "ld",
+      "kind": "program",
+      "vars": [],
+      "comment": "",
+      "sections": [
+        {
+          "name": "main",
+          "rungs": [
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "series",
+                    "items": [
+                      {
+                        "op": "contact",
+                        "var": "n__i0_0",
+                        "negated": false
+                      },
+                      {
+                        "op": "contact",
+                        "var": "TON1.Q",
+                        "negated": true
+                      }
+                    ]
+                  },
+                  {
+                    "op": "block",
+                    "block": "TON",
+                    "instance": "TON0",
+                    "preset": "T#3000ms"
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON0.Q",
+                    "negated": false
+                  },
+                  {
+                    "op": "block",
+                    "block": "TON",
+                    "instance": "TON1",
+                    "preset": "T#2000ms"
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "TON0.TT",
+                "negated": false
+              },
+              "coil": {
+                "var": "n__q0_0",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON0.TT",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON0.Q",
+                    "negated": false
+                  },
+                  {
+                    "op": "block",
+                    "block": "CTU",
+                    "instance": "CTU0",
+                    "preset": "5"
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "CTU0.Q",
+                "negated": false
+              },
+              "coil": {
+                "var": "n__q0_1",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "CTU0.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "n__i0_1",
+                "negated": false
+              },
+              "coil": {
+                "var": "CTU0.R",
+                "kind": "reset",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "n__i0_1",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    }
+  ]
+}

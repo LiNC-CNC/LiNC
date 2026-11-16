@@ -22,19 +22,41 @@ sample set released under GPL-3.0-or-later; the samples are the corresponding
 source of the derived files here, which is why they are kept. `manifest.json`
 records the origin.
 
-The `.xml` files are conversions of those sources to PLCopen TC6, produced by a
-converter that lives outside this repository. `stimuli/` and `traces/` were
-produced by running the sources in the reference engine, also outside this tree.
+The `.xml` files are conversions of those sources to PLCopen TC6, produced by
+`tools/plcy2plcopen.py`; `stimuli/` and `traces/` were produced by running the
+sources in the reference engine, which is outside this tree.
+
+`tools/plcy2json/` converts the XML to the project JSON LiNC opens, with the same
+canonicalisation the PLC page's Save uses. Both tools are GPL-3.0-or-later with
+everything else here: they exist to process this corpus, and their output is a
+derivative work of it.
+
+Two provenance notes, because a tool's licence is not obvious from its job:
+
+- `tools/plcy2plcopen.py` is a LiNC contributor's own work, written against this
+  corpus. It reads PLCYard's `.plcy` format, which is what makes its output — and
+  therefore the tool in this directory — part of the same GPL-3 aggregation. It is
+  not a copy of PLCYard code; nothing is imported from it.
+- `tools/plcy2json/` links `linc-plc-core` (GPL-2.0-or-later) to read the XML and
+  write the JSON. That is the ordinary direction of use for a GPL library, and its
+  own sources stay under this directory's licence.
 
 ## Layout
 
 ```text
 sources/*.plcy    the program, verbatim: the authoritative definition
-*.xml             PLCopen TC6, for the three that convert today
+*.xml             PLCopen TC6, the conversion of each source
+projects/*.json   the same programs as project JSON, the format the UI opens
 stimuli/*.json    the inputs each program is driven with, and for how long
 traces/*.json     the outputs the reference engine produced, per scan
 manifest.json     all 41 sampled files: 12 ladder, 29 excluded, per-file status
+tools/            the converters, so the conversions are reproducible
 ```
+
+`projects/*.json` are read by the PLC page's OPEN, so the same twelve programs the
+harness runs as XML also open in the simulator. The harness compares each project
+to its XML — same ops, same word layout — so the JSON cannot drift from the
+program the traces were recorded against.
 
 ## Status, and what the manifest means
 

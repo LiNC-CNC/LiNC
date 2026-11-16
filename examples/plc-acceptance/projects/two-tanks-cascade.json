@@ -1,0 +1,702 @@
+{
+  "schema": 1,
+  "name": "two-tanks-cascade",
+  "description": "",
+  "io": [
+    {
+      "name": "n__i0_2",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__i0_3",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__iw64",
+      "direction": "in",
+      "kind": "word",
+      "comment": ""
+    },
+    {
+      "name": "n__iw66",
+      "direction": "in",
+      "kind": "word",
+      "comment": ""
+    },
+    {
+      "name": "n__iw68",
+      "direction": "in",
+      "kind": "word",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_2",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__qw64",
+      "direction": "out",
+      "kind": "word",
+      "comment": ""
+    },
+    {
+      "name": "n__qw66",
+      "direction": "out",
+      "kind": "word",
+      "comment": ""
+    }
+  ],
+  "vars": [
+    {
+      "name": "outerout",
+      "kind": "bit",
+      "ty": "real",
+      "retain": false,
+      "comment": ""
+    },
+    {
+      "name": "setpoint",
+      "kind": "bit",
+      "ty": "real",
+      "retain": false,
+      "comment": ""
+    }
+  ],
+  "watch": [],
+  "sections": [
+    {
+      "name": "main",
+      "rungs": [
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "const",
+                "value": true
+              },
+              {
+                "op": "block",
+                "block": "SCP",
+                "instance": "",
+                "preset": "",
+                "args": [
+                  {
+                    "pin": "in",
+                    "var": "n__iw68",
+                    "out": false
+                  },
+                  {
+                    "pin": "min_in",
+                    "var": "0",
+                    "out": false
+                  },
+                  {
+                    "pin": "max_in",
+                    "var": "27648",
+                    "out": false
+                  },
+                  {
+                    "pin": "min_out",
+                    "var": "0",
+                    "out": false
+                  },
+                  {
+                    "pin": "max_out",
+                    "var": "100",
+                    "out": false
+                  },
+                  {
+                    "pin": "out",
+                    "var": "setpoint",
+                    "out": true
+                  }
+                ]
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "const",
+            "value": true
+          },
+          "coil": {
+            "var": "",
+            "kind": "compute",
+            "expr": "n__qw66 = 16589"
+          },
+          "cells": [
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "const",
+                "value": true
+              },
+              {
+                "op": "block",
+                "block": "PID",
+                "instance": "outer",
+                "preset": "",
+                "args": [
+                  {
+                    "pin": "in",
+                    "var": "n__iw66",
+                    "out": false
+                  },
+                  {
+                    "pin": "out",
+                    "var": "outerout",
+                    "out": true
+                  },
+                  {
+                    "pin": "sp",
+                    "var": "setpoint",
+                    "out": false
+                  },
+                  {
+                    "pin": "kp",
+                    "var": "2.0",
+                    "out": false
+                  },
+                  {
+                    "pin": "ki",
+                    "var": "0.05",
+                    "out": false
+                  },
+                  {
+                    "pin": "maxi",
+                    "var": "27648.0",
+                    "out": false
+                  }
+                ]
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "const",
+                "value": true
+              },
+              {
+                "op": "block",
+                "block": "PID",
+                "instance": "inner",
+                "preset": "",
+                "args": [
+                  {
+                    "pin": "in",
+                    "var": "n__iw64",
+                    "out": false
+                  },
+                  {
+                    "pin": "out",
+                    "var": "n__qw64",
+                    "out": true
+                  },
+                  {
+                    "pin": "master",
+                    "var": "outer",
+                    "out": false
+                  },
+                  {
+                    "pin": "kp",
+                    "var": "4.0",
+                    "out": false
+                  },
+                  {
+                    "pin": "ki",
+                    "var": "0.2",
+                    "out": false
+                  },
+                  {
+                    "pin": "maxi",
+                    "var": "27648.0",
+                    "out": false
+                  },
+                  {
+                    "pin": "maxcv",
+                    "var": "27648.0",
+                    "out": false
+                  }
+                ]
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "parallel",
+            "items": [
+              {
+                "op": "contact",
+                "var": "n__i0_2",
+                "negated": false
+              },
+              {
+                "op": "contact",
+                "var": "n__i0_3",
+                "negated": false
+              }
+            ]
+          },
+          "coil": {
+            "var": "n__q0_2",
+            "kind": "normal",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "n__i0_2",
+              "negated": false
+            },
+            {
+              "cell": "link"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "label": "",
+          "comment": "branch of n__q0_2",
+          "logic": {
+            "op": "const",
+            "value": true
+          },
+          "coil": {
+            "var": "",
+            "kind": "normal",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "n__i0_3",
+              "negated": false
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "pous": [
+    {
+      "name": "MAIN",
+      "language": "ld",
+      "kind": "program",
+      "vars": [],
+      "comment": "",
+      "sections": [
+        {
+          "name": "main",
+          "rungs": [
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "const",
+                    "value": true
+                  },
+                  {
+                    "op": "block",
+                    "block": "SCP",
+                    "instance": "",
+                    "preset": "",
+                    "args": [
+                      {
+                        "pin": "in",
+                        "var": "n__iw68",
+                        "out": false
+                      },
+                      {
+                        "pin": "min_in",
+                        "var": "0",
+                        "out": false
+                      },
+                      {
+                        "pin": "max_in",
+                        "var": "27648",
+                        "out": false
+                      },
+                      {
+                        "pin": "min_out",
+                        "var": "0",
+                        "out": false
+                      },
+                      {
+                        "pin": "max_out",
+                        "var": "100",
+                        "out": false
+                      },
+                      {
+                        "pin": "out",
+                        "var": "setpoint",
+                        "out": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "",
+                "kind": "compute",
+                "expr": "n__qw66 = 16589"
+              },
+              "cells": [
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "const",
+                    "value": true
+                  },
+                  {
+                    "op": "block",
+                    "block": "PID",
+                    "instance": "outer",
+                    "preset": "",
+                    "args": [
+                      {
+                        "pin": "in",
+                        "var": "n__iw66",
+                        "out": false
+                      },
+                      {
+                        "pin": "out",
+                        "var": "outerout",
+                        "out": true
+                      },
+                      {
+                        "pin": "sp",
+                        "var": "setpoint",
+                        "out": false
+                      },
+                      {
+                        "pin": "kp",
+                        "var": "2.0",
+                        "out": false
+                      },
+                      {
+                        "pin": "ki",
+                        "var": "0.05",
+                        "out": false
+                      },
+                      {
+                        "pin": "maxi",
+                        "var": "27648.0",
+                        "out": false
+                      }
+                    ]
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "const",
+                    "value": true
+                  },
+                  {
+                    "op": "block",
+                    "block": "PID",
+                    "instance": "inner",
+                    "preset": "",
+                    "args": [
+                      {
+                        "pin": "in",
+                        "var": "n__iw64",
+                        "out": false
+                      },
+                      {
+                        "pin": "out",
+                        "var": "n__qw64",
+                        "out": true
+                      },
+                      {
+                        "pin": "master",
+                        "var": "outer",
+                        "out": false
+                      },
+                      {
+                        "pin": "kp",
+                        "var": "4.0",
+                        "out": false
+                      },
+                      {
+                        "pin": "ki",
+                        "var": "0.2",
+                        "out": false
+                      },
+                      {
+                        "pin": "maxi",
+                        "var": "27648.0",
+                        "out": false
+                      },
+                      {
+                        "pin": "maxcv",
+                        "var": "27648.0",
+                        "out": false
+                      }
+                    ]
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "parallel",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "n__i0_2",
+                    "negated": false
+                  },
+                  {
+                    "op": "contact",
+                    "var": "n__i0_3",
+                    "negated": false
+                  }
+                ]
+              },
+              "coil": {
+                "var": "n__q0_2",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "n__i0_2",
+                  "negated": false
+                },
+                {
+                  "cell": "link"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "branch of n__q0_2",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "n__i0_3",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    }
+  ]
+}

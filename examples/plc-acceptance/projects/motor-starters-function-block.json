@@ -1,0 +1,447 @@
+{
+  "schema": 1,
+  "name": "motor-starters-function-block",
+  "description": "",
+  "io": [
+    {
+      "name": "n__i0_0",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__i0_1",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__i0_2",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__i0_3",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_0",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_1",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_2",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_3",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    }
+  ],
+  "vars": [
+    {
+      "name": "pump1",
+      "kind": "bit",
+      "ty": {
+        "derived": "MotorStarter"
+      },
+      "retain": false,
+      "comment": ""
+    },
+    {
+      "name": "pump2",
+      "kind": "bit",
+      "ty": {
+        "derived": "MotorStarter"
+      },
+      "retain": false,
+      "comment": ""
+    }
+  ],
+  "watch": [],
+  "sections": [],
+  "pous": [
+    {
+      "name": "MAIN",
+      "language": "ld",
+      "kind": "program",
+      "vars": [],
+      "comment": "",
+      "sections": [
+        {
+          "name": "main",
+          "rungs": [
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "pump1",
+                "kind": "call",
+                "expr": null,
+                "args": [
+                  {
+                    "pin": "start",
+                    "var": "n__i0_0",
+                    "out": false
+                  },
+                  {
+                    "pin": "stop",
+                    "var": "n__i0_1",
+                    "out": false
+                  },
+                  {
+                    "pin": "run",
+                    "var": "n__q0_0",
+                    "out": true
+                  },
+                  {
+                    "pin": "ready",
+                    "var": "n__q0_1",
+                    "out": true
+                  }
+                ]
+              },
+              "cells": [
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "pump2",
+                "kind": "call",
+                "expr": null,
+                "args": [
+                  {
+                    "pin": "start",
+                    "var": "n__i0_2",
+                    "out": false
+                  },
+                  {
+                    "pin": "stop",
+                    "var": "n__i0_3",
+                    "out": false
+                  },
+                  {
+                    "pin": "run",
+                    "var": "n__q0_2",
+                    "out": true
+                  },
+                  {
+                    "pin": "ready",
+                    "var": "n__q0_3",
+                    "out": true
+                  }
+                ]
+              },
+              "cells": [
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    },
+    {
+      "name": "MOTORSTARTER",
+      "language": "ld",
+      "kind": "function_block",
+      "vars": [
+        {
+          "name": "start",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "in"
+        },
+        {
+          "name": "stop",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "in"
+        },
+        {
+          "name": "run",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "out"
+        },
+        {
+          "name": "ready",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "out"
+        }
+      ],
+      "comment": "",
+      "sections": [
+        {
+          "name": "motorstarter",
+          "rungs": [
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "parallel",
+                    "items": [
+                      {
+                        "op": "contact",
+                        "var": "start",
+                        "negated": false
+                      },
+                      {
+                        "op": "contact",
+                        "var": "run",
+                        "negated": false
+                      }
+                    ]
+                  },
+                  {
+                    "op": "contact",
+                    "var": "stop",
+                    "negated": true
+                  }
+                ]
+              },
+              "coil": {
+                "var": "run",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "start",
+                  "negated": false
+                },
+                {
+                  "cell": "link"
+                },
+                {
+                  "cell": "contact",
+                  "var": "stop",
+                  "negated": true
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "branch of run",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "run",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "run",
+                    "negated": false
+                  },
+                  {
+                    "op": "block",
+                    "block": "TON",
+                    "instance": "TON0",
+                    "preset": "T#3s"
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "TON0.Q",
+                "negated": false
+              },
+              "coil": {
+                "var": "ready",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON0.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    }
+  ]
+}

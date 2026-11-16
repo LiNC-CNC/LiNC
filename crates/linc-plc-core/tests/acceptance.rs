@@ -506,3 +506,85 @@ fn a_stimulus_holds_and_releases() {
         "an undriven input is false"
     );
 }
+
+/// The converted projects are the same program as their XML.
+///
+/// `projects/*.json` is what the PLC page's Open reads, so a corpus tested only
+/// as XML would leave the open path unproven: the JSON could rot and no test
+/// would say. Each pair is compiled and the two programs compared — the hash,
+/// the word layout and the ops. A missing project is a failure, not a skip.
+#[test]
+fn every_project_json_is_the_same_program_as_its_xml() {
+    let dir = corpus();
+    let projects = dir.join("projects");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).expect("the corpus directory reads") {
+        let xml_path = entry.expect("an entry").path();
+        if xml_path.extension().and_then(|ext| ext.to_str()) != Some("xml") {
+            continue;
+        }
+        let stem = xml_path.file_stem().expect("a stem");
+        let json_path = projects.join(stem).with_extension("json");
+        let json = std::fs::read_to_string(&json_path)
+            .unwrap_or_else(|error| panic!("{}: {error}", json_path.display()));
+        let parsed: linc_plc_core::model::Project = serde_json::from_str(&json)
+            .unwrap_or_else(|error| panic!("{}: {error}", json_path.display()));
+
+        // The page validates before it offers START, and so must the file.
+        let diagnostics = linc_plc_core::validate(&parsed);
+        let errors = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .collect::<Vec<_>>();
+        assert!(
+            errors.is_empty(),
+            "{}: {:?}",
+            json_path.display(),
+            errors
+                .iter()
+                .map(|diagnostic| format!("{} @ {}", diagnostic.message, diagnostic.path))
+                .collect::<Vec<_>>()
+        );
+
+        let xml = std::fs::read_to_string(&xml_path).expect("the xml reads");
+        let imported = linc_plc_core::plcopen::import(&xml).expect("the xml imports");
+        let from_xml = linc_plc_core::compile(&imported).expect("the xml compiles");
+        let from_json = linc_plc_core::compile(&parsed).expect("the json compiles");
+        // The comparison is the compiled program, not the project's spelling:
+        // the JSON is a canonicalised form, so the two files differ in
+        // representation and must agree in what they compile to.
+        assert_eq!(
+            from_json.program.ops,
+            from_xml.program.ops,
+            "{} does not compile to the program {} does",
+            json_path.display(),
+            xml_path.display()
+        );
+        assert_eq!(
+            from_json.program.words.total(),
+            from_xml.program.words.total()
+        );
+        assert_eq!(
+            from_json
+                .program
+                .words
+                .regions()
+                .iter()
+                .map(|region| (region.name, region.base, region.len))
+                .collect::<Vec<_>>(),
+            from_xml
+                .program
+                .words
+                .regions()
+                .iter()
+                .map(|region| (region.name, region.base, region.len))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            from_json.program.output_count,
+            from_xml.program.output_count
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 12, "every corpus file has a converted project");
+}

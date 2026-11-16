@@ -1,0 +1,758 @@
+{
+  "schema": 1,
+  "name": "silo-function-block",
+  "description": "",
+  "io": [
+    {
+      "name": "n__i0_0",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__i0_1",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__i0_3",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__i0_4",
+      "direction": "in",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_0",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_1",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_2",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_3",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_4",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    }
+  ],
+  "vars": [
+    {
+      "name": "station",
+      "kind": "bit",
+      "ty": {
+        "derived": "FillStation"
+      },
+      "retain": false,
+      "comment": ""
+    }
+  ],
+  "watch": [],
+  "sections": [],
+  "pous": [
+    {
+      "name": "MAIN",
+      "language": "ld",
+      "kind": "program",
+      "vars": [],
+      "comment": "",
+      "sections": [
+        {
+          "name": "main",
+          "rungs": [
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "station",
+                "kind": "call",
+                "expr": null,
+                "args": [
+                  {
+                    "pin": "start",
+                    "var": "n__i0_0",
+                    "out": false
+                  },
+                  {
+                    "pin": "stop",
+                    "var": "n__i0_1",
+                    "out": false
+                  },
+                  {
+                    "pin": "boxthere",
+                    "var": "n__i0_3",
+                    "out": false
+                  },
+                  {
+                    "pin": "full",
+                    "var": "n__i0_4",
+                    "out": false
+                  },
+                  {
+                    "pin": "conveyor",
+                    "var": "n__q0_0",
+                    "out": true
+                  },
+                  {
+                    "pin": "fill",
+                    "var": "n__q0_1",
+                    "out": true
+                  },
+                  {
+                    "pin": "runlamp",
+                    "var": "n__q0_2",
+                    "out": true
+                  },
+                  {
+                    "pin": "fulllamp",
+                    "var": "n__q0_4",
+                    "out": true
+                  }
+                ]
+              },
+              "cells": [
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "station.filling",
+                "negated": false
+              },
+              "coil": {
+                "var": "n__q0_3",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "station.filling",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    },
+    {
+      "name": "FILLSTATION",
+      "language": "ld",
+      "kind": "function_block",
+      "vars": [
+        {
+          "name": "start",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "in"
+        },
+        {
+          "name": "stop",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "in"
+        },
+        {
+          "name": "boxthere",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "in"
+        },
+        {
+          "name": "full",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "in"
+        },
+        {
+          "name": "conveyor",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "out"
+        },
+        {
+          "name": "fill",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "out"
+        },
+        {
+          "name": "runlamp",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "out"
+        },
+        {
+          "name": "fulllamp",
+          "kind": "bit",
+          "retain": false,
+          "comment": "",
+          "direction": "out"
+        },
+        {
+          "name": "running",
+          "kind": "bit",
+          "retain": false,
+          "comment": ""
+        },
+        {
+          "name": "filling",
+          "kind": "bit",
+          "retain": false,
+          "comment": ""
+        }
+      ],
+      "comment": "",
+      "sections": [
+        {
+          "name": "fillstation",
+          "rungs": [
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "parallel",
+                    "items": [
+                      {
+                        "op": "contact",
+                        "var": "start",
+                        "negated": false
+                      },
+                      {
+                        "op": "contact",
+                        "var": "running",
+                        "negated": false
+                      }
+                    ]
+                  },
+                  {
+                    "op": "contact",
+                    "var": "stop",
+                    "negated": false
+                  }
+                ]
+              },
+              "coil": {
+                "var": "running",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "start",
+                  "negated": false
+                },
+                {
+                  "cell": "link"
+                },
+                {
+                  "cell": "contact",
+                  "var": "stop",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "branch of running",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "running",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "series",
+                    "items": [
+                      {
+                        "op": "contact",
+                        "var": "running",
+                        "negated": false
+                      },
+                      {
+                        "op": "contact",
+                        "var": "boxthere",
+                        "negated": false
+                      }
+                    ]
+                  },
+                  {
+                    "op": "contact",
+                    "var": "full",
+                    "negated": true
+                  }
+                ]
+              },
+              "coil": {
+                "var": "filling",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "running",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "boxthere",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "full",
+                  "negated": true
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "parallel",
+                "items": [
+                  {
+                    "op": "series",
+                    "items": [
+                      {
+                        "op": "contact",
+                        "var": "running",
+                        "negated": false
+                      },
+                      {
+                        "op": "contact",
+                        "var": "boxthere",
+                        "negated": true
+                      }
+                    ]
+                  },
+                  {
+                    "op": "series",
+                    "items": [
+                      {
+                        "op": "contact",
+                        "var": "running",
+                        "negated": false
+                      },
+                      {
+                        "op": "contact",
+                        "var": "full",
+                        "negated": false
+                      }
+                    ]
+                  }
+                ]
+              },
+              "coil": {
+                "var": "conveyor",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "running",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "boxthere",
+                  "negated": true
+                },
+                {
+                  "cell": "link"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "branch of conveyor",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "running",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "full",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "filling",
+                "negated": false
+              },
+              "coil": {
+                "var": "fill",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "filling",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "running",
+                "negated": false
+              },
+              "coil": {
+                "var": "runlamp",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "running",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "boxthere",
+                    "negated": false
+                  },
+                  {
+                    "op": "contact",
+                    "var": "full",
+                    "negated": false
+                  }
+                ]
+              },
+              "coil": {
+                "var": "fulllamp",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "boxthere",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "full",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    }
+  ]
+}

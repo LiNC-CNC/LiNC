@@ -28,7 +28,7 @@ Copyright: 2005, 2006 Chris Radek
 License: GPL-2.0-or-later
  The Hershey stroke font is ported from AXIS (lib/python/hershey.py).
 
-Files: examples/plc-acceptance/*
+Files: examples/plc-acceptance/* examples/plc-acceptance/projects/* examples/plc-acceptance/tools/*
 Copyright: 2026 the PLCYard sample contributors
 License: GPL-3.0-or-later
  This program is free software: you can redistribute it and/or modify it under
@@ -44,12 +44,14 @@ License: GPL-3.0-or-later
  in /usr/share/common-licenses/GPL-3.
 Comment: Aggregated with LiNC, not compiled into it. The twelve `sources/*.plcy`
  files are redistributed verbatim from the PLCYard sample set, which is
- GPL-3.0-or-later; the `.xml` conversions, the `stimuli/` and the `traces/` are
- derived from those programs and from runs of the reference engine, so they carry
- the same licence and live here as the corresponding source. Nothing under
- `crates/` embeds any of it — no `include_str!`, no build script; a test reads the
- directory at run time only. See `examples/plc-acceptance/README.md` and the
- licence text in `examples/plc-acceptance/LICENSE`.
+ GPL-3.0-or-later; the `.xml` conversions, the `projects/*.json` format
+ transforms of them, the `stimuli/` and the `traces/` are derived from those
+ programs and from runs of the reference engine, so they carry the same licence
+ and live here as the corresponding source. `tools/` holds both converters for
+ that reason: its input and output are corpus. Nothing under `crates/` embeds any
+ of it — no `include_str!`, no build script; a test reads the directory at run
+ time only. See `examples/plc-acceptance/README.md` and the licence text in
+ `examples/plc-acceptance/LICENSE`.
 
 Files: subroutines/probe_basic/*
 Copyright: 2019-2026 Chris Polanski and Probe Basic contributors

@@ -1730,36 +1730,61 @@ fn lower_grid_rung(
     // in parallel with the cells left of the link only; cells from the link on
     // stay in series with both. Lowering the whole row in parallel let a branch
     // contact bypass a series contact to the right of the link.
-    let link = cells
+    //
+    // A row can carry several links, one per extra branch of the same parallel
+    // (`split_parallel` writes them onto the first branch, and a three-way branch
+    // whose members have different lengths needs one column each). Each link owns
+    // the next row: the segments between links are in series and every branch row
+    // is in parallel with what is already on the stack.
+    let links = cells
         .iter()
-        .position(|cell| matches!(cell, crate::grid::Cell::Link))
-        .filter(|_| index + 1 < run.len());
-    if let Some(link) = link {
-        let before = &cells[..link];
-        let after = &cells[link + 1..];
-        let mut compute = false;
-        if !before
-            .iter()
-            .all(|cell| matches!(cell, crate::grid::Cell::Wire))
-        {
-            compute |= lower_cells(before, lookup, ops, edges);
-        } else {
-            ops.push(Op::PushConst(true));
-        }
-        let mut used = 1;
-        used += lower_grid_rung(run, index + 1, lookup, ops, edges).0;
-        ops.push(Op::Or);
-        if !after
-            .iter()
-            .all(|cell| matches!(cell, crate::grid::Cell::Wire))
-        {
-            compute |= lower_cells(after, lookup, ops, edges);
-            ops.push(Op::And);
-        }
-        return (used, compute);
+        .enumerate()
+        .filter(|(_, cell)| matches!(cell, crate::grid::Cell::Link))
+        .map(|(at, _)| at)
+        .collect::<Vec<_>>();
+    let links = if index + links.len() < run.len() {
+        links
+    } else {
+        Vec::new()
+    };
+    if links.is_empty() {
+        let compute = lower_cells(cells, lookup, ops, edges);
+        return (1, compute);
     }
-    let compute = lower_cells(cells, lookup, ops, edges);
-    (1, compute)
+    let mut compute = false;
+    let mut powered = false;
+    let mut cursor = 0;
+    let mut used = 1;
+    for link in &links {
+        let segment = &cells[cursor..*link];
+        if !segment
+            .iter()
+            .all(|cell| matches!(cell, crate::grid::Cell::Wire))
+        {
+            compute |= lower_cells(segment, lookup, ops, edges);
+            if powered {
+                ops.push(Op::And);
+            }
+            powered = true;
+        }
+        let (rows, more) = lower_grid_rung(run, index + used, lookup, ops, edges);
+        compute |= more;
+        if powered {
+            ops.push(Op::Or);
+        }
+        powered = true;
+        used += rows;
+        cursor = link + 1;
+    }
+    let after = &cells[cursor..];
+    if !after
+        .iter()
+        .all(|cell| matches!(cell, crate::grid::Cell::Wire))
+    {
+        compute |= lower_cells(after, lookup, ops, edges);
+        ops.push(Op::And);
+    }
+    (used, compute)
 }
 
 /// A word-valued operand of a compare contact. The type is the profile's, so the

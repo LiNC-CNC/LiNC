@@ -1,0 +1,15 @@
+[package]
+name = "plcy2json"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+# A tool, not a workspace member: it reads the corpus at run time and depends on
+# the library the way any other consumer does. Its own manifest keeps `cargo
+# build` at the root from picking it up.
+[workspace]
+
+[dependencies]
+linc-plc-core = { path = "../../../../crates/linc-plc-core" }
+serde_json = "1"

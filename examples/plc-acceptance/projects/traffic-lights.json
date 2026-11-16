@@ -1,0 +1,1043 @@
+{
+  "schema": 1,
+  "name": "traffic-lights",
+  "description": "",
+  "io": [
+    {
+      "name": "n__q0_0",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_1",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_2",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_4",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_5",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    },
+    {
+      "name": "n__q0_6",
+      "direction": "out",
+      "kind": "bit",
+      "comment": ""
+    }
+  ],
+  "vars": [],
+  "watch": [],
+  "sections": [
+    {
+      "name": "main",
+      "rungs": [
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON5.Q",
+                "negated": true
+              },
+              {
+                "op": "block",
+                "block": "TON",
+                "instance": "TON0",
+                "preset": "T#6000ms"
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON0.Q",
+                "negated": false
+              },
+              {
+                "op": "block",
+                "block": "TON",
+                "instance": "TON1",
+                "preset": "T#2000ms"
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON1.Q",
+                "negated": false
+              },
+              {
+                "op": "block",
+                "block": "TON",
+                "instance": "TON2",
+                "preset": "T#1000ms"
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON2.Q",
+                "negated": false
+              },
+              {
+                "op": "block",
+                "block": "TON",
+                "instance": "TON3",
+                "preset": "T#6000ms"
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON3.Q",
+                "negated": false
+              },
+              {
+                "op": "block",
+                "block": "TON",
+                "instance": "TON4",
+                "preset": "T#2000ms"
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON4.Q",
+                "negated": false
+              },
+              {
+                "op": "block",
+                "block": "TON",
+                "instance": "TON5",
+                "preset": "T#1000ms"
+              }
+            ]
+          },
+          "cells": []
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "TON0.Q",
+            "negated": true
+          },
+          "coil": {
+            "var": "n__q0_2",
+            "kind": "normal",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON0.Q",
+              "negated": true
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON0.Q",
+                "negated": false
+              },
+              {
+                "op": "contact",
+                "var": "TON1.Q",
+                "negated": true
+              }
+            ]
+          },
+          "coil": {
+            "var": "n__q0_1",
+            "kind": "normal",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON0.Q",
+              "negated": false
+            },
+            {
+              "cell": "contact",
+              "var": "TON1.Q",
+              "negated": true
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "contact",
+            "var": "TON1.Q",
+            "negated": false
+          },
+          "coil": {
+            "var": "n__q0_0",
+            "kind": "normal",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON1.Q",
+              "negated": false
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON2.Q",
+                "negated": false
+              },
+              {
+                "op": "contact",
+                "var": "TON3.Q",
+                "negated": true
+              }
+            ]
+          },
+          "coil": {
+            "var": "n__q0_6",
+            "kind": "normal",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON2.Q",
+              "negated": false
+            },
+            {
+              "cell": "contact",
+              "var": "TON3.Q",
+              "negated": true
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "series",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON3.Q",
+                "negated": false
+              },
+              {
+                "op": "contact",
+                "var": "TON4.Q",
+                "negated": true
+              }
+            ]
+          },
+          "coil": {
+            "var": "n__q0_5",
+            "kind": "normal",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON3.Q",
+              "negated": false
+            },
+            {
+              "cell": "contact",
+              "var": "TON4.Q",
+              "negated": true
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "label": "",
+          "comment": "",
+          "logic": {
+            "op": "parallel",
+            "items": [
+              {
+                "op": "contact",
+                "var": "TON2.Q",
+                "negated": true
+              },
+              {
+                "op": "contact",
+                "var": "TON4.Q",
+                "negated": false
+              }
+            ]
+          },
+          "coil": {
+            "var": "n__q0_4",
+            "kind": "normal",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON2.Q",
+              "negated": true
+            },
+            {
+              "cell": "link"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        },
+        {
+          "label": "",
+          "comment": "branch of n__q0_4",
+          "logic": {
+            "op": "const",
+            "value": true
+          },
+          "coil": {
+            "var": "",
+            "kind": "normal",
+            "expr": null
+          },
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON4.Q",
+              "negated": false
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "pous": [
+    {
+      "name": "MAIN",
+      "language": "ld",
+      "kind": "program",
+      "vars": [],
+      "comment": "",
+      "sections": [
+        {
+          "name": "main",
+          "rungs": [
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON5.Q",
+                    "negated": true
+                  },
+                  {
+                    "op": "block",
+                    "block": "TON",
+                    "instance": "TON0",
+                    "preset": "T#6000ms"
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON0.Q",
+                    "negated": false
+                  },
+                  {
+                    "op": "block",
+                    "block": "TON",
+                    "instance": "TON1",
+                    "preset": "T#2000ms"
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON1.Q",
+                    "negated": false
+                  },
+                  {
+                    "op": "block",
+                    "block": "TON",
+                    "instance": "TON2",
+                    "preset": "T#1000ms"
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON2.Q",
+                    "negated": false
+                  },
+                  {
+                    "op": "block",
+                    "block": "TON",
+                    "instance": "TON3",
+                    "preset": "T#6000ms"
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON3.Q",
+                    "negated": false
+                  },
+                  {
+                    "op": "block",
+                    "block": "TON",
+                    "instance": "TON4",
+                    "preset": "T#2000ms"
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON4.Q",
+                    "negated": false
+                  },
+                  {
+                    "op": "block",
+                    "block": "TON",
+                    "instance": "TON5",
+                    "preset": "T#1000ms"
+                  }
+                ]
+              },
+              "cells": []
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "TON0.Q",
+                "negated": true
+              },
+              "coil": {
+                "var": "n__q0_2",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON0.Q",
+                  "negated": true
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON0.Q",
+                    "negated": false
+                  },
+                  {
+                    "op": "contact",
+                    "var": "TON1.Q",
+                    "negated": true
+                  }
+                ]
+              },
+              "coil": {
+                "var": "n__q0_1",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON0.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "TON1.Q",
+                  "negated": true
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "contact",
+                "var": "TON1.Q",
+                "negated": false
+              },
+              "coil": {
+                "var": "n__q0_0",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON1.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON2.Q",
+                    "negated": false
+                  },
+                  {
+                    "op": "contact",
+                    "var": "TON3.Q",
+                    "negated": true
+                  }
+                ]
+              },
+              "coil": {
+                "var": "n__q0_6",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON2.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "TON3.Q",
+                  "negated": true
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "series",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON3.Q",
+                    "negated": false
+                  },
+                  {
+                    "op": "contact",
+                    "var": "TON4.Q",
+                    "negated": true
+                  }
+                ]
+              },
+              "coil": {
+                "var": "n__q0_5",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON3.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "TON4.Q",
+                  "negated": true
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "",
+              "logic": {
+                "op": "parallel",
+                "items": [
+                  {
+                    "op": "contact",
+                    "var": "TON2.Q",
+                    "negated": true
+                  },
+                  {
+                    "op": "contact",
+                    "var": "TON4.Q",
+                    "negated": false
+                  }
+                ]
+              },
+              "coil": {
+                "var": "n__q0_4",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON2.Q",
+                  "negated": true
+                },
+                {
+                  "cell": "link"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            },
+            {
+              "label": "",
+              "comment": "branch of n__q0_4",
+              "logic": {
+                "op": "const",
+                "value": true
+              },
+              "coil": {
+                "var": "",
+                "kind": "normal",
+                "expr": null
+              },
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON4.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "il": [],
+      "fbd": [],
+      "fbd_grid": null
+    }
+  ]
+}

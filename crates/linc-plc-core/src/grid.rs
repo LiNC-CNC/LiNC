@@ -347,20 +347,37 @@ pub fn tree_rows(logic: &Logic) -> Option<Vec<Vec<Cell>>> {
             // Row 0 is the series; a parallel item adds its remaining branches
             // as rows below and leaves a link on row 0.
             let mut rows: Vec<Vec<Cell>> = vec![Vec::new()];
+            let mut linked = false;
             for item in items {
                 match item {
                     Logic::Parallel { items: branches } => {
                         if branches.is_empty() {
                             return None;
                         }
+                        // `split_parallel` leaves the link at the end of the first
+                        // branch, one per extra branch: pushing another here made two
+                        // links for one parallel, and a row below for only one of
+                        // them.
                         let (mut first, rest) = split_parallel(branches)?;
                         rows[0].append(&mut first);
-                        rows[0].push(Cell::Link);
                         rows.extend(rest);
+                        linked = true;
                     }
                     other => {
                         let mut part = tree_rows(other)?;
                         if part.len() != 1 {
+                            return None;
+                        }
+                        // A block or a compute cell consumes the power bit instead
+                        // of gating it, so in series with a link it has no cell form:
+                        // the row would AND the block's result with the power it
+                        // already ate. Such a rung stays a tree.
+                        if linked
+                            && matches!(
+                                part[0].first(),
+                                Some(Cell::Block { .. } | Cell::Compute { .. })
+                            )
+                        {
                             return None;
                         }
                         rows[0].append(&mut part[0]);
