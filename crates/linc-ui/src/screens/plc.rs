@@ -3665,6 +3665,12 @@ fn open_list_window(plc: &mut PlcUi, ui: &mut Ui) {
                             index == list.cursor,
                             RichText::new(name).monospace().size(theme::font_size(10.0)),
                         );
+                        // The cursor starts on the project that is open, which
+                        // can be below the fold: keep the highlighted row in
+                        // view so Enter opens what the operator can see.
+                        if index == list.cursor {
+                            row.scroll_to_me(Some(egui::Align::Center));
+                        }
                         if row.clicked() {
                             click = Some(index);
                         }
