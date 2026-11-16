@@ -404,7 +404,7 @@ impl Source for BusSource {
                     "lube_level_ok": machine.lube_level_ok,
                     "door_closed": machine.door_closed,
                     "tool_change_active": machine.tool_change_active,
-                    "limits": machine.limits,
+                    "limits": machine.limit_labels(),
                     "force_homing": machine.force_homing,
                     "following_error": machine.following_error,
                     "servo_load": machine.servo_load,

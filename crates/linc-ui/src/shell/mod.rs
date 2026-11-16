@@ -38,6 +38,7 @@ mod keyboard;
 mod nav;
 mod prefs;
 mod program;
+mod recovery;
 mod status;
 mod sync;
 mod view;
@@ -68,13 +69,15 @@ use prefs::*;
 #[allow(unused_imports)]
 use program::*;
 #[allow(unused_imports)]
+use recovery::*;
+#[allow(unused_imports)]
 use status::*;
 #[allow(unused_imports)]
 use sync::*;
 #[allow(unused_imports)]
 use view::*;
 
-pub use commands::move_progress;
+pub use commands::MoveProgress;
 pub use gates::{probe_trip_banner_text, PROBE_TRIP_ACTION};
 pub use keyboard::FocusRegion;
 pub use nav::{mode_page, nav_row_geometry, page_from_name, NavRowGeometry, NAV_ITEMS};
@@ -345,6 +348,7 @@ impl LincApp {
                 messages_scroll: 0.0,
                 confirm_token: None,
                 plc_editor: false,
+                limit_prompt_seen: None,
             },
             safety_gate,
             jog: JogUi {
@@ -357,7 +361,6 @@ impl LincApp {
                 origin: [0.0; 3],
                 trail_cleared: false,
                 trail_cleared_tip: None,
-                move_distance: linc_core::model::AxisMap::new(),
                 move_progress: linc_core::model::AxisMap::new(),
                 preview_ticks: 0,
             },

@@ -1,7 +1,9 @@
 //! Read-only Manual screen shared by JOG, INC and MPG panel modes.
 //!
 //! Layout base: the same live graph + large coordinate readout split as the
-//! Homing (HOME / PROG.HOME) screen — see common::live_split.
+//! Homing (HOME / PROG.HOME) screen — see common::live_split. Under the
+//! coordinates sit the INC step row (INC only) and the SERVO LOAD card from
+//! MAIN, so the operator reads axis load without leaving the jog page.
 //!
 //! No mode context card and no limit-override button: the [keys] chord covers
 //! the override and the status line shows when it is on.
@@ -19,6 +21,12 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // mode this is, and the row cost vertical space on a 720-line screen. The
     // mode itself still drives the context card below.
     let readout = coordinates_readout(app);
+    // Read once, before the split: the closure borrows `app` mutably, and the
+    // card's height comes from the same row count it draws.
+    let servo_rows = app.servo_load_rows();
+    // INC fills this column with its step row, so the servo card is for JOG and
+    // MPG only. One secondary card under the DRO, not a stack.
+    let show_servo = !increment_keys_active(app.snapshot.panel.mode.mode());
     common::live_split(
         app,
         ui,
@@ -52,6 +60,19 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             if increment_keys_active(app.snapshot.panel.mode.mode()) {
                 ui.add_space(8.0);
                 common::increment_row(app, ui);
+            }
+            // The same card MAIN draws under the toolpath. It shares the
+            // column with the coordinates, so both frames take the column's
+            // width and their left and right edges line up without a second
+            // margin. Absent on a profile with no `[ui] servo_load` list, and
+            // absent in INC, where the step row is the card this column carries.
+            if show_servo && !servo_rows.is_empty() {
+                ui.add_space(8.0);
+                common::servo_load_card(
+                    &servo_rows,
+                    ui,
+                    common::servo_load_card_height(servo_rows.len()),
+                );
             }
         },
     );
@@ -177,7 +198,7 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
     }
     let axes = app.axes();
     let mut zero: Option<Vec<String>> = None;
-    let mut toggle_limits = false;
+    let mut open_recovery = false;
     ui.input_mut(|input| {
         for (key, axis) in [
             (egui::Key::X, "X"),
@@ -193,11 +214,11 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
             zero = Some(axes.clone());
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::O) {
-            toggle_limits = true;
+            open_recovery = true;
         }
     });
-    if toggle_limits {
-        app.send(linc_core::command::MachineCommand::ToggleLimitsOverride);
+    if open_recovery {
+        app.open_limit_recovery();
     }
     if let Some(axes) = zero {
         common::zero_axes(app, axes);

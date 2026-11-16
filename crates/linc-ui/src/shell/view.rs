@@ -309,9 +309,6 @@ pub(crate) struct ViewState {
     /// system for a poll, and the cross would snap to the machine origin and
     /// back.
     pub origin: [f64; 3],
-    /// Largest remaining distance (absolute) seen for each axis since it last
-    /// stopped, i.e. the length of the move in progress. The status only carries
-    /// the remainder, so this is what turns it into a percentage.
     /// Set by `clear_trail`: the backend applies the clear on its next
     /// conversion, and until it does its snapshot still carries the old points.
     /// While set, those are replaced by the cleared tip so the trail cannot flash
@@ -320,9 +317,10 @@ pub(crate) struct ViewState {
     /// Tool tip at the moment of the clear, to tell a stale trail from new
     /// motion.
     pub trail_cleared_tip: Option<[f64; 3]>,
-    pub move_distance: linc_core::model::AxisMap<f64>,
-    /// 0..1 of the current move already travelled, per axis.
-    pub move_progress: linc_core::model::AxisMap<f64>,
+    /// How far through its move each axis is, from the controller's distance to
+    /// go: the bar sweeps once per block, empty when the block starts and full
+    /// when the axis arrives.
+    pub move_progress: linc_core::model::AxisMap<super::MoveProgress>,
     pub preview_ticks: u64,
 }
 

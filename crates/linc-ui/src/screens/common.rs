@@ -581,9 +581,14 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         .map(|name| name == axis)
         .unwrap_or(false);
     // Progress of the move in flight, not the position within the travel range:
-    // the bar starts empty when the axis sets off, fills as the distance to go
-    // shrinks, and sits full once it arrives (see `LincApp::move_progress`).
-    let fraction = app.view.move_progress.get(axis).copied().unwrap_or(1.0);
+    // the bar starts empty when the block sets off, fills as the distance to go
+    // shrinks, and sits full once it arrives (see `MoveProgress`).
+    let fraction = app
+        .view
+        .move_progress
+        .get(axis)
+        .map(|progress| progress.fraction())
+        .unwrap_or(1.0);
     paint_dro_frame(ui, rect, active);
     paint_dro_readout(
         ui,
@@ -602,6 +607,20 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
 /// (100-120 %) behind an accent progress fill, with the percentage on the right.
 /// One meter row: the label, the bar and the percentage on a single line.
 pub const SERVO_METER_HEIGHT: f32 = 16.0;
+
+/// Height of a SERVO LOAD card holding `rows` meters: the title, the frame's
+/// two margins and the slack the meters are centred in.
+///
+/// MAIN draws this card beside the feed block and the manual page stacks it
+/// under the coordinates, so both pages take the height from here. `0` means
+/// no rows, which is the caller's cue not to draw the card at all.
+pub fn servo_load_card_height(rows: usize) -> f32 {
+    if rows == 0 {
+        0.0
+    } else {
+        44.0 + rows as f32 * SERVO_METER_HEIGHT
+    }
+}
 
 /// Where the block of meters starts inside the card's free space.
 ///

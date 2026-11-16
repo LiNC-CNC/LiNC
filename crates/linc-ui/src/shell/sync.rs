@@ -44,6 +44,7 @@ impl LincApp {
         }
         self.tick_preview();
         self.tick_loops();
+        self.tick_limit_recovery();
         self.overlay
             .toasts
             .retain(|toast| toast.until > Instant::now());

@@ -213,8 +213,9 @@ tool_number = "Ctrl+T"
 # with no [ui] pages entry, so the keys are the way in.
 diagnostics = "Ctrl+D"
 help = "Ctrl+H"
-# Frees a joint parked on a limit switch. No button on the jog screens.
-limits_override = "Ctrl+Shift+O"
+# Opens the limit-switch recovery dialog from any page. No button on the
+# jog screens; O opens the same dialog there.
+limit_recovery = "Ctrl+I"
 # Full-screen messages dialog.
 messages = "M"
 back = "Escape"
@@ -312,6 +313,12 @@ rapid_override = "cnc_panel.rapid_override"
 spindle_override = "cnc_panel.spindle_override"
 spindle_load = "rio.spindle-modbus.spindle_load-abs"
 spindle_speed = "spindle.0.speed-in"
+# Per-axis load pins for the Machine page's SERVO LOAD bars, axis letter -> HAL
+# pin. LinuxCNC's status carries no per-axis servo load, so an axis without an
+# entry reads 0%. Machines that publish one (the BaierMill takes Z thrust load
+# from the spindle VFD's Modbus link) name it here.
+# [hal.pins.axis_load]
+# Z = "rio.spindle-modbus.z_load-abs"
 
 [panel]
 # Panel I/O is owned by the linc-panel service. The HMI never opens the serial

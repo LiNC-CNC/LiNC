@@ -17,6 +17,7 @@ pub mod model;
 pub mod network;
 pub mod preferences;
 pub mod probe;
+pub mod recovery;
 pub mod sim;
 pub mod sim_ipc;
 pub mod tool_state;

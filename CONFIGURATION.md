@@ -522,9 +522,19 @@ after an explicit unload). On startup the backend restores a remembered
 nonzero tool with `M61 Qn`, which sets the current tool without moving the
 changer, and then `G43 Hn`, once the machine is ON, homed, idle and
 unprotected and the tool is in the tool table. A controller that already
-reports a tool wins over the stored one. The file is written atomically on
-each observed change; deleting it makes the next session trust the controller,
-with no other effect.
+reports a tool wins over the stored one. While the restore waits, the status
+line reads `RESTORING Tn`; a block the controller accepts and then does not
+publish is retried three times, then written off with one warning, and a tool
+missing from the table is written off at once. `M61` sets the tool, not the
+pocket, so a turret/ATC machine reads the restored tool with an unknown pocket
+until the next change. The file is written atomically on each observed change;
+deleting it makes the next session trust the controller, with no other effect.
+
+The panel's spindle keys are held off while `iocontrol.0.tool-change` is high:
+`hal/linc.hal`, `hal/linc-lathe.hal` and the BaierMill session's
+`hal/panel-spindle.hal` route them through an `and2` with that signal, and the
+mill post-GUI cuts the spindle enable/forward/reverse drive bits with it too.
+A machine that wires its own spindle keys must apply the same gate.
 
 `--config`/machine profile changes require a restart. Preferences may be
 written while running.
@@ -652,7 +662,7 @@ The bindings do not change: the panel's navigation keys already send `F5` to
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `save_preamble`, `save_postamble` |
 | `[toolpath]` | `show_grid`, `show_live_trail`, `trail_max_points`, `clear_trail_action`, `show_program_bounds`, `show_machine_bounds`, `show_stock`, `stock_alpha`, `bounds_mode` (preference), `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `tool_number`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds`, `remaining`, `toggle_lathe_mirror`, `toggle_lathe_diameter` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `tool_number`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds`, `remaining`, `toggle_lathe_mirror`, `toggle_lathe_diameter`, `limit_recovery` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_execution`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |

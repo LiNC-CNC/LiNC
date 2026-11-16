@@ -394,6 +394,7 @@ impl LincApp {
         let mut save_as_name: Option<String> = None;
         let mut save_as_confirm = false;
         let mut discard_on_leave = false;
+        let mut recovery: Option<RecoveryChoice> = None;
         // A real modal, not a Window: the backdrop and modal layer stop the
         // page behind from receiving Enter/clicks while a dialog owns the
         // keyboard.
@@ -839,6 +840,9 @@ impl LincApp {
                         }
                     });
                 }
+                Modal::LimitRecovery(dialog) => {
+                    recovery = self.draw_limit_recovery(ui, first_frame, dialog);
+                }
                 }
             });
         if let Some(text) = goto_buffer {
@@ -937,6 +941,9 @@ impl LincApp {
         if let Some(overwrite) = overwrite {
             self.overlay.modal = None;
             screens::files::finish_overwrite(self, overwrite);
+        }
+        if let Some(choice) = recovery {
+            self.limit_recovery_action(choice);
         }
     }
 
@@ -1106,4 +1113,8 @@ pub(crate) struct OverlayUi {
     /// The PLC editor is popped out: it owns the whole keyboard, so the shell's
     /// keys must not reach the page.
     pub plc_editor: bool,
+    /// The `(axis, side)` the recovery dialog opened for last. It opens once
+    /// per trip; dismissing it leaves the banner, not a dialog that returns
+    /// every frame.
+    pub limit_prompt_seen: Option<(String, linc_core::model::LimitSide)>,
 }

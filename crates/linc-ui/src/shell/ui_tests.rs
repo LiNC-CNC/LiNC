@@ -2,7 +2,7 @@
 
 use super::*;
 use linc_core::model::{
-    Alarm, AlarmSeverity, AlarmSource, LoobricStatus, NetworkStatus, PanelModeValidity,
+    Alarm, AlarmSeverity, AlarmSource, LimitSide, LoobricStatus, NetworkStatus, PanelModeValidity,
     ToolChangerKind,
 };
 
@@ -1552,6 +1552,63 @@ fn the_increment_row_and_its_numbers_belong_to_the_step_modes() {
     );
     harness.frame_with(&[(egui::Key::Num3, egui::Modifiers::NONE)]);
     assert_eq!(harness.app.jog.index, 0, "and takes no digits");
+}
+
+/// The manual page carries the servo card from MAIN under the coordinates:
+/// same column, same frame width, meters you can read while jogging.
+#[test]
+fn the_manual_page_stacks_the_servo_load_under_the_work_coordinates() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.frame(&[]);
+    let output = harness.frame_full(Vec::new());
+    let texts = painted_text(&output);
+    let cards = painted_cards(&output);
+    let anchor = |label: &str| {
+        let (_, text) = texts
+            .iter()
+            .find(|(text, _)| text == label)
+            .unwrap_or_else(|| panic!("{label} is painted"));
+        cards
+            .iter()
+            .copied()
+            .find(|card| card.contains(text.center()))
+            .unwrap_or_else(|| panic!("{label} sits in a card"))
+    };
+    let coordinates = anchor("WORK COORDINATES");
+    let servo = anchor("SERVO LOAD");
+    assert!(
+        (coordinates.left() - servo.left()).abs() <= 1.0
+            && (coordinates.right() - servo.right()).abs() <= 1.0,
+        "the two cards share the column's edges: {coordinates:?} vs {servo:?}"
+    );
+    assert!(
+        servo.top() >= coordinates.bottom(),
+        "the servo card sits below the coordinates, not over them: {coordinates:?} vs {servo:?}"
+    );
+    // One meter per configured row, so the card is drawn with its contents.
+    let meters = texts
+        .iter()
+        .filter(|(text, rect)| text.ends_with('%') && servo.contains(rect.center()))
+        .count();
+    assert_eq!(meters, 3, "X, Y and Z each have a meter: {texts:?}");
+
+    // INC carries the step row in that column instead, so the card is hidden
+    // there; MPG has no step row, so it shows the card like JOG.
+    for (mode, expected) in [(PanelMode::Inc, false), (PanelMode::Mpg, true)] {
+        let mut harness = ProbeHarness::new(mode, false, true);
+        harness.app.set_page(Page::Manual);
+        harness.frame(&[]);
+        let texts: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
+        assert_eq!(
+            texts.iter().any(|text| text == "SERVO LOAD"),
+            expected,
+            "{mode:?} servo card presence: {texts:?}"
+        );
+    }
 }
 
 /// The style, not the page: REMAINING is what stops the trail being drawn,
@@ -4059,6 +4116,110 @@ fn a_tool_change_moves_the_table_selection_to_the_active_row() {
     harness.app.send(MachineCommand::SetCurrentTool { tool: 1 });
     harness.frame(&[]);
     assert_eq!(harness.app.tools.selected_row, 0);
+}
+
+/// The TOOLS search filters what the table draws, and the row `T` loads stays
+/// the tool the cursor names: a filter must not renumber the rows the page
+/// edits and loads by index.
+#[test]
+fn the_tools_search_filters_the_table_without_moving_the_loaded_tool() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    harness.frame(&[]);
+    harness.sent.borrow_mut().clear();
+
+    // `/` takes the keyboard into the field; the panel's text event is what
+    // types into it, so the digits arrive as a `Text` event, not as keys.
+    harness.frame(&[egui::Key::Slash]);
+    harness.type_text("12");
+    harness.frame(&[]);
+    assert_eq!(harness.app.tools.query, "12");
+
+    let texts: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        texts.iter().any(|text| text == "1 OF 2 TOOLS"),
+        "the count follows the filter: {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|text| text == "face mill"),
+        "T12 is still drawn: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text == "end mill"),
+        "T1 is filtered out: {texts:?}"
+    );
+    assert!(
+        harness.app.tools.selected_row == 1,
+        "the hidden cursor moved to the row the search shows"
+    );
+    assert!(harness.sent.borrow().is_empty(), "typing issues no command");
+
+    // `T` is text while the field owns the keyboard: the page must not read it
+    // as "load" and issue a tool change underneath the operator's search.
+    harness.type_text("t");
+    harness.frame(&[]);
+    assert_eq!(harness.app.tools.query, "12t", "the letter is typed");
+    assert!(
+        harness.sent.borrow().is_empty(),
+        "a letter in the field is not a command"
+    );
+
+    // Enter hands the keyboard back to the table, and Escape then clears the
+    // search: with no filter the whole table comes back.
+    harness.frame(&[egui::Key::Enter]);
+    harness.frame(&[egui::Key::Escape]);
+    assert!(
+        harness.app.tools.query.is_empty(),
+        "Escape clears the search"
+    );
+    let texts: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        texts.iter().any(|text| text == "2 TOOLS") && texts.iter().any(|text| text == "end mill"),
+        "every row comes back: {texts:?}"
+    );
+
+    // Filter again and load: `T` reaches the page once Enter released the
+    // field, and the row it loads is the tool the filtered table shows.
+    harness.app.tools.query = "12".into();
+    harness.frame(&[]);
+    assert_eq!(harness.app.tools.selected_row, 1, "the cursor is on T12");
+    harness.frame(&[egui::Key::Enter]);
+    harness.frame(&[egui::Key::T]);
+    let sent = harness.sent.borrow();
+    assert!(
+        matches!(sent.as_slice(), [MachineCommand::LoadTool { tool: 12 }]),
+        "T loads T12, not a row number in the shorter list: {sent:?}"
+    );
+    drop(sent);
+}
+
+/// A search with no hits says so instead of looking like an empty table.
+#[test]
+fn a_tools_search_with_no_hits_says_so() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    harness.app.tools.query = "drill".into();
+    harness.frame(&[]);
+    let texts: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == "NO TOOLS MATCH THIS SEARCH"),
+        "the miss is stated: {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|text| text == "0 OF 2 TOOLS"),
+        "and the count says zero: {texts:?}"
+    );
 }
 
 /// Editing the mill's OFFSET cell must write the Z the table loader reads back.
@@ -7198,4 +7359,106 @@ fn history_limit_drops_the_oldest_block() {
     mdi.commit(2, "G3 X4".into());
     assert_eq!(mdi.len(), 2);
     assert_eq!(mdi.blocks[1].0, "G3 X4");
+}
+
+/// The PLC editor owns the shell's keys while it is popped out, and limit
+/// recovery is the machine-safety chord that is the way in from anywhere: both
+/// hold, so the chord reaches the dialog from behind the editor's guard.
+#[test]
+fn the_recovery_chord_reaches_behind_the_plc_editor() {
+    let (_dir, mut app) = make_app(PanelMode::Jog);
+    app.safety_gate = false;
+    app.snapshot.machine.limits.insert(
+        "Y",
+        linc_core::model::LimitState {
+            min_hard: true,
+            ..Default::default()
+        },
+    );
+    app.nav.page = Page::Plc;
+    app.overlay.plc_editor = true;
+    let chord = app.prefs.keymap.limit_recovery;
+    let ctx = egui::Context::default();
+    let mut output = ctx.run_ui(
+        probe_raw_input(vec![egui::Event::Key {
+            key: chord.key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: chord.modifiers,
+        }]),
+        |ui| {
+            app.handle_keyboard(ui);
+        },
+    );
+    output.textures_delta.clear();
+    match &app.overlay.modal {
+        Some(Modal::LimitRecovery(dialog)) => {
+            assert_eq!(dialog.axis, "Y");
+            assert_eq!(dialog.side, LimitSide::Min);
+        }
+        other => panic!("expected the recovery dialog behind the editor, got {other:?}"),
+    }
+}
+
+#[test]
+fn recovery_opens_only_with_a_tripped_axis() {
+    let (_dir, mut app) = make_app(PanelMode::Jog);
+    app.snapshot.machine.limits.insert(
+        "X",
+        linc_core::model::LimitState {
+            max_hard: true,
+            ..Default::default()
+        },
+    );
+    app.open_limit_recovery();
+    match &app.overlay.modal {
+        Some(Modal::LimitRecovery(dialog)) => {
+            assert_eq!(dialog.axis, "X");
+            assert_eq!(dialog.side, LimitSide::Max);
+            assert_eq!(dialog.phase, RecoveryPhase::Confirming);
+        }
+        other => panic!("expected the recovery dialog, got {other:?}"),
+    }
+    assert_eq!(
+        app.overlay.modal.as_ref().map(Modal::kind),
+        Some("limit-recovery")
+    );
+
+    // Dismissed and untripped: the key reports instead of opening an empty
+    // dialog with two buttons that can only refuse.
+    app.overlay.modal = None;
+    app.snapshot.machine.limits = linc_core::model::AxisMap::new();
+    app.open_limit_recovery();
+    assert!(app.overlay.modal.is_none());
+    assert!(app
+        .overlay
+        .toasts
+        .iter()
+        .any(|toast| toast.text == "NO LIMIT SWITCH TRIPPED"));
+}
+
+#[test]
+fn recovery_names_the_gate_that_blocks_it() {
+    let (_dir, mut app) = make_app(PanelMode::Jog);
+    app.snapshot.machine.limits.insert(
+        "X",
+        linc_core::model::LimitState {
+            max_hard: true,
+            ..Default::default()
+        },
+    );
+    // The simulator starts with its spindles running, which is a refusal.
+    let reason = app
+        .limit_recovery_block("X")
+        .expect("a running spindle blocks recovery");
+    assert!(reason.contains("SPINDLE"), "{reason}");
+
+    for spindle in &mut app.snapshot.spindles {
+        spindle.on = false;
+    }
+    assert_eq!(app.limit_recovery_block("X"), None);
+    // A different axis is not the tripped one.
+    let reason = app.limit_recovery_block("Y").expect("Y is not on a limit");
+    assert!(reason.contains("Y IS NOT ON A LIMIT"), "{reason}");
 }

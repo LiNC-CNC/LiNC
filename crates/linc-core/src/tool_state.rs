@@ -10,6 +10,12 @@
 //! The backend records every tool the controller reports, including `0` after
 //! an explicit unload, and restores a remembered nonzero tool on the next
 //! session. The write is atomic, so a crash cannot leave a torn state file.
+//!
+//! Only the tool number is remembered. The restore issues `M61`, which sets the
+//! tool in the spindle and leaves the pocket at 0, so a turret or ATC profile
+//! reads the restored tool with an unknown pocket until the next change. The
+//! pocket is the tool table's own `P` column, not machine state: the HMI reports
+//! it from the table, and there is no MDI word that sets it.
 
 use std::fs;
 use std::io::Write;

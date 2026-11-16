@@ -1,7 +1,9 @@
 //! The closed machine command set.
 //!
 //! Machine-control commands (cycle, jog, spindle, coolant, overrides, E-stop)
-//! are intentionally not representable.
+//! are intentionally not representable, with one exception: `RecoverLimit`
+//! issues a single bounded increment away from a tripped hard limit. It cannot
+//! express a direction, a distance, a speed or a free jog.
 
 use std::path::PathBuf;
 
@@ -165,9 +167,19 @@ pub enum MachineCommand {
     SetCurrentTool {
         tool: u16,
     },
-    /// Toggle the controller's limits override, which accepts jogging off a
-    /// limit switch. The controller owns the state; this only asks it to flip.
-    ToggleLimitsOverride,
+    /// Arm the controller's limits override for `axis`. LinuxCNC masks every
+    /// limit that is tripped *at this moment* and clears the mask when the jog
+    /// it allows finishes; there is no disarm command, and the old name
+    /// `toggle` never described that. Only the recovery dialog calls it.
+    ArmLimitsOverride {
+        axis: String,
+    },
+    /// One bounded step off a tripped hard limit. The backend re-reads the
+    /// controller, derives the side, the sign and the jog mode itself, and
+    /// refuses unless `axis` is the only tripped axis.
+    RecoverLimit {
+        axis: String,
+    },
     LoadProgram {
         path: PathBuf,
         expected_revision: Option<u64>,
@@ -269,7 +281,8 @@ impl MachineCommand {
             Self::LoadTool { .. } => "Load tool with height compensation",
             Self::ConfirmManualToolChange { .. } => "Confirm manual tool change",
             Self::SetCurrentTool { .. } => "Set current tool",
-            Self::ToggleLimitsOverride => "Toggle limits override",
+            Self::ArmLimitsOverride { .. } => "Arm limits override",
+            Self::RecoverLimit { .. } => "Recover limit",
             Self::LoadProgram { .. } => "Load program",
             Self::UnloadProgram => "Unload program",
             Self::SaveProgram { .. } => "Save program",
@@ -314,6 +327,20 @@ pub enum MachineError {
     WrongPanelMode,
     #[error("probe tripped; reset the controller first")]
     ProbeTripped,
+    #[error("cabinet is off")]
+    CabinetOff,
+    #[error("emergency stop is active")]
+    EmergencyStop,
+    #[error("spindle is running")]
+    SpindleRunning,
+    #[error("homing is in progress")]
+    HomingInProgress,
+    #[error("a tool change is pending")]
+    ToolChangePending,
+    #[error("{axis} is not on a limit switch")]
+    LimitNotTripped { axis: String },
+    #[error("more than one axis is on a limit switch")]
+    MultipleLimitsTripped,
     #[error("unsupported command: {0}")]
     Unsupported(String),
     #[error("invalid command: {0}")]
@@ -355,6 +382,13 @@ impl MachineError {
             Self::ProgramRunning => "RUNNING",
             Self::WrongPanelMode => "WRONG MODE",
             Self::ProbeTripped => "PROBE TRIPPED",
+            Self::CabinetOff => "CABINET OFF",
+            Self::EmergencyStop => "E-STOP ACTIVE",
+            Self::SpindleRunning => "SPINDLE RUNNING",
+            Self::HomingInProgress => "HOMING",
+            Self::ToolChangePending => "TOOL CHANGE",
+            Self::LimitNotTripped { .. } => "NOT ON A LIMIT",
+            Self::MultipleLimitsTripped => "MULTIPLE LIMITS",
             Self::Unsupported(_) => "UNSUPPORTED",
             Self::Invalid(_) => "INVALID",
             Self::Io(_) => "I/O",
@@ -385,9 +419,61 @@ pub enum BackendEvent {
     SnapshotLost,
 }
 
+/// Does this MDI block ask the spindle to turn?
+///
+/// `M3`, `M4` and `M19` start it: forward, reverse and orient. `M5` stops it and
+/// `S` only sets the commanded speed, so neither counts as a start and both stay
+/// allowed during a tool change — the operator may be recovering from a spindle
+/// someone left running. Parenthesised and `;` comments are skipped, and the
+/// integer part of the word is what counts, so `M3.1` (start, then wait for
+/// at-speed) starts it too.
+pub fn starts_spindle(block: &str) -> bool {
+    let mut code = String::with_capacity(block.len());
+    let mut depth = 0usize;
+    for character in block.chars() {
+        match character {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => code.push(character),
+            _ => {}
+        }
+    }
+    let code = code.split(';').next().unwrap_or(&code);
+    code.split_whitespace()
+        .filter_map(|word| {
+            let digits = word.strip_prefix('M').or_else(|| word.strip_prefix('m'))?;
+            digits
+                .split('.')
+                .next()
+                .unwrap_or(digits)
+                .parse::<u32>()
+                .ok()
+        })
+        .any(|number| matches!(number, 3 | 4 | 19))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_spindle_start_is_recognised_and_a_stop_is_not() {
+        for block in ["M3", "M4 S1000", "G0 X0 M3", "M19 R0", "M3.1", "m4"] {
+            assert!(starts_spindle(block), "{block} starts the spindle");
+        }
+        for block in [
+            "M5",
+            "G97 S300 M5",
+            "M30",
+            "G0 X0",
+            "S1000",
+            "(M3) G0 X0",
+            "G0 X0 ; M3",
+            "(nested (M4) comment) M5",
+        ] {
+            assert!(!starts_spindle(block), "{block} does not start it");
+        }
+    }
 
     #[test]
     fn only_declared_hal_outputs_are_representable() {

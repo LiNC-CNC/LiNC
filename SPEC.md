@@ -933,8 +933,14 @@ Primary quick tool-change surface; no MDI entry required.
   remembered tool with `M61 Qn` (which sets the current tool without moving the
   changer) and then `G43 Hn`, once the machine is ON, homed, idle and
   unprotected and the tool is in the table. A controller that already reports a
-  tool wins. This keeps the `CURRENT` row, delete/renumber protection and the
-  probe-tool gate aligned with the physical spindle after a power cycle.
+  tool wins. While the restore waits, the status line reads `RESTORING Tn`, so
+  an empty `CURRENT` is not read as an empty spindle. A block the controller
+  accepts and then does not publish is retried three times and then written off
+  with one warning; a remembered tool that is not in the table is written off at
+  once. `M61` sets the tool and not the pocket, so a turret/ATC profile reads the
+  restored tool with an unknown pocket until the next change. This keeps the
+  `CURRENT` row, delete/renumber protection and the probe-tool gate aligned with
+  the physical spindle after a power cycle.
 - An axis DRO row sits above the table, at the same place and in the same
   cards as the Offsets page: the work coordinate large, the machine coordinate
   dimmed underneath, optional axes from the INI and the lathe's X in the
@@ -966,6 +972,17 @@ Primary quick tool-change surface; no MDI entry required.
 - `T` loads the selected row's tool: `Tn M6` followed by `G43 Hn` in one
   backend command, so the length compensation is in effect as soon as the
   change completes. The shortcut does not fire while a cell is being edited.
+- The table searches like the G-code help index: a `SEARCH` line in the card
+  header, focused with `/` (`[keys] help_search`, page-local). It filters as the
+  operator types, on the tool number (`12` or `T12`), the pocket, the
+  description and the type. `Enter` hands the keyboard back to the table and
+  `Esc` clears the query and puts the caret back in the line. Filtering changes
+  what is drawn, not what the cursor names: `T`, `Z`, the cell editor and the
+  dialogs still act on the tool under the cursor, and a cursor left on a
+  filtered-out row (a tool change can do that) moves to the first row the search
+  shows. The line reads `N TOOLS`, or `N OF M TOOLS` while a query is up, and a
+  query with no hits says `NO TOOLS MATCH THIS SEARCH` instead of looking like a
+  table the backend never sent.
 - `Ctrl+T` (`[keys] tool_number`, page-local like `T`) opens a small dialog
   that types a tool number directly, for an operator who knows the number and
   does not want to cursor to the row. It opens on one line of digits prefilled
@@ -1015,6 +1032,15 @@ Primary quick tool-change surface; no MDI entry required.
   `linc.tool-change-confirm` HAL output and **holds it** until `iocontrol.0.tool-change`
   drops — a pulse shorter than the EMCIO cycle can be missed. It is not an
   arbitrary HAL write.
+- The spindle is inhibited for the whole change. `iocontrol.0.tool-change` is
+  high from the request until the acknowledgement, so the panel spindle keys
+  reach halui through an `and2` with that signal (`hal/linc.hal`,
+  `hal/linc-lathe.hal`, and `hal/panel-spindle.hal` in the BaierMill session)
+  and the mill post-GUI cuts the enable/forward/reverse drive bits with the same
+  signal. The keys therefore do nothing during a change, and nothing is latched
+  for after it. `spindle.0.inhibit` is deliberately not used: it also blocks the
+  `M19` orientation a changer program runs. An MDI block that starts the spindle
+  (`M3`, `M4`, `M19`) is refused with `TOOL CHANGE` while the change is up.
 - The acknowledgement token is derived from a counter that increments on the
   rising edge of the request, so it is stable for one change episode and a late
   press cannot confirm the next one.
@@ -1342,7 +1368,11 @@ Rules:
   preferences as `mdi_history`, bounded by `mdi.history_limit`; issuing,
   deleting or moving a line updates the stored copy. `Ctrl+S` writes a program
   file.
-- No on-screen jog, override, spindle, coolant or E-stop controls.
+- No on-screen jog, override, spindle, coolant or E-stop controls. The one
+  exception is the limit-switch recovery dialog (§6.10.1): it arms the
+  controller's limit override and issues at most four bounded increments away
+  from a tripped hard limit. It cannot express a direction, a distance, a speed
+  or a continuous jog.
 
 ### 6.10 Homing
 
@@ -1419,6 +1449,46 @@ to the live graph or the coordinate readout applies to both.
 - The page shows machine position, limits, homed count and sequence completion.
   It provides no on-screen home, unhome, jog or override buttons.
 
+#### 6.10.1 Limit-switch recovery
+
+An unhomed machine has no soft limits, so a jog can put a joint on a hard limit.
+LinuxCNC then disables motion and reports `ESTOP_RESET`; `HOME` is dropped while
+motion is disabled, and the cabinet switch cannot re-enable the machine because
+`halui.machine.on` is edge-triggered on a maintained latch. The HMI is the only
+path back.
+
+A trip raises a banner (`LIMIT SWITCH — X- — MOTION DISABLED.`) with a
+`RECOVER (Ctrl+I)` action. Plain `O` on MANUAL/HOMING opens the same dialog, as
+does `[keys] limit_recovery` (default `Ctrl+I`, old name `limits_override`
+still parses). With no tripped axis, `O` toasts `NO LIMIT SWITCH TRIPPED` and
+opens nothing; with more than one, the dialog opens on the first and
+RECOVER/ASSIST stay disabled with the reason named.
+
+The dialog offers:
+
+- `RECOVER` — arms `EMC_JOINT_OVERRIDE_LIMITS`, enables motion, and issues one
+  bounded `EMC_JOG_INCR` away from the tripped side. One command is one step;
+  the dialog re-arms and re-enables per step, up to four steps (20 mm), and
+  stops when the switch clears. A step is 5 mm at 5 mm/s in machine units,
+  converted from the INI's `[TRAJ] LINEAR_UNITS`.
+- `ASSIST` — arms the override and enables motion only; the operator holds the
+  jog key. The dialog re-arms after each jog (LinuxCNC clears the mask when the
+  move ends) while it stays open, with a 60 s timeout.
+- `STOP` — aborts motion and ends the attempt. `CANCEL` takes the keyboard on
+  the first frame, so a reflex `Enter` never recovers.
+
+Both actions are refused unless the cabinet switch is not off, the E-stop is
+released, the panel is live and in JOG/INC/MPG, no program is running or
+paused, the spindle is stopped, no probe trip is latched, no joint is homing, no
+tool change is pending, and exactly the named axis sits on a hard limit. The
+backend re-checks the same list on every command, derives the side, the sign
+and the joint/axis index space from the controller's own status, and refuses a
+caller that names any other axis.
+
+Recovery never issues a home command: it only clears the switch so the panel's
+HOME mode can run. A switch still tripped after four steps is reported and the
+machine is left disabled.
+
 ### 6.11 Manual modes: JOG / INC / MPG
 
 Mode-driven screen shared by the panel's `JOG`, `INC` and `MPG` positions.
@@ -1449,6 +1519,14 @@ jog in JOG mode.
   distance-to-go, with units and sign. Work coordinates use a large monospace
   face; machine/DTG values may be smaller but must remain legible at the target
   display.
+- **SERVO LOAD** sits under the work coordinates in `JOG` and `MPG`: the same
+  card MAIN shows under the toolpath, aligned to the coordinates card's left and
+  right edges. It lists one load bar per `[ui] servo_load` entry (X, Y, Z and S
+  on the mill) and is absent on a profile with no list. `INC` does not show it:
+  that column carries the increment row there, one secondary card under the DRO
+  rather than a stack. Its height comes from the row count, the same expression
+  MAIN uses, so the meters are never clipped; a window too short for the
+  coordinates and servo stack scrolls that column as a whole.
 - Optional axes follow the INI. Lathe X is shown in the configured
   radius/diameter convention, with the convention labeled.
 - The active axis is highlighted from the panel's selected-axis state. Unknown
@@ -1806,7 +1884,11 @@ HAL pins is still open.
   switch, is rechecked by the backend on every write, and fails closed when
   unknown or stale.
 - Manual modes are read-only: no HMI jog, increment, handwheel, mode or
-  override command exists. The WHB pendant is accepted for jog only.
+  override command exists. The WHB pendant is accepted for jog only. The one
+  exception is limit-switch recovery (§6.10.1): it arms the override and issues
+  at most four 5 mm increments away from the tripped hard limit, deriving the
+  side, sign and jog mode from the controller's status. It never issues a
+  continuous jog, a direction, a distance, or a home command.
 - A probe trip reported by LinuxCNC latches a persistent banner and blocks
   motion/MDI/probe/tool/offset commands until the operator's reset clears it.
   The banner has no timeout. The clear action is the controller's

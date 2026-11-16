@@ -24,7 +24,7 @@ use linuxcnc_nml::{
 
 use linc_core::backend::MachineBackend;
 use linc_core::command::{
-    HalValue, LincOutput, MachineCommand, MachineError, MdiOrigin, ProbeTarget,
+    starts_spindle, HalValue, LincOutput, MachineCommand, MachineError, MdiOrigin, ProbeTarget,
 };
 use linc_core::config::Profile;
 use linc_core::diag::BridgeInfo;
@@ -125,9 +125,17 @@ struct ToolRestore {
     /// The `M61` block has been sent; wait for the controller to publish it
     /// before trying again.
     issued: bool,
+    /// Blocks the controller accepted and then did not publish. A restore that
+    /// is waiting for power, homing, PROTECT or an idle interpreter is not an
+    /// attempt: it is the machine not being ready yet.
+    attempts: u8,
     next_attempt: Instant,
-    warned_missing: bool,
 }
+
+/// How many accepted-then-unpublished `M61` blocks a remembered tool gets before
+/// the state file is written off as stale. Without a cap the backend re-issues
+/// the block every 5 s for the life of the session and logs each one.
+const RESTORE_ATTEMPTS: u8 = 3;
 
 impl NmlBackend {
     pub fn connect(profile: Profile) -> Result<Self, BackendError> {
@@ -170,8 +178,8 @@ impl NmlBackend {
             .map(|tool| ToolRestore {
                 tool,
                 issued: false,
+                attempts: 0,
                 next_attempt: Instant::now(),
-                warned_missing: false,
             });
         let bridge = BridgeInfo {
             kind: "nml".into(),
@@ -266,6 +274,26 @@ impl NmlBackend {
         let mut snapshot =
             self.builder
                 .build(&status, &panel, spindles, &self.parameters, executing_line);
+        // The cabinet switch is a level the HMI must judge before a recovery
+        // move: `halui.machine.on` samples edges, but this pin is the state.
+        snapshot.cabinet_on = self
+            .hal
+            .as_ref()
+            .and_then(|hal| hal.read("linc.machine-on"))
+            .and_then(|value| value.as_bool());
+        // Per-axis load. LinuxCNC's status carries no servo load, so the only
+        // source is a HAL pin, and SnapshotBuilder owns no HAL reader: the pins
+        // are read here and replace the zeros the builder seeded. An axis with
+        // no configured pin keeps its 0%, which is what the machine really
+        // publishes for it.
+        for (axis, pin) in &self.profile.config.hal.pins.axis_load {
+            if let Some(load) = self.hal.as_ref().and_then(|hal| hal.float(pin)) {
+                snapshot
+                    .machine
+                    .servo_load
+                    .insert(axis.trim().to_ascii_uppercase(), load);
+            }
+        }
         if let Some(stored) = self.last_snapshot.as_mut() {
             carry_hal_selections(&mut snapshot, stored);
         }
@@ -291,7 +319,7 @@ impl NmlBackend {
         snapshot.hal.tool_change_confirm_seq = self.confirm_seq;
         snapshot.machine.hal_thread_ok = self.hal.is_some();
         snapshot.bridge = Some(self.bridge_info());
-        self.service_tool_state(&snapshot);
+        self.service_tool_state(&mut snapshot);
         self.last_snapshot = Some(snapshot.clone());
         snapshot
     }
@@ -307,9 +335,13 @@ impl NmlBackend {
     /// on, homed, idle and unprotected, so the restore never fights a real
     /// tool change or a safety gate. `M61` does not move the changer; the
     /// following `G43` applies the remembered tool's length.
-    fn service_tool_state(&mut self, snapshot: &MachineSnapshot) {
+    fn service_tool_state(&mut self, snapshot: &mut MachineSnapshot) {
         let current = snapshot.tool_change.current_tool;
         if let Some(mut restore) = self.tool_restore {
+            // Published while the restore waits for the machine: the tool change
+            // message alone is not rendered, and T0 would read as "empty
+            // spindle" for as long as booting, homing or PROTECT takes.
+            snapshot.tool_change.restore_pending = Some(restore.tool);
             if current != 0 {
                 // The controller has a tool: an operator change, or the
                 // restore landed. Trust it over a remembered number.
@@ -322,9 +354,18 @@ impl NmlBackend {
                 return;
             }
             if restore.issued {
-                // The block was accepted but never reached the status pin.
-                // Ask again rather than leaving the spindle remembered as T0.
+                // The block was accepted but never reached the status pin. Ask
+                // again, but not forever: the controller may be refusing it.
                 restore.issued = false;
+                restore.attempts += 1;
+                if restore.attempts >= RESTORE_ATTEMPTS {
+                    log::warn!(
+                        "T{} was not restored after {RESTORE_ATTEMPTS} attempts; the controller still reports no tool",
+                        restore.tool
+                    );
+                    self.tool_restore = None;
+                    return;
+                }
             }
             if snapshot.tool_table.error.is_some() {
                 restore.next_attempt = now + Duration::from_secs(1);
@@ -337,15 +378,14 @@ impl NmlBackend {
                 .iter()
                 .any(|row| row.tool == restore.tool)
             {
-                if !restore.warned_missing {
-                    log::warn!(
-                        "remembered tool T{} is not in the tool table; not restoring it",
-                        restore.tool
-                    );
-                    restore.warned_missing = true;
-                }
-                restore.next_attempt = now + Duration::from_secs(5);
-                self.tool_restore = Some(restore);
+                // The table is loaded and the row is not in it, so `M61` would
+                // be refused every cycle. Stop, once, instead of leaving the
+                // status line pending for the session.
+                log::warn!(
+                    "remembered tool T{} is not in the tool table; not restoring it",
+                    restore.tool
+                );
+                self.tool_restore = None;
                 return;
             }
             if snapshot.issue_allowed().is_err()
@@ -803,6 +843,86 @@ impl NmlBackend {
         Ok(())
     }
 
+    /// Arm the limits override for `axis` and make sure motion is enabled, the
+    /// order recovery depends on: a joint still sitting on the switch re-faults
+    /// on the next servo cycle unless the mask is armed first.
+    fn arm_limits_override(&mut self, axis: &str) -> Result<(), MachineError> {
+        let snapshot = self.refresh();
+        linc_core::recovery::check_gates(&snapshot, axis)?;
+        self.nml_send(&NmlCommand::OverrideLimits)?;
+        self.wait_complete(Duration::from_secs(1))?;
+        self.enable_motion()
+    }
+
+    /// `EMC_TASK_SET_STATE(ON)` is the only path from the HMI to motion's
+    /// enable, and the task reports ON before motion has accepted it. Poll the
+    /// controller's own `motion.enabled` rather than guessing.
+    fn enable_motion(&mut self) -> Result<(), MachineError> {
+        let status = self.poll_status()?;
+        if status.task.state == NmlTaskState::On && status.motion.enabled {
+            return Ok(());
+        }
+        self.nml_send(&NmlCommand::SetState(NmlTaskState::On))?;
+        self.wait_complete(Duration::from_secs(1))?;
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            if self.poll_status()?.motion.enabled {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(MachineError::Backend(
+                    "the controller did not enable motion".into(),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// One bounded step off the tripped hard limit.
+    ///
+    /// The caller names an axis and nothing else. The side, the sign, the feed
+    /// and the index space are derived here from the controller's own status,
+    /// so a caller cannot drive the machine into the switch or name a distance.
+    fn recover_limit(&mut self, axis: &str) -> Result<(), MachineError> {
+        let snapshot = self.refresh();
+        let side = linc_core::recovery::check_gates(&snapshot, axis)?;
+        let joint_index = self
+            .profile
+            .machine_ini
+            .axes
+            .iter()
+            .position(|candidate| candidate.name.eq_ignore_ascii_case(axis))
+            .ok_or_else(|| MachineError::LimitNotTripped {
+                axis: axis.to_ascii_uppercase(),
+            })?;
+
+        self.arm_limits_override(axis)?;
+
+        // A homed machine sits in TELEOP and takes an axis jog; an unhomed one
+        // is still in FREE and takes a joint jog. The two index spaces differ,
+        // which is why the mode is read from the controller after enabling.
+        let status = self.poll_status()?;
+        let joint_mode = matches!(
+            linuxcnc_nml::TrajMode::from_i32(status.motion.mode),
+            linuxcnc_nml::TrajMode::Free
+        );
+        let index = if joint_mode {
+            joint_index as i32
+        } else {
+            axis_pose_index(axis)
+                .ok_or_else(|| MachineError::Invalid(format!("{axis} has no axis index")))?
+                as i32
+        };
+        let plan = linc_core::recovery::plan(side, &self.profile.machine_ini.linear_units);
+        self.nml_send(&NmlCommand::JogIncrement {
+            joint_mode,
+            index,
+            velocity: plan.feed,
+            increment: plan.increment,
+        })?;
+        Ok(())
+    }
+
     fn validate_write(&mut self) -> Result<MachineSnapshot, MachineError> {
         let snapshot = self.refresh();
         if !snapshot.panel.connected || snapshot.panel.communication_error {
@@ -1096,6 +1216,18 @@ impl NmlBackend {
                 if blocks.is_empty() {
                     return Err(MachineError::Invalid("empty MDI block".into()));
                 }
+                // A spindle start during a tool change is refused here as well
+                // as cut in HAL: a request that silently does nothing is worse
+                // than a refused command, and nothing is left latched for the
+                // moment the change ends. `validate_issue` refreshed the
+                // controller, so the flag it stored is the current one.
+                let tool_change_active = self
+                    .last_snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.machine.tool_change_active);
+                if starts_spindle(&block) && tool_change_active {
+                    return Err(MachineError::ToolChangePending);
+                }
                 let axes = self.profile.machine_ini.axis_names();
                 for line in &blocks {
                     let preview = parse_preview(line, &axes, None, [0.0; 3]);
@@ -1172,17 +1304,8 @@ impl NmlBackend {
                 self.validate_issue(MdiOrigin::ToolChange)?;
                 self.issue_blocks(&[format!("M61 Q{tool}")])
             }
-            MachineCommand::ToggleLimitsOverride => {
-                if self.refresh().probe_trip_active() {
-                    return Err(MachineError::ProbeTripped);
-                }
-                self.nml_send(&NmlCommand::OverrideLimits)?;
-                self.wait_complete(Duration::from_secs(1))?;
-                if self.poll_status()?.task.state != NmlTaskState::On {
-                    self.nml_send(&NmlCommand::SetState(NmlTaskState::On))?;
-                }
-                Ok(())
-            }
+            MachineCommand::ArmLimitsOverride { axis } => self.arm_limits_override(&axis),
+            MachineCommand::RecoverLimit { axis } => self.recover_limit(&axis),
             MachineCommand::LoadProgram {
                 path,
                 expected_revision,

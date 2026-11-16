@@ -11,7 +11,7 @@ use linc_core::editor::Editor;
 use linc_core::gcode::Preview;
 use linc_core::help::HelpBundle;
 use linc_core::model::MachineSnapshot;
-use linc_core::model::{AlarmSeverity, AlarmSource};
+use linc_core::model::{AlarmSeverity, AlarmSource, LimitSide};
 use linc_core::probe::{ProbeCategory, ProbeOperation, ProbeParameters};
 use linc_view::{theme as view_theme, TrajectoryView, ViewMode};
 
@@ -273,6 +273,57 @@ pub enum Modal {
     ConfirmOverwrite(String),
     Error(String),
     Info(String),
+    /// A hard limit tripped: recover, assist, or get out of the way.
+    LimitRecovery(LimitRecovery),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecoveryPhase {
+    /// No command sent; RECOVER and ASSIST are open.
+    Confirming,
+    /// One `RecoverLimit` issued; the dialog waits for the move to settle.
+    Recovering,
+    /// The override is armed and the operator jogs; the dialog re-arms.
+    Assisting,
+    /// The attempt ended. The message says why.
+    Done,
+}
+
+/// The state the recovery dialog owns for one attempt. `axis` and `side` are
+/// read from the snapshot when the dialog opened and are not re-derived: the
+/// operator is looking at that axis, and a second trip elsewhere must not move
+/// the buttons under them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LimitRecovery {
+    pub axis: String,
+    pub side: LimitSide,
+    pub phase: RecoveryPhase,
+    /// Recovery steps issued in this attempt, 0 before the first.
+    pub issued: u8,
+    pub sent_at: Option<Instant>,
+    pub assist_until: Option<Instant>,
+    pub last_arm: Option<Instant>,
+    pub message: Option<String>,
+}
+
+impl LimitRecovery {
+    pub fn new(axis: String, side: LimitSide) -> Self {
+        Self {
+            axis,
+            side,
+            phase: RecoveryPhase::Confirming,
+            issued: 0,
+            sent_at: None,
+            assist_until: None,
+            last_arm: None,
+            message: None,
+        }
+    }
+
+    pub fn fail(&mut self, message: impl Into<String>) {
+        self.phase = RecoveryPhase::Done;
+        self.message = Some(message.into());
+    }
 }
 
 impl Modal {
@@ -298,6 +349,7 @@ impl Modal {
             Modal::ConfirmOverwrite(_) => "confirm-overwrite",
             Modal::Error(_) => "error",
             Modal::Info(_) => "info",
+            Modal::LimitRecovery(_) => "limit-recovery",
         }
     }
 }
@@ -1503,6 +1555,16 @@ pub struct ToolsUi {
     /// `LincApp::overlay_open`, so the table, the cell editor and the shell's
     /// global keys stand down behind it.
     pub position: Option<ToolPositionEntry>,
+    /// The table search, matched against the tool number, pocket, description
+    /// and kind. Empty shows every row. The search filters what the table
+    /// draws; `selected_row` stays an index into the full table, so every
+    /// edit path keeps addressing the tool it names.
+    pub query: String,
+    /// Focus the search field on the next frame. Set by the page's `/` key.
+    pub focus_search: bool,
+    /// The search field holds the keyboard this frame. The shell leaves Escape
+    /// to the page while it does, the way it does for an in-place cell edit.
+    pub search_focused: bool,
 }
 
 /// The TOOLS page's tool-number dialog: one line of digits, prefilled with the
@@ -1579,6 +1641,9 @@ impl Default for ToolsUi {
             number: None,
             pending_select_tool: None,
             position: None,
+            query: String::new(),
+            focus_search: false,
+            search_focused: false,
         }
     }
 }
@@ -2409,8 +2474,9 @@ pub struct Keymap {
     /// Page-local to Tools: type a tool number and load it, as bare `T` loads
     /// the selected row.
     pub tool_number: Binding,
-    /// Toggle the limit-switch override. The jog screens carry no button for it.
-    pub limits_override: Binding,
+    /// Open the limit-switch recovery dialog. The jog screens carry no button
+    /// for it; the dialog owns the arm and the bounded moves.
+    pub limit_recovery: Binding,
     pub diagnostics: Binding,
     pub help: Binding,
     /// Any page: open the full-screen messages dialog.
@@ -2555,12 +2621,9 @@ impl Keymap {
             tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
             tool_number: binding(&keys.tool_number, Binding::new(Key::T, ctrl), &mut rejected),
-            limits_override: binding(
-                &keys.limits_override,
-                Binding::new(
-                    Key::O,
-                    Modifiers::CTRL | Modifiers::COMMAND | Modifiers::SHIFT,
-                ),
+            limit_recovery: binding(
+                &keys.limit_recovery,
+                Binding::new(Key::I, ctrl),
                 &mut rejected,
             ),
             diagnostics: binding(&keys.diagnostics, Binding::new(Key::D, ctrl), &mut rejected),

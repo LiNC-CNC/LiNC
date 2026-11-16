@@ -155,7 +155,6 @@ pub struct PanelState {
     pub program_protect_known: bool,
     pub estop: bool,
     pub rapid: bool,
-    pub override_limits: bool,
     pub next_tool: u16,
     pub buttons: u64,
     pub leds: u64,
@@ -185,7 +184,6 @@ impl PanelState {
             program_protect_known: false,
             estop: false,
             rapid: false,
-            override_limits: false,
             next_tool: 0,
             buttons: 0,
             leds: 0,
@@ -364,7 +362,6 @@ impl PanelReader {
         state.sseg_status = hal.s32(&format!("{prefix}sseg_status")).unwrap_or(-1);
         state.estop = bit(hal, &format!("{prefix}estop"), false);
         state.rapid = bit(hal, &format!("{prefix}rapid"), false);
-        state.override_limits = bit(hal, "halui.joint.0.override-limits", false);
         state.next_tool = hal.s32("iocontrol.0.tool-prep-number").unwrap_or(0).max(0) as u16;
         state.tool_change_active = bit(hal, "iocontrol.0.tool-change", false);
         state.door_closed = bit(hal, &format!("{prefix}led_safe_door"), true);

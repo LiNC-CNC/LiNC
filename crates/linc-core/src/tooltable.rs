@@ -404,6 +404,41 @@ pub fn axis_values(row: &ToolRow, axes: &[String]) -> AxisMap<f64> {
     values
 }
 
+/// Indices of the rows a tool-table search shows.
+///
+/// The search works like the G-code help index: the query is trimmed and
+/// lowercased, then matched as a substring of what the row says. The tool
+/// number matches through its `T` form as well as its digits, so `t12` and
+/// `12` both find T12. An empty query keeps every row, in table order.
+///
+/// Indices rather than rows: the page's cursor and every edit path address
+/// the table by position, so a filter that renumbered the rows would make `T`
+/// load the wrong tool.
+pub fn filter_indices(rows: &[ToolRow], query: &str) -> Vec<usize> {
+    let needle = query.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return (0..rows.len()).collect();
+    }
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| row_matches(row, &needle))
+        .map(|(index, _)| index)
+        .collect()
+}
+
+fn row_matches(row: &ToolRow, needle: &str) -> bool {
+    let pocket = row
+        .pocket
+        .map(|pocket| pocket.to_string())
+        .unwrap_or_default();
+    let hay = format!(
+        "t{} {} {} {} {}",
+        row.tool, row.tool, pocket, row.description, row.kind
+    )
+    .to_ascii_lowercase();
+    hay.contains(needle)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,6 +480,29 @@ mod tests {
         let error = ToolTable::parse(Path::new("tool.tbl"), MILL, "TZDR", ToolChangerKind::Atc)
             .unwrap_err();
         assert!(error.to_string().contains("P column"));
+    }
+
+    #[test]
+    fn a_search_finds_a_number_a_description_and_a_kind() {
+        let rows = ToolTable::parse(
+            Path::new("tool.tbl"),
+            ";Tool Pocket Z Offset Diameter Remark\nT1 P3 Z0 D+6 ; 6mm end mill\nT12 P0 Z-1 D+17.3 ; face mill\n",
+            "TZPDR",
+            ToolChangerKind::Manual,
+        )
+        .unwrap()
+        .rows;
+        // Empty query: every row, in order.
+        assert_eq!(filter_indices(&rows, "   "), vec![0, 1]);
+        // Digits find the tool, and the T form finds it too.
+        assert_eq!(filter_indices(&rows, "12"), vec![1]);
+        assert_eq!(filter_indices(&rows, "T12"), vec![1]);
+        // Description and kind, case-insensitively.
+        assert_eq!(filter_indices(&rows, "FACE"), vec![1]);
+        assert_eq!(filter_indices(&rows, "mill"), vec![0, 1]);
+        // The pocket column is searchable, and a miss returns nothing.
+        assert_eq!(filter_indices(&rows, "3"), vec![0], "pocket 3 is T1");
+        assert!(filter_indices(&rows, "drill").is_empty());
     }
 
     #[test]

@@ -51,9 +51,16 @@ impl LincApp {
         // The PLC editor owns the keyboard while it is open. Its grid, its
         // pickers and its text fields all take the manual's keys, so the shell
         // must not consume Enter, Escape, the arrows, the element letters or the
-        // page chords first. Emergency and safety keys stay global: they are
-        // handled on paths that run before this guard.
+        // page chords first. Emergency and safety keys stay global: the limit
+        // recovery chord is read inside this guard, and the rest run before it.
         if self.overlay.plc_editor {
+            // Limit recovery is the one key that stays live: it is a machine-safety
+            // path whose chord is the way in from anywhere, and it opens a dialog
+            // rather than acting, so the editor's grid cannot be reached through it.
+            let chord = self.prefs.keymap.limit_recovery;
+            if ui.input_mut(|input| input.consume_key(chord.modifiers, chord.key)) {
+                self.open_limit_recovery();
+            }
             return;
         }
         // Ctrl+E opens the PLC workbench from the keyboard, so the acceptance does
@@ -418,12 +425,13 @@ impl LincApp {
                 nav_page = Some(Page::Tools);
             }
             // The jog screens carry no button for the limit override, so the
-            // chord is the only way to free a joint parked on a switch.
+            // chord is the way in from anywhere. It opens the recovery dialog,
+            // which owns the arm and the bounded moves.
             if input.consume_key(
-                self.prefs.keymap.limits_override.modifiers,
-                self.prefs.keymap.limits_override.key,
+                self.prefs.keymap.limit_recovery.modifiers,
+                self.prefs.keymap.limit_recovery.key,
             ) {
-                self.send(linc_core::command::MachineCommand::ToggleLimitsOverride);
+                self.open_limit_recovery();
             }
             if input.consume_key(
                 self.prefs.keymap.offsets.modifiers,
@@ -521,7 +529,9 @@ impl LincApp {
             // An edit or a page popup owns Escape: it cancels the edit (or
             // closes the selector) rather than leaving the page.
             let editing_in_place = (self.nav.page == Page::Tools
-                && (self.tools.editing || self.tools.kind_popup.is_some()))
+                && (self.tools.editing
+                    || self.tools.kind_popup.is_some()
+                    || self.tools.search_focused))
                 || (self.nav.page == Page::Offsets
                     && (self.offsets.editing || self.offsets.dro_edit.is_some()))
                 || (self.nav.page == Page::Files && self.files.rename.is_some())

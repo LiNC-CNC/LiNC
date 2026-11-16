@@ -264,9 +264,14 @@ fn postgui_hal_is_linc_owned_and_free_of_probe_basic_gui_pins() {
         "net pendant-stop-cmd or2.pendant-stop.out => halui.program.stop",
         // probe input and tool-99 spindle gating
         "net sig_rio_probe_bit => motion.probe-input",
-        "net gated-spindle-enable => rio.spindle.enable",
-        "net gated-spindle-forward => rio.spindle-forward.bit",
-        "net gated-spindle-rev => rio.spindle-reverse.bit",
+        "net gated-spindle-enable-final => rio.spindle.enable",
+        "net gated-spindle-forward-final => rio.spindle-forward.bit",
+        "net gated-spindle-rev-final => rio.spindle-reverse.bit",
+        // a tool change cuts every spindle request at the drive
+        "net tool-change => not.tool-changing.in",
+        "net not-tool-changing => and2.spindle-enable-change.in1",
+        "net not-tool-changing => and2.spindle-forward-change.in1",
+        "net not-tool-changing => and2.spindle-rev-change.in1",
     ] {
         assert!(
             code.iter().any(|line| *line == required),

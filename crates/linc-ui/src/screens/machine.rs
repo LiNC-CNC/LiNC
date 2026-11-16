@@ -124,12 +124,7 @@ fn bottom_cards_height(app: &LincApp) -> f32 {
         return FOLLOWING;
     }
     let rows = app.servo_load_rows().len();
-    let servo = if rows == 0 {
-        0.0
-    } else {
-        44.0 + rows as f32 * common::SERVO_METER_HEIGHT
-    };
-    FEED.max(servo)
+    FEED.max(common::servo_load_card_height(rows))
 }
 
 /// Width of one bottom card so that `cards` cards and the 8 px gaps between
