@@ -2479,6 +2479,8 @@ pub struct Keymap {
     pub limit_recovery: Binding,
     pub diagnostics: Binding,
     pub help: Binding,
+    /// Any page: open the ladder PLC page.
+    pub plc: Binding,
     /// Any page: open the full-screen messages dialog.
     pub messages: Binding,
     pub back: Binding,
@@ -2576,7 +2578,7 @@ impl Keymap {
                 Binding::new(Key::Num0, ctrl),
                 &mut rejected,
             ),
-            graph_clear: binding(&keys.graph_clear, Binding::new(Key::L, ctrl), &mut rejected),
+            graph_clear: binding(&keys.graph_clear, Binding::new(Key::K, ctrl), &mut rejected),
             view_pan_left: binding(
                 &keys.view_pan_left,
                 Binding::new(Key::ArrowLeft, ctrl),
@@ -2628,6 +2630,7 @@ impl Keymap {
             ),
             diagnostics: binding(&keys.diagnostics, Binding::new(Key::D, ctrl), &mut rejected),
             help: binding(&keys.help, Binding::new(Key::H, ctrl), &mut rejected),
+            plc: binding(&keys.plc, Binding::new(Key::L, ctrl), &mut rejected),
             messages: binding(&keys.messages, Binding::new(Key::M, none), &mut rejected),
             back: binding(&keys.back, Binding::new(Key::Escape, none), &mut rejected),
             quit: binding(&keys.quit, Binding::new(Key::Q, ctrl), &mut rejected),

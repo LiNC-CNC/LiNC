@@ -1377,6 +1377,15 @@ fn the_navigation_is_compact_and_lists_seven_pages() {
     assert_eq!(harness.app.nav.page, Page::Diagnostics);
     harness.frame_with(&[(egui::Key::H, ctrl())]);
     assert_eq!(harness.app.nav.page, Page::Help);
+    // Ctrl+L is the PLC page. It is not in `Page::NAV`, so before this chord
+    // the page could only be reached by pointing at its entry, and the trail
+    // clear that owned the chord moved to Ctrl+K.
+    harness.frame_with(&[(egui::Key::L, ctrl())]);
+    assert_eq!(harness.app.nav.page, Page::Plc);
+    assert_ne!(
+        harness.app.prefs.keymap.plc, harness.app.prefs.keymap.graph_clear,
+        "two defaults share Ctrl+L"
+    );
 }
 
 /// `[ui] keyboard = "pc"` names the F-keys in the navigation and in every

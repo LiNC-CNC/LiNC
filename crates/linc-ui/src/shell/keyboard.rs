@@ -455,6 +455,11 @@ impl LincApp {
             if input.consume_key(self.prefs.keymap.help.modifiers, self.prefs.keymap.help.key) {
                 nav_page = Some(Page::Help);
             }
+            // The PLC page is not in `Page::NAV`, so it has no F-key: this chord
+            // is the keyboard's only way to it.
+            if input.consume_key(self.prefs.keymap.plc.modifiers, self.prefs.keymap.plc.key) {
+                nav_page = Some(Page::Plc);
+            }
             // Not on DIAGNOSTICS: that page shows the same log inline, and on
             // the LOGS tab `M` is the MOTION source toggle, so the global
             // dialog would open over the filter it just changed.

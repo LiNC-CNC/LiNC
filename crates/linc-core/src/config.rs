@@ -464,6 +464,9 @@ pub struct KeysConfig {
     pub diagnostics: String,
     /// Open the offline G-code reference from any page.
     pub help: String,
+    /// Open the ladder PLC page from any page. The page had no key before this
+    /// one: it could only be reached by pointing at its navigation entry.
+    pub plc: String,
     /// Open the full-screen messages dialog from any page.
     pub messages: String,
     pub back: String,
@@ -508,7 +511,9 @@ impl KeysConfig {
             toggle_lathe_diameter: "Ctrl+E".into(),
             remaining: "Ctrl+M".into(),
             graph_fit: "Ctrl+0".into(),
-            graph_clear: "Ctrl+L".into(),
+            // Ctrl+L is the PLC page: a navigation key must work from every page,
+            // and the trail clear was the one page-local command that had it.
+            graph_clear: "Ctrl+K".into(),
             view_pan_left: "Ctrl+Left".into(),
             view_pan_right: "Ctrl+Right".into(),
             view_pan_up: "Ctrl+Up".into(),
@@ -524,6 +529,7 @@ impl KeysConfig {
             limit_recovery: "Ctrl+I".into(),
             diagnostics: "Ctrl+D".into(),
             help: "Ctrl+H".into(),
+            plc: "Ctrl+L".into(),
             messages: "M".into(),
             back: "Escape".into(),
             quit: "Ctrl+Q".into(),
