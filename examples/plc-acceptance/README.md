@@ -22,14 +22,24 @@ sample set released under GPL-3.0-or-later; the samples are the corresponding
 source of the derived files here, which is why they are kept. `manifest.json`
 records the origin.
 
-The `.xml` files are conversions of those sources to PLCopen TC6, produced by
-`tools/plcy2plcopen.py`; `stimuli/` and `traces/` were produced by running the
-sources in the reference engine, which is outside this tree.
+The `.xml` files are conversions of those sources to PLCopen TC6. The converter
+that produced them was a session artifact and is gone; **the committed `.xml` files
+are the originals** and are the record of that conversion.
+
+`tools/plcy2plcopen.py` is a **reconstruction, not verified**: it regenerates the
+twelve files, but `garage-door`'s program diverges from its trace (`%Q0.1` is true
+at scan 61 where the trace says false), so it must not be used to rebuild the
+corpus until that is fixed. It is committed as a starting point, not as the tool
+that made these files.
+
+`stimuli/` and `traces/` were produced by running the sources in the reference
+engine, which is outside this tree.
 
 `tools/plcy2json/` converts the XML to the project JSON LiNC opens, with the same
-canonicalisation the PLC page's Save uses. Both tools are GPL-3.0-or-later with
-everything else here: they exist to process this corpus, and their output is a
-derivative work of it.
+canonicalisation the PLC page's Save uses — that one is verified by the corpus:
+each project compiles to the same ops, word layout and output count as its XML.
+Both tools are GPL-3.0-or-later with everything else here: they exist to process
+this corpus, and their output is a derivative work of it.
 
 Two provenance notes, because a tool's licence is not obvious from its job:
 
