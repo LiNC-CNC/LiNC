@@ -997,6 +997,9 @@ pub struct PlcUi {
     pub close_requested: bool,
     /// Cell cursor in the ladder grid: section, rung, position (9 = coil).
     pub cell_cursor: Option<(usize, usize, usize)>,
+    /// The open dialog: the JSON projects beside the current path, read from
+    /// disk when it opens. None when the dialog is closed.
+    pub open_list: Option<OpenList>,
     /// The element picker is open on this cell.
     pub picker: Option<(usize, usize, usize)>,
     /// The row the element picker's cursor sits on; arrows move it, Enter takes it.
@@ -1126,6 +1129,7 @@ impl Default for PlcUi {
     fn default() -> Self {
         Self {
             project: startup_project(),
+            open_list: None,
             path_text: startup_path().display().to_string(),
             socket_text: linc_plc_client::default_socket_path().display().to_string(),
             selection: Some(NodePath::root(0, 0)),
@@ -2479,6 +2483,90 @@ impl PlcUi {
         self.normalise_selection();
     }
 
+    /// The directory the open dialog lists: the current project's, else the
+    /// corpus, else where the process is.
+    fn open_dir(&self) -> std::path::PathBuf {
+        let path = std::path::Path::new(self.path_text.trim());
+        if let Some(dir) = path.parent() {
+            if !dir.as_os_str().is_empty() && dir.is_dir() {
+                return dir.to_path_buf();
+            }
+        }
+        let corpus = std::path::Path::new(CORPUS_PROJECTS);
+        if corpus.is_dir() {
+            return corpus.to_path_buf();
+        }
+        std::path::PathBuf::from(".")
+    }
+
+    /// List the projects on disk. Read here, at run time: the corpus is not
+    /// compiled into the application, so a project added to the folder shows up
+    /// without a rebuild.
+    pub fn open_picker(&mut self) {
+        let dir = self.open_dir();
+        let mut list = OpenList {
+            dir: dir.display().to_string(),
+            ..Default::default()
+        };
+        match std::fs::read_dir(&dir) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let json = path
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
+                    if !json || !path.is_file() {
+                        continue;
+                    }
+                    if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                        list.entries.push(name.to_string());
+                    }
+                }
+                list.entries.sort();
+            }
+            Err(error) => list.error = Some(format!("{dir:?}: {error}")),
+        }
+        // The cursor starts on the project that is open, when it is one of them.
+        let current = std::path::Path::new(self.path_text.trim())
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        list.cursor = list
+            .entries
+            .iter()
+            .position(|name| name == current)
+            .unwrap_or(0);
+        self.open_list = Some(list);
+    }
+
+    /// Open the row the open dialog's cursor is on. A file that fails to parse
+    /// leaves the dialog up with the reason, so the next row is one arrow away.
+    pub fn pick_open_list(&mut self) {
+        let Some(name) = self
+            .open_list
+            .as_ref()
+            .and_then(|list| list.entries.get(list.cursor))
+            .cloned()
+        else {
+            return;
+        };
+        let path = std::path::Path::new(
+            &self
+                .open_list
+                .as_ref()
+                .map(|list| list.dir.clone())
+                .unwrap_or_default(),
+        )
+        .join(name);
+        self.path_text = path.display().to_string();
+        self.last_error = None;
+        self.open();
+        if self.last_error.is_none() {
+            self.open_list = None;
+        }
+    }
+
     pub fn open(&mut self) {
         match std::fs::read_to_string(self.path_text.trim()) {
             Ok(text) => match project_from_json(&text) {
@@ -2601,6 +2689,22 @@ impl PlcUi {
 // ---------------------------------------------------------------------------
 // Drawing
 // ---------------------------------------------------------------------------
+
+/// What the open dialog found on disk, and the row under its cursor.
+///
+/// The listing is made when the dialog opens and never cached across opens: the
+/// corpus is ordinary files, and a project written a minute ago must appear.
+#[derive(Clone, Debug, Default)]
+pub struct OpenList {
+    pub dir: String,
+    pub entries: Vec<String>,
+    pub cursor: usize,
+    pub error: Option<String>,
+}
+
+/// Where the open dialog looks when the current project has no directory of its
+/// own: the acceptance corpus, beside the crate that tests it.
+const CORPUS_PROJECTS: &str = "examples/plc-acceptance/projects";
 
 /// The page the PLC application shows, chosen by the VIEW menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3377,11 +3481,19 @@ fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
     if plc.page != PlcPage::PouList || plc.text_editing || plc.keys_blocked {
         return;
     }
+    if plc.open_list.is_some() {
+        open_list_keys(plc, ui);
+        return;
+    }
     let pous = plc.project.all_pous();
     if pous.is_empty() {
+        if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::O)) {
+            plc.open_picker();
+        }
         return;
     }
     let mut selected = plc.pou.min(pous.len() - 1);
+    let mut picker = false;
     let mut redraw = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
@@ -3409,6 +3521,9 @@ fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::N) {
             actions.push(Action::AddPou(PouLanguage::Ld));
             redraw = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::O) {
+            picker = true;
         }
         // The instruction list is a first-class body language: L switches an
         // empty POU between LD and IL, so a jump program can be typed without
@@ -3466,6 +3581,122 @@ fn pou_list_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) {
         plc.pou = selected;
         plc.scroll_to_pou = true;
     }
+    if picker {
+        plc.open_picker();
+    }
+}
+
+/// The open dialog owns the arrows, Enter and Escape while it is up, so the
+/// program list behind it does not move under the cursor.
+fn open_list_keys(plc: &mut PlcUi, ui: &Ui) {
+    let Some(mut list) = plc.open_list.take() else {
+        return;
+    };
+    let mut open = false;
+    let mut close = false;
+    ui.input_mut(|input| {
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            list.cursor = list.cursor.saturating_sub(1);
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+            && !list.entries.is_empty()
+        {
+            list.cursor = (list.cursor + 1).min(list.entries.len() - 1);
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+            open = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+            close = true;
+        }
+    });
+    plc.open_list = Some(list);
+    if open {
+        plc.pick_open_list();
+    } else if close {
+        plc.open_list = None;
+    }
+}
+
+/// The open dialog, drawn over the program list. It reads no file itself: the
+/// listing came from disk when the dialog opened and the row is opened by the
+/// same `open` the status card uses.
+fn open_list_window(plc: &mut PlcUi, ui: &mut Ui) {
+    let Some(list) = plc.open_list.clone() else {
+        return;
+    };
+    let mut pick = false;
+    let mut cancel = false;
+    let mut click = None;
+    egui::Window::new("OPEN PROJECT")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ui.ctx(), |ui| {
+            ui.set_min_width(420.0);
+            ui.label(
+                RichText::new(&list.dir)
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            if let Some(error) = &list.error {
+                ui.label(
+                    RichText::new(error)
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::WARNING),
+                );
+            }
+            ui.add_space(4.0);
+            if list.entries.is_empty() {
+                ui.label(
+                    RichText::new("NO *.json IN THIS DIRECTORY")
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+            }
+            egui::ScrollArea::vertical()
+                .max_height(320.0)
+                .show(ui, |ui| {
+                    for (index, name) in list.entries.iter().enumerate() {
+                        let row = ui.selectable_label(
+                            index == list.cursor,
+                            RichText::new(name).monospace().size(theme::font_size(10.0)),
+                        );
+                        if row.clicked() {
+                            click = Some(index);
+                        }
+                    }
+                });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("OPEN").clicked() {
+                    pick = true;
+                }
+                if ui.button("CANCEL").clicked() {
+                    cancel = true;
+                }
+            });
+            ui.label(
+                RichText::new("UP/DOWN MOVE · ENTER OPENS · ESC CLOSES")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+        });
+    if let Some(index) = click {
+        if let Some(list) = plc.open_list.as_mut() {
+            list.cursor = index;
+        }
+        pick = true;
+    }
+    if pick {
+        plc.pick_open_list();
+    } else if cancel {
+        plc.open_list = None;
+    }
 }
 
 /// Rows moved by one Page key, as in the tool table.
@@ -3476,6 +3707,7 @@ const POU_PAGE: isize = 8;
 /// footer that names the keys. The selection is the open POU.
 fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>) {
     pou_list_keys(plc, ui, actions);
+    open_list_window(plc, ui);
     let pous = plc.project.all_pous();
     let selected = plc.pou.min(pous.len().saturating_sub(1));
     let mut open: Option<usize> = None;
@@ -3492,7 +3724,7 @@ fn pou_list_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Ac
             });
         });
         ui.label(
-            RichText::new("N NEW · L LANGUAGE · ENTER OPENS")
+            RichText::new("O OPEN FILE · N NEW · L LANGUAGE · ENTER OPENS")
                 .monospace()
                 .size(theme::font_size(9.0))
                 .color(theme::MUTED),
@@ -8908,6 +9140,53 @@ mod pou_list_n_tests {
         });
         output.textures_delta.clear();
         actions
+    }
+
+    /// The open dialog is a listing of a directory read at run time, not a list
+    /// of paths compiled in: a project written after the build opens from it,
+    /// and Escape closes the dialog without touching the project.
+    #[test]
+    fn the_open_dialog_lists_disk_and_opens_the_row_under_the_cursor() {
+        let dir = std::env::temp_dir().join(format!(
+            "linc-open-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let mut on_disk = Project::example();
+        let mut pous = on_disk.all_pous();
+        pous[0].name = "FROM_DISK".to_string();
+        on_disk.set_pous(pous);
+        let text = project_to_json(&on_disk).expect("serialise");
+        std::fs::write(dir.join("a-from-disk.json"), text).expect("write");
+
+        let mut plc = PlcUi::default();
+        plc.path_text = dir.join("a-from-disk.json").display().to_string();
+        plc.page = PlcPage::PouList;
+        plc.project = Project::example();
+
+        press(&mut plc, egui::Key::O);
+        let list = plc.open_list.as_ref().expect("dialog open");
+        assert_eq!(
+            list.entries,
+            vec!["a-from-disk.json".to_string()],
+            "only the JSON in the path's directory is listed"
+        );
+        assert_eq!(list.cursor, 0, "the cursor starts on the file named");
+        // Escape closes the dialog and changes nothing.
+        press(&mut plc, egui::Key::Escape);
+        assert!(plc.open_list.is_none());
+        assert_ne!(plc.project.all_pous()[0].name, "FROM_DISK");
+
+        press(&mut plc, egui::Key::O);
+        press(&mut plc, egui::Key::Enter);
+        assert!(plc.open_list.is_none(), "the dialog closes on success");
+        assert!(plc.last_error.is_none(), "{:?}", plc.last_error);
+        assert_eq!(plc.project.all_pous()[0].name, "FROM_DISK");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     fn plc_with_two_pous() -> PlcUi {
