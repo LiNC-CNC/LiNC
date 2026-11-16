@@ -77,7 +77,7 @@ use sync::*;
 #[allow(unused_imports)]
 use view::*;
 
-pub use commands::move_progress;
+pub use commands::MoveProgress;
 pub use gates::{probe_trip_banner_text, PROBE_TRIP_ACTION};
 pub use keyboard::FocusRegion;
 pub use nav::{mode_page, nav_row_geometry, page_from_name, NavRowGeometry, NAV_ITEMS};
@@ -325,7 +325,6 @@ impl LincApp {
                 origin: [0.0; 3],
                 trail_cleared: false,
                 trail_cleared_tip: None,
-                move_distance: linc_core::model::AxisMap::new(),
                 move_progress: linc_core::model::AxisMap::new(),
                 preview_ticks: 0,
             },

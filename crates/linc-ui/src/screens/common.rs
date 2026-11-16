@@ -581,9 +581,14 @@ fn paint_axis_card(app: &LincApp, ui: &Ui, axis: &str, rect: egui::Rect, compact
         .map(|name| name == axis)
         .unwrap_or(false);
     // Progress of the move in flight, not the position within the travel range:
-    // the bar starts empty when the axis sets off, fills as the distance to go
-    // shrinks, and sits full once it arrives (see `LincApp::move_progress`).
-    let fraction = app.view.move_progress.get(axis).copied().unwrap_or(1.0);
+    // the bar starts empty when the block sets off, fills as the distance to go
+    // shrinks, and sits full once it arrives (see `MoveProgress`).
+    let fraction = app
+        .view
+        .move_progress
+        .get(axis)
+        .map(|progress| progress.fraction())
+        .unwrap_or(1.0);
     paint_dro_frame(ui, rect, active);
     paint_dro_readout(
         ui,

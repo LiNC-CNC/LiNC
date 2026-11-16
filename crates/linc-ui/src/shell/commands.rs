@@ -3,27 +3,59 @@
 
 use super::*;
 
-/// Fraction of the current move already travelled, from the remaining distance.
+/// How far through its move an axis is, from the controller's distance to go.
 ///
-/// `remaining` is the magnitude of the DTG — the sign only says which way the
-/// move goes — and `total` is the largest remainder seen since the axis last
-/// stopped, i.e. the length of the move. The bar starts empty, fills as the
-/// remainder shrinks, and sits full once the axis arrives. A move that turns out
-/// to be longer than the one recorded resets the total, so the bar can never go
-/// past empty.
-///
-/// Returns `(fraction, total)`, where `total` is what the caller should keep for
-/// the next observation.
-pub fn move_progress(remaining: f64, total: f64) -> (f64, f64) {
+/// The status carries only the remainder — the distance still to go, signed by
+/// the direction of travel — so the length of the move is learned from the
+/// largest remainder seen for it. That length belongs to one move only. A
+/// program runs block after block, and a shorter block measured against the
+/// previous, longer one started its bar part filled, from a scale that no longer
+/// meant anything (measured on LinuxCNC with a G64 program: 100 % down to 51 %,
+/// 25 %, 0 % at block starts). A remainder that grows beyond the blend overshoot
+/// is therefore a new move, and the bar starts from empty again.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MoveProgress {
+    /// Length of the move in flight: the largest remainder seen for it.
+    length: f64,
+    /// The remainder at the last observation, sign discarded.
+    remaining: f64,
+}
+
+impl MoveProgress {
+    /// Below this the axis has arrived and the move is over.
     const AT_REST: f64 = 1e-6;
-    let remaining = remaining.abs();
-    if remaining <= AT_REST {
-        // Nothing left to travel: the move is complete and the next one starts
-        // from a fresh total.
-        return (1.0, 0.0);
+    /// Growth of the remainder that is more than a blend overshoot. The planner
+    /// can carry a little past a block's endpoint before the next block is
+    /// reported, and that is still the same move.
+    const NEW_MOVE: f64 = 1e-3;
+
+    /// Feed one observation of the controller's distance to go, either sign, and
+    /// return the fraction of the move already travelled.
+    pub fn observe(&mut self, dtg: f64) -> f64 {
+        let remaining = dtg.abs();
+        if remaining <= Self::AT_REST {
+            // Nothing left to travel: the move is complete, and the next one
+            // brings its own length.
+            *self = Self::default();
+            return 1.0;
+        }
+        if remaining > self.remaining + Self::NEW_MOVE {
+            self.length = remaining;
+        }
+        self.length = self.length.max(remaining);
+        self.remaining = remaining;
+        (1.0 - remaining / self.length).clamp(0.0, 1.0)
     }
-    let total = total.max(remaining);
-    ((1.0 - remaining / total).clamp(0.0, 1.0), total)
+
+    /// Fraction of the move already travelled, as last observed.
+    pub fn fraction(&self) -> f64 {
+        if self.length <= 0.0 {
+            // Standing still: the bar sits full.
+            1.0
+        } else {
+            (1.0 - self.remaining / self.length).clamp(0.0, 1.0)
+        }
+    }
 }
 
 impl LincApp {
@@ -78,17 +110,21 @@ impl LincApp {
         accepted
     }
 
-    /// Turn each axis's remaining distance into a fraction of its current move.
+    /// Feed each axis's remaining distance to its move bar.
     pub(super) fn update_move_progress(&mut self) {
         let mut updates = Vec::new();
         for (axis, position) in self.snapshot.positions.axes.iter() {
-            let total = self.view.move_distance.get(axis).copied().unwrap_or(0.0);
-            let (fraction, total) = move_progress(position.dtg, total);
-            updates.push((axis.to_string(), total, fraction));
+            updates.push((axis.to_string(), position.dtg));
         }
-        for (axis, total, fraction) in updates {
-            self.view.move_distance.insert(axis.clone(), total);
-            self.view.move_progress.insert(axis, fraction);
+        for (axis, dtg) in updates {
+            if self.view.move_progress.get(axis.as_str()).is_none() {
+                self.view
+                    .move_progress
+                    .insert(axis.clone(), MoveProgress::default());
+            }
+            if let Some(progress) = self.view.move_progress.get_mut(axis.as_str()) {
+                progress.observe(dtg);
+            }
         }
     }
 
@@ -299,42 +335,82 @@ mod move_progress_tests {
 
     #[test]
     pub(super) fn a_move_fills_the_bar_from_empty_to_full() {
-        let (fraction, total) = move_progress(-100.0, 0.0);
-        assert_eq!(fraction, 0.0);
-        assert_eq!(total, 100.0);
-
-        let (fraction, total) = move_progress(-50.0, total);
-        assert!((fraction - 0.5).abs() < 1e-9, "{fraction}");
-
-        let (fraction, total) = move_progress(-0.0, total);
-        assert_eq!(fraction, 1.0);
-        assert_eq!(total, 0.0);
+        let mut progress = MoveProgress::default();
+        assert_eq!(progress.observe(-100.0), 0.0);
+        assert!((progress.observe(-50.0) - 0.5).abs() < 1e-9);
+        assert_eq!(progress.observe(-0.0), 1.0);
     }
 
     #[test]
     pub(super) fn the_sign_of_the_remaining_distance_is_ignored() {
-        let (plus, _) = move_progress(100.0, 0.0);
-        let (minus, _) = move_progress(-100.0, 0.0);
-        assert_eq!(plus, 0.0);
-        assert_eq!(minus, 0.0);
+        let mut plus = MoveProgress::default();
+        let mut minus = MoveProgress::default();
+        for step in [100.0, 40.0, 5.0] {
+            assert_eq!(plus.observe(step), minus.observe(-step));
+        }
+    }
 
-        let (plus, _) = move_progress(40.0, 100.0);
-        let (minus, _) = move_progress(-40.0, 100.0);
-        assert!((plus - 0.6).abs() < 1e-9, "{plus}");
-        assert_eq!(plus, minus);
+    /// A program runs block after block. The length of one block must not become
+    /// the scale of the next: a shorter block then started part filled, and the
+    /// bar read as full and draining (measured: 100 % -> 51 %, 25 %, 0 %).
+    #[test]
+    pub(super) fn a_shorter_block_starts_empty_instead_of_part_filled() {
+        let mut progress = MoveProgress::default();
+        assert_eq!(progress.observe(-200.0), 0.0);
+        assert_eq!(progress.observe(-0.0), 1.0);
+        // The next block is a tenth of the last one and goes the other way.
+        assert_eq!(progress.observe(20.0), 0.0);
+        assert!((progress.observe(10.0) - 0.5).abs() < 1e-9);
     }
 
     #[test]
-    pub(super) fn a_longer_move_resets_the_total_instead_of_going_negative() {
-        let (fraction, total) = move_progress(-200.0, 50.0);
-        assert_eq!(fraction, 0.0);
-        assert_eq!(total, 200.0);
+    pub(super) fn a_longer_block_starts_empty_as_well() {
+        let mut progress = MoveProgress::default();
+        assert_eq!(progress.observe(50.0), 0.0);
+        assert_eq!(progress.observe(-200.0), 0.0);
+        assert!((progress.observe(-100.0) - 0.5).abs() < 1e-9);
+    }
+
+    /// The planner can carry a few microns past a block's endpoint before the
+    /// next block is reported; that is the same move, not a fresh one.
+    #[test]
+    pub(super) fn a_blend_overshoot_keeps_the_move() {
+        let mut progress = MoveProgress::default();
+        assert_eq!(progress.observe(-20.0), 0.0);
+        let late = progress.observe(-0.0004);
+        assert!(late > 0.99, "{late}");
+        let overshoot = progress.observe(0.0005);
+        assert!(overshoot > 0.99, "still the same move: {overshoot}");
+    }
+
+    /// The measured shape of a running program: blocks of different lengths and
+    /// directions, each remainder shrinking to nothing (blended, so the planner
+    /// carries a few microns past the endpoint). The bar sweeps once per block
+    /// and never runs backwards.
+    #[test]
+    pub(super) fn a_program_sweeps_once_per_block_and_never_backwards() {
+        let mut progress = MoveProgress::default();
+        for length in [-20.0_f64, 10.0, -30.0, 15.0] {
+            assert_eq!(progress.observe(length), 0.0, "block {length} starts empty");
+            let mut last = 0.0;
+            for step in 1..=20 {
+                let remaining = length * (1.0 - step as f64 / 20.0);
+                let fraction = progress.observe(remaining);
+                assert!(
+                    fraction >= last - 1e-9,
+                    "block {length}: {fraction} after {last}"
+                );
+                last = fraction;
+            }
+            assert_eq!(progress.observe(0.0), 1.0, "block {length} arrives full");
+        }
     }
 
     #[test]
     pub(super) fn an_idle_axis_shows_a_full_bar() {
-        let (fraction, total) = move_progress(0.0, 0.0);
-        assert_eq!(fraction, 1.0);
-        assert_eq!(total, 0.0);
+        assert_eq!(MoveProgress::default().fraction(), 1.0);
+        let mut progress = MoveProgress::default();
+        assert_eq!(progress.observe(0.0), 1.0);
+        assert_eq!(progress.fraction(), 1.0);
     }
 }
