@@ -6730,12 +6730,20 @@ fn ladder_body(
                     // One model: every rung is cells. `normalise` lays a tree
                     // out on the way in, and a rung that still has none is
                     // shown as an empty row rather than in a second editor.
+                    // The row below is passed in: a link joins it into the
+                    // parallel, both for the preview and for the junction's
+                    // length, which ends on that row's conductor.
+                    let below = section
+                        .rungs
+                        .get(rung_index + 1)
+                        .filter(|row| !row.is_comment_row());
                     let rect = crate::screens::plc_grid::grid_rung(
                         plc,
                         ui,
                         section_index,
                         rung_index,
                         rung,
+                        below,
                         actions,
                         &mut cursor_rect,
                     );

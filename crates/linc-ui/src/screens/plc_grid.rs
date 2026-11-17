@@ -1790,6 +1790,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     symbol_rect,
                     &item.face,
                     Style::new(ink, theme::C4, State::Off),
+                    CELL_HEIGHT,
                 );
                 ui.painter().text(
                     egui::pos2(rect.left() + 44.0, rect.center().y),
@@ -3208,7 +3209,11 @@ fn compute_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
 /// One scan of a rung for the preview: the power flow a held input produces, so
 /// contacts and the coil light together. Blocks are opaque; they pass the power
 /// they were given because their logic is not evaluated here.
-fn preview_scan(plc: &PlcUi, cells: &[Cell]) -> (Vec<Option<bool>>, Option<bool>) {
+fn preview_scan(
+    plc: &PlcUi,
+    cells: &[Cell],
+    below: Option<&[Cell]>,
+) -> (Vec<Option<bool>>, Option<bool>) {
     let mut local = vec![None; POSITIONS];
     let mut power = true;
     for (position, cell) in cells.iter().enumerate() {
@@ -3251,7 +3256,29 @@ fn preview_scan(plc: &PlcUi, cells: &[Cell]) -> (Vec<Option<bool>>, Option<bool>
             *slot = value;
         }
     }
-    (local, Some(power))
+    // A link joins the row below into the parallel, so the rung's output is
+    // (before the link OR the branch) AND everything after the link. Without
+    // this the preview said a linked rung was false whenever its own row was.
+    let mut output = power;
+    if let Some(link) = cells.iter().position(|cell| matches!(cell, Cell::Link)) {
+        if let Some(branch) = below {
+            let before = series_power(plc, &cells[..link]);
+            let after = series_power(plc, &cells[link + 1..]);
+            output = (before || series_power(plc, branch)) && after;
+        }
+    }
+    (local, Some(output))
+}
+
+/// One row's series power, for the link join. Links inside the segment read as
+/// closed (they are the join points, not conditions).
+fn series_power(plc: &PlcUi, cells: &[Cell]) -> bool {
+    cells.iter().all(|cell| match cell {
+        Cell::Contact { .. } | Cell::Edge { .. } | Cell::Compare { .. } => {
+            cell_active(plc, cell).unwrap_or(false)
+        }
+        _ => true,
+    })
 }
 
 /// One grid rung: nine element positions, the rail, and the coil.
@@ -3261,6 +3288,7 @@ pub fn grid_rung(
     section: usize,
     rung_index: usize,
     rung: &Rung,
+    below: Option<&Rung>,
     actions: &mut Vec<Action>,
     cursor_rect: &mut Option<egui::Rect>,
 ) -> egui::Rect {
@@ -3277,7 +3305,12 @@ pub fn grid_rung(
     // logic follows the held input: only the toggled contact turning green said
     // nothing about what the rung would do.
     let previewing = !plc.preview.is_empty();
-    let local = previewing.then(|| preview_scan(plc, &cells));
+    let branch = below.map(|row| row.cells.as_slice());
+    let local = previewing.then(|| preview_scan(plc, &cells, branch));
+    // A link drops to the next row's conductor, which is `CONDUCTOR_Y` above that
+    // row's bottom edge; a row that grew for a block body or a comment band moves
+    // its conductor down with it, so the drop follows the row it joins.
+    let below_height = below.map(|row| strip_height_of(row)).unwrap_or(CELL_HEIGHT);
     // The comment sits on a line of its own above the operand names, so the rung
     // grows by one band and the names move down into the next one.
     let label = rung.label.trim();
@@ -3374,6 +3407,7 @@ pub fn grid_rung(
                 &label,
                 &face,
                 name_y,
+                below_height,
                 Vec2::new(if wide { SPAN } else { CELL_WIDTH }, strip_height),
                 live,
             );
@@ -3400,6 +3434,7 @@ pub fn grid_rung(
                 Face::from_cell(&Cell::Wire)
             },
             name_y,
+            below_height,
             Vec2::new(CELL_WIDTH, strip_height),
             // A compute rung writes through its cell, so its coil slot is unused
             // and must not light up from a variable of the same name.
@@ -3822,7 +3857,12 @@ pub(crate) fn draw_wire(painter: &egui::Painter, rect: egui::Rect, style: Style)
     );
 }
 
-pub(crate) fn draw_link(painter: &egui::Painter, rect: egui::Rect, style: Style) {
+pub(crate) fn draw_link(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    style: Style,
+    below_height: f32,
+) {
     let s = rect.height() / CELL_HEIGHT;
     let y = conductor_y(rect);
     let cx = rect.center().x;
@@ -3830,24 +3870,52 @@ pub(crate) fn draw_link(painter: &egui::Painter, rect: egui::Rect, style: Style)
         [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
         style.lead(s),
     );
-    // The junction reaches the next row's conductor exactly, because every row's
-    // conductor sits `CONDUCTOR_Y` above its own bottom edge and a plain row is
-    // `CELL_HEIGHT` tall. A row that grows for a label or a comment keeps that
-    // offset from its own bottom, so a link drawn *above* such a row stops one
-    // band short; a block row already behaves that way. Threading the next row's
-    // band through here is the fix if it ever shows on a real branch.
+    // The junction reaches the next row's conductor: `CONDUCTOR_Y` above that
+    // row's bottom edge, whatever its height. A constant half-cell drop stopped
+    // short of every row that grew for a block body or a comment band, which left
+    // the branch visibly unjoined.
     painter.line_segment(
         [
             egui::pos2(cx, y),
-            egui::pos2(cx, rect.bottom() + CELL_HEIGHT / 2.0),
+            egui::pos2(cx, rect.bottom() + link_drop(below_height)),
         ],
         style.lead(s),
     );
 }
 
+/// How far a link's junction reaches below its own row: to the conductor of the
+/// row underneath, which sits `CONDUCTOR_Y` above that row's bottom edge.
+fn link_drop(below_height: f32) -> f32 {
+    (below_height - CONDUCTOR_Y).max(0.0)
+}
+
+/// The height a row's strip takes, from the rung alone: block bodies grow it, and
+/// a label or a comment adds the band the comment sits in.
+fn strip_height_of(rung: &Rung) -> f32 {
+    let rows = rung
+        .cells
+        .iter()
+        .filter_map(|cell| match cell {
+            Cell::Block { block, .. } => {
+                linc_plc_core::profile::spec::spec(block).map(|spec| spec.pins.0.len().max(1))
+            }
+            _ => None,
+        })
+        .max()
+        .unwrap_or(1);
+    let banded = !rung.comment.is_empty() || !rung.label.trim().is_empty();
+    row_height(rows) + if banded { COMMENT_BAND } else { 0.0 }
+}
+
 /// Draw one symbol. Rung furniture and the symbol are here; the operand label is
 /// `grid_cell_label`'s, and `glyph` is symbol furniture only.
-pub(crate) fn draw_face(painter: &egui::Painter, rect: egui::Rect, face: &Face<'_>, style: Style) {
+pub(crate) fn draw_face(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    face: &Face<'_>,
+    style: Style,
+    below_height: f32,
+) {
     let s = rect.height() / CELL_HEIGHT;
     let y = conductor_y(rect);
     let cx = rect.center().x;
@@ -3857,7 +3925,7 @@ pub(crate) fn draw_face(painter: &egui::Painter, rect: egui::Rect, face: &Face<'
     match face.shape {
         // A bare conductor and its branch draw no symbol: the span is one line.
         Shape::Wire => draw_wire(painter, rect, style),
-        Shape::Link => draw_link(painter, rect, style),
+        Shape::Link => draw_link(painter, rect, style, below_height),
         Shape::Contact | Shape::ContactNc => {
             let bar = BAR_HALF * s;
             painter.line_segment([egui::pos2(left, y), egui::pos2(cx - bar, y)], lead);
@@ -4103,6 +4171,7 @@ fn cell_box(
     label: &str,
     face: &Face<'_>,
     name_y: f32,
+    below_height: f32,
     size: Vec2,
     live: Option<bool>,
 ) -> egui::Rect {
@@ -4150,7 +4219,7 @@ fn cell_box(
         egui::pos2(rect.left(), rect.bottom() - CELL_HEIGHT),
         egui::vec2(rect.width(), CELL_HEIGHT),
     );
-    draw_face(painter, symbol_rect, face, style);
+    draw_face(painter, symbol_rect, face, style, below_height);
     if !label.is_empty() {
         // Fit the operand inside the cell: expressions such as `MW2:=MW1+5` and
         // long coil names were clipped at the strip edges. The font shrinks to fit
@@ -4407,9 +4476,9 @@ mod rung_pitch_tests {
             crate::screens::plc::zero_rung_spacing(ui);
             let before = ui.cursor().top();
             let mut cursor_rect = None;
-            grid_rung(&plc, ui, 0, 0, &rung, &mut actions, &mut cursor_rect);
+            grid_rung(&plc, ui, 0, 0, &rung, None, &mut actions, &mut cursor_rect);
             let step = ui.cursor().top() - before;
-            grid_rung(&plc, ui, 0, 1, &rung, &mut actions, &mut cursor_rect);
+            grid_rung(&plc, ui, 0, 1, &rung, None, &mut actions, &mut cursor_rect);
             let two = ui.cursor().top() - before;
             (step, two - step)
         });
@@ -4821,13 +4890,13 @@ mod compare_window_tests {
             Cell::Wire,
         ];
         plc.preview = vec![("start".into(), true)];
-        let (local, coil) = preview_scan(&plc, &cells);
+        let (local, coil) = preview_scan(&plc, &cells, None);
         assert_eq!(local[0], Some(true));
         assert_eq!(local[1], Some(true));
         assert_eq!(coil, Some(true), "the coil follows the held contact");
 
         plc.preview = vec![("start".into(), false)];
-        let (local, coil) = preview_scan(&plc, &cells);
+        let (local, coil) = preview_scan(&plc, &cells, None);
         assert_eq!(local[0], Some(false));
         assert_eq!(coil, Some(false));
     }
@@ -5294,7 +5363,7 @@ mod golden_tests {
         let output = ctx.run_ui(input, |ui| {
             let mut actions = Vec::new();
             let mut cursor = None;
-            grid_rung(&plc, ui, 0, 0, &rung, &mut actions, &mut cursor);
+            grid_rung(&plc, ui, 0, 0, &rung, None, &mut actions, &mut cursor);
         });
         let mut output = output;
         output.textures_delta.clear();
@@ -5637,8 +5706,8 @@ mod preview_colour_tests {
                 negated: false,
             },
         ];
-        let local = Some(preview_scan(&plc, &cells));
-        let scan = preview_scan(&plc, &cells);
+        let local = Some(preview_scan(&plc, &cells, None));
+        let scan = preview_scan(&plc, &cells, None);
         assert_eq!(
             scan.0[0],
             Some(true),
@@ -5666,9 +5735,103 @@ mod preview_colour_tests {
     #[test]
     fn a_wire_without_a_preview_stays_unknown() {
         let plc = plc_with(&[("a", true)]);
-        let empty = preview_scan(&plc, &[]);
+        let empty = preview_scan(&plc, &[], None);
         assert_eq!(empty.1, Some(true));
         let wire = Cell::Wire;
         assert_eq!(live_at(&plc, &None, 0, &wire), None);
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    fn contact(var: &str, negated: bool) -> Cell {
+        Cell::Contact {
+            var: var.to_string(),
+            negated,
+        }
+    }
+
+    fn plc_with(vars: &[(&str, bool)]) -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.vars = vars
+            .iter()
+            .map(|(name, value)| linc_plc_core::VarValue {
+                name: (*name).to_string(),
+                value: *value,
+                kind: linc_plc_core::SymbolKind::Input,
+                forced: false,
+            })
+            .collect();
+        plc
+    }
+
+    /// The compiler joins a linked row into the parallel
+    /// (`compile_vm::a_linked_branch_parallels_one_cell_and_not_the_estop`); the
+    /// preview must do the same, or Space on a branch row says nothing about the
+    /// rung the branch belongs to.
+    #[test]
+    fn a_link_joins_the_branch_into_the_preview() {
+        let row = vec![contact("pump", false), Cell::Link, contact("estop", true)];
+        let branch = vec![contact("run", false)];
+
+        let sealed = plc_with(&[("pump", false), ("run", true), ("estop", false)]);
+        assert_eq!(
+            preview_scan(&sealed, &row, Some(&branch)).1,
+            Some(true),
+            "the branch holds the rung on with pump false"
+        );
+
+        let idle = plc_with(&[("pump", false), ("run", false), ("estop", false)]);
+        assert_eq!(
+            preview_scan(&idle, &row, Some(&branch)).1,
+            Some(false),
+            "with neither path made the rung is false"
+        );
+
+        // The cells after the link stay in series with the whole parallel.
+        let stopped = plc_with(&[("pump", false), ("run", true), ("estop", true)]);
+        assert_eq!(
+            preview_scan(&stopped, &row, Some(&branch)).1,
+            Some(false),
+            "the estop breaks the branch"
+        );
+
+        // Without the row below in hand there is nothing to join, and the row's
+        // own series is all the preview can claim.
+        assert_eq!(preview_scan(&sealed, &row, None).1, Some(false));
+    }
+
+    /// The junction ends on the next row's conductor, not a half cell down: a row
+    /// that grew for a comment band carries its conductor down with it.
+    #[test]
+    fn a_link_drops_to_the_next_rows_conductor() {
+        assert_eq!(link_drop(CELL_HEIGHT), CELL_HEIGHT - CONDUCTOR_Y);
+        assert_eq!(
+            link_drop(CELL_HEIGHT + COMMENT_BAND),
+            CELL_HEIGHT + COMMENT_BAND - CONDUCTOR_Y,
+            "a banded row's conductor sits one band lower"
+        );
+        assert_eq!(
+            link_drop(65.0),
+            40.0,
+            "a three-row block body is 65 tall, so its conductor is 40 below the row edge"
+        );
+        assert_eq!(link_drop(0.0), 0.0, "never negative");
+    }
+
+    /// The height `grid_rung` hands the row above: a banded row is one band
+    /// taller, so a link above it must reach further.
+    #[test]
+    fn a_banded_row_reports_its_full_height() {
+        let mut rung = Rung::new(
+            linc_plc_core::model::Logic::Const { value: true },
+            Coil::new("run", CoilKind::Normal),
+        );
+        rung.cells = vec![Cell::Wire; linc_plc_core::grid::POSITIONS];
+        assert_eq!(strip_height_of(&rung), CELL_HEIGHT);
+        rung.comment = "// branch of seal".to_string();
+        assert_eq!(strip_height_of(&rung), CELL_HEIGHT + COMMENT_BAND);
     }
 }
