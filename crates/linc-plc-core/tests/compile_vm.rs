@@ -3500,3 +3500,189 @@ fn an_expression_with_too_many_operations_is_refused() {
         "{diagnostics:?}"
     );
 }
+
+/// The snapshot is what the editor colours a block from, so its member names are
+/// the interface: `TON0.Q` and `TON0.TT`, `CTU0.CV`, the power pin, and a
+/// counter's `R`. A block in the later banks keeps its own spelling — the name
+/// used to fall through to `CTD` past the counters, which published eight
+/// identical `CTD0.CV` rows.
+#[test]
+fn the_snapshot_publishes_member_bits_under_their_own_names() {
+    fn block(block: &str, instance: &str, preset: &str) -> Vec<linc_plc_core::Cell> {
+        vec![
+            linc_plc_core::Cell::Block {
+                block: block.into(),
+                instance: instance.into(),
+                preset: preset.into(),
+            },
+            linc_plc_core::Cell::Wire,
+        ]
+    }
+    let mut project = simple_project(
+        Logic::Const { value: true },
+        Coil::new("y", CoilKind::Normal),
+    );
+    project.sections[0].rungs = vec![
+        Rung {
+            cells: block("TON", "TON0", "T#2s"),
+            coil: None,
+            ..Rung::new(
+                Logic::Const { value: true },
+                Coil::new("", CoilKind::Normal),
+            )
+        },
+        Rung {
+            cells: block("CTU", "CTU0", "5"),
+            coil: None,
+            ..Rung::new(
+                Logic::Const { value: true },
+                Coil::new("", CoilKind::Normal),
+            )
+        },
+        Rung {
+            cells: block("R_TRIG", "RT0", ""),
+            coil: None,
+            ..Rung::new(
+                Logic::Const { value: true },
+                Coil::new("", CoilKind::Normal),
+            )
+        },
+        // The reset rung: a member coil writes the counter's `R`.
+        Rung {
+            cells: vec![linc_plc_core::Cell::Contact {
+                var: "b".into(),
+                negated: false,
+            }],
+            coil: Some(Coil::new("CTU0.R", CoilKind::Reset)),
+            ..Rung::new(
+                Logic::Const { value: true },
+                Coil::new("", CoilKind::Normal),
+            )
+        },
+    ];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    vm.scan(&[true, false]);
+
+    let bits: Vec<(String, bool)> = vm
+        .snapshot()
+        .into_iter()
+        .map(|var| (var.name, var.value))
+        .collect();
+    let get = |name: &str| {
+        bits.iter()
+            .find(|(bit, _)| bit == name)
+            .map(|(_, value)| *value)
+            .unwrap_or_else(|| panic!("{name} is not published: {bits:?}"))
+    };
+    // A timer one scan in: enabled, not done, so `TT` is on and `ET` is 0.
+    assert!(get("TON0.Q") == false);
+    assert!(get("TON0.TT"), "the timing bit is published");
+    assert!(get("TON0.IN"), "the power pin is published");
+    // A counter one pulse in: `CU` was true, `CV` is 1, the reset is not asserted.
+    assert!(get("CTU0.CU"));
+    assert!(!get("CTU0.R"), "an idle reset pin reads off, not unknown");
+    // The edge block keeps its own spelling instead of falling into the counters.
+    assert!(get("RT0.Q"));
+    assert!(
+        !bits.iter().any(|(name, _)| name.starts_with("CTD")),
+        "no block is published under another family's name: {bits:?}"
+    );
+    // One row per member: duplicates would make `word_value` answer by position.
+    let mut names = bits
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    names.sort();
+    let before = names.len();
+    names.dedup();
+    assert_eq!(names.len(), before, "member names are unique: {bits:?}");
+}
+
+/// The word members: a timer publishes `ET`, a counter `CV`, and nothing else
+/// does — one row each, no duplicates.
+#[test]
+fn the_word_snapshot_publishes_one_value_member_per_block() {
+    let mut project = simple_project(
+        Logic::Const { value: true },
+        Coil::new("y", CoilKind::Normal),
+    );
+    let block = |block: &str, instance: &str| {
+        vec![
+            linc_plc_core::Cell::Block {
+                block: block.into(),
+                instance: instance.into(),
+                preset: "".into(),
+            },
+            linc_plc_core::Cell::Wire,
+        ]
+    };
+    project.sections[0].rungs = vec![
+        Rung {
+            cells: block("TON", "TON0"),
+            coil: None,
+            ..Rung::new(
+                Logic::Const { value: true },
+                Coil::new("", CoilKind::Normal),
+            )
+        },
+        Rung {
+            cells: block("CTU", "CTU0"),
+            coil: None,
+            ..Rung::new(
+                Logic::Const { value: true },
+                Coil::new("", CoilKind::Normal),
+            )
+        },
+        Rung {
+            cells: block("R_TRIG", "RT0"),
+            coil: None,
+            ..Rung::new(
+                Logic::Const { value: true },
+                Coil::new("", CoilKind::Normal),
+            )
+        },
+    ];
+    let mut vm = Vm::new(&compile(&project).expect("compile"));
+    // The bank is fixed-size; a block enters the snapshot by running.
+    vm.scan(&[true, false]);
+    let names = vm
+        .word_snapshot()
+        .into_iter()
+        .map(|word| word.name)
+        .collect::<Vec<_>>();
+    assert!(names.iter().any(|name| name == "TON0.ET"), "{names:?}");
+    assert!(names.iter().any(|name| name == "CTU0.CV"), "{names:?}");
+    assert!(
+        !names.iter().any(|name| name.contains(".Q")),
+        "a bit is not a word: {names:?}"
+    );
+    let mut sorted = names.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(
+        sorted.len(),
+        names.len(),
+        "no duplicate word rows: {names:?}"
+    );
+}
+
+/// The bank order is the interface between the compiler and the snapshot, so it
+/// is pinned: `kind * FB_PER_TYPE + n`.
+#[test]
+fn every_block_bank_names_itself() {
+    use linc_plc_core::compile::{FbKind, FB_PER_TYPE};
+    let kinds = FbKind::ALL;
+    assert_eq!(kinds.len(), 9, "one bank per kind in the table");
+    for (bank, kind) in kinds.iter().enumerate() {
+        for number in 0..usize::from(FB_PER_TYPE) {
+            let index = bank * usize::from(FB_PER_TYPE) + number;
+            assert_eq!(FbKind::of_index(index), Some(*kind), "index {index}");
+            assert!(!kind.mnemonic().is_empty(), "{kind:?} has a spelling");
+        }
+    }
+    assert_eq!(
+        FbKind::of_index(usize::from(FB_PER_TYPE) * 9),
+        None,
+        "past the last bank there is no kind"
+    );
+}

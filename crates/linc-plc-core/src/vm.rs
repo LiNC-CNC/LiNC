@@ -549,8 +549,12 @@ impl Vm {
                 }
                 Op::FbReset(instance) => {
                     let power = pop(&stack, &mut depth);
-                    if power {
-                        if let Some(state) = self.blocks.get_mut(instance as usize) {
+                    if let Some(state) = self.blocks.get_mut(instance as usize) {
+                        // The pin is published whether or not it fires: a reset
+                        // that is not asserted is an off pin, not an unknown one.
+                        state.used = true;
+                        state.reset = power;
+                        if power {
                             state.value = 0;
                         }
                     }
@@ -560,6 +564,7 @@ impl Vm {
                     if power {
                         let preset = self.preset_value(preset).max(0);
                         if let Some(state) = self.blocks.get_mut(instance as usize) {
+                            state.used = true;
                             state.value = preset;
                             state.preset = preset;
                         }
@@ -1050,21 +1055,19 @@ impl Vm {
             })
             .collect::<Vec<_>>();
         for (index, state) in self.blocks.iter().enumerate() {
-            let kind = match index / usize::from(crate::compile::FB_PER_TYPE) {
-                0 => "TON",
-                1 => "TOF",
-                2 => "TP",
-                3 => "CTU",
-                _ => "CTD",
+            // A word member belongs to the value blocks only: a timer's `ET`, a
+            // counter's `CV`. The other families have no value and publish
+            // nothing here, so the list carries one name per real member.
+            let Some(kind) = FbKind::of_index(index) else {
+                continue;
             };
+            if !state.used || !(kind.is_timer() || kind.is_counter()) {
+                continue;
+            }
             let number = index % usize::from(crate::compile::FB_PER_TYPE);
-            let member = if matches!(kind, "CTU" | "CTD") {
-                "CV"
-            } else {
-                "ET"
-            };
+            let member = if kind.is_counter() { "CV" } else { "ET" };
             values.push(WordValue {
-                name: format!("{kind}{number}.{member}"),
+                name: format!("{}{number}.{member}", kind.mnemonic()),
                 value: state.value,
             });
         }
@@ -1090,29 +1093,41 @@ impl Vm {
             .collect()
     }
 
-    /// Each block's `Q`, published as `TON0.Q`, so the editor can colour a block by
-    /// its real output instead of guessing from the rung.
+    /// The bit members the scan knows, published by name so the editor can colour
+    /// a block pin by its real state instead of guessing from the rung: `Q` for
+    /// every block, `TT` for a timer ("enabled and not done", the same rule
+    /// `Op::FbTiming` reads), the power pin (`IN`, `CU`, `CLK`) and a counter's
+    /// reset (`R`). A pin the scan does not keep is not published at all — the
+    /// editor then leaves it grey rather than inventing a value.
     fn block_outputs(&self) -> Vec<VarValue> {
-        self.blocks
-            .iter()
-            .enumerate()
-            .map(|(index, state)| {
-                let kind = match index / usize::from(crate::compile::FB_PER_TYPE) {
-                    0 => "TON",
-                    1 => "TOF",
-                    2 => "TP",
-                    3 => "CTU",
-                    _ => "CTD",
-                };
-                let number = index % usize::from(crate::compile::FB_PER_TYPE);
-                VarValue {
-                    name: format!("{kind}{number}.Q"),
-                    value: state.q,
+        let mut values = Vec::new();
+        for (index, state) in self.blocks.iter().enumerate() {
+            let Some(kind) = FbKind::of_index(index) else {
+                continue;
+            };
+            if !state.used {
+                continue;
+            }
+            let number = index % usize::from(crate::compile::FB_PER_TYPE);
+            let name = |member: &str| format!("{}{number}.{member}", kind.mnemonic());
+            let mut push = |member: String, value: bool| {
+                values.push(VarValue {
+                    name: member,
+                    value,
                     kind: SymbolKind::Output,
                     forced: false,
-                }
-            })
-            .collect()
+                });
+            };
+            push(name("Q"), state.q);
+            if kind.is_timer() {
+                push(name("TT"), state.input && !state.q);
+            }
+            push(name(kind.power_pin()), state.input);
+            if kind.is_counter() {
+                push(name("R"), state.reset);
+            }
+        }
+        values
     }
 
     /// Forces hold across scans until cleared and are applied to both images, so a
@@ -1167,6 +1182,10 @@ fn apply_forces(image: &mut [bool], forces: &[Option<bool>]) {
 /// A standard function block, one record per instance.
 #[derive(Debug, Clone, Copy, Default)]
 struct FbState {
+    /// The program actually names this instance. The bank is fixed-size, so the
+    /// snapshot publishes only the blocks in use instead of all `FB_PER_TYPE`
+    /// slots of all nine kinds.
+    used: bool,
     input: bool,
     q: bool,
     running: bool,
@@ -1174,6 +1193,9 @@ struct FbState {
     /// Separate from `input`, which is the block's own count input.
     up_input: bool,
     down_input: bool,
+    /// The counter's `R` pin as last executed: a member coil writes it, and the
+    /// editor lights the pin from it.
+    reset: bool,
     /// `ET` of a timer, `CV` of a counter.
     value: i32,
     /// `PT` of a timer, `PV` of a counter, as last executed.
@@ -1193,6 +1215,7 @@ fn run_block(
     let Some(state) = blocks.get_mut(instance) else {
         return false;
     };
+    state.used = true;
     let preset = preset.max(0);
     state.preset = preset;
     let dt = i32::from(dt);
@@ -1283,6 +1306,7 @@ fn run_counter(
     let Some(state) = blocks.get_mut(instance) else {
         return false;
     };
+    state.used = true;
     let preset = preset.max(0);
     state.preset = preset;
     if rule.steps_on_coils() {
@@ -1307,6 +1331,7 @@ fn count_member(blocks: &mut [FbState], instance: usize, up: bool, power: bool, 
     let Some(state) = blocks.get_mut(instance) else {
         return;
     };
+    state.used = true;
     let previous = if up { state.up_input } else { state.down_input };
     if power && !previous {
         let mut value = if up {
@@ -1341,6 +1366,7 @@ fn run_latch(
     let Some(state) = blocks.get_mut(instance) else {
         return false;
     };
+    state.used = true;
     state.q = match kind {
         FbKind::Rs => !reset && (set || state.q),
         _ => set || (state.q && !reset),

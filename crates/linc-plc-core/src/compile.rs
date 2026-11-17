@@ -295,6 +295,46 @@ impl FbKind {
     pub fn is_latch(self) -> bool {
         matches!(self, Self::Sr | Self::Rs)
     }
+
+    /// Every kind, in bank order: the instance index is `kind * FB_PER_TYPE + n`,
+    /// so this is the table the index is read against.
+    pub const ALL: [Self; 9] = [
+        Self::Ton,
+        Self::Tof,
+        Self::Tp,
+        Self::Ctu,
+        Self::Ctd,
+        Self::Rt,
+        Self::Rf,
+        Self::Sr,
+        Self::Rs,
+    ];
+
+    /// The kind an instance index belongs to. `None` past the last bank.
+    pub fn of_index(index: usize) -> Option<Self> {
+        Self::ALL.get(index / usize::from(FB_PER_TYPE)).copied()
+    }
+
+    /// The table's own spelling, which is what a published member is named after:
+    /// `TON0.Q`, `CTU0.CV`. Read from the instruction table, never matched here,
+    /// so a new mnemonic cannot leave the snapshot behind.
+    pub fn mnemonic(self) -> &'static str {
+        self.table().map(|spec| spec.mnemonic).unwrap_or("")
+    }
+
+    /// The block's first input pin, which is the power row: `IN`, `CU`, `CLK`.
+    pub fn power_pin(self) -> &'static str {
+        self.table()
+            .and_then(|spec| spec.pins.0.first().copied())
+            .unwrap_or("IN")
+    }
+
+    /// The instruction-table row for this kind: the canonical spelling and pins.
+    fn table(self) -> Option<&'static crate::profile::spec::Spec> {
+        crate::profile::spec::SPECS.iter().find(|spec| {
+            matches!(spec.family, crate::profile::spec::Family::Fb(name) if Self::from_name(name) == self)
+        })
+    }
 }
 
 /// Arithmetic of a compute coil.
