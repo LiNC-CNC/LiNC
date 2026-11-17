@@ -134,6 +134,20 @@ pub fn migrate(logic: &Logic) -> Option<Vec<Cell>> {
             var: var.clone(),
             negated: *negated,
         }]),
+        // Display only, for a rung whose tree is kept: the face needs the block's
+        // name and its instance, and an analogue block's `args` draw as a pin
+        // value the renderer reads back from the project, so nothing is lost that
+        // the picture needs. This cell is never written back.
+        Logic::Block {
+            block,
+            instance,
+            preset,
+            ..
+        } => Some(vec![Cell::Block {
+            block: block.clone(),
+            instance: instance.clone(),
+            preset: preset.clone(),
+        }]),
         Logic::Series { items } => {
             let mut cells = Vec::new();
             for item in items {
@@ -249,17 +263,30 @@ pub fn tree_rows(logic: &Logic) -> Option<Vec<Vec<Cell>>> {
             block,
             instance,
             preset,
-            ..
-        } => Some(vec![vec![
-            // A block occupies two positions, so the wire to its right is part of
-            // its footprint: the editor draws its pin values there.
-            Cell::Block {
-                block: block.clone(),
-                instance: instance.clone(),
-                preset: preset.clone(),
-            },
-            Cell::Wire,
-        ]]),
+            args,
+        } => {
+            // An analogue block keeps its configuration in `args` (SCP's four
+            // values, PID's six), and a cell has nowhere to put them: migrating one
+            // would drop the arguments and leave a block the validator cannot
+            // resolve. The rung stays a tree, which is the form the compiler reads.
+            let analogue = matches!(
+                crate::profile::spec::spec(block).map(|spec| spec.family),
+                Some(crate::profile::spec::Family::Analog(_))
+            );
+            if analogue && !args.is_empty() {
+                return None;
+            }
+            Some(vec![vec![
+                // A block occupies two positions, so the wire to its right is part of
+                // its footprint: the editor draws its pin values there.
+                Cell::Block {
+                    block: block.clone(),
+                    instance: instance.clone(),
+                    preset: preset.clone(),
+                },
+                Cell::Wire,
+            ]])
+        }
         Logic::Compare {
             operator,
             left,

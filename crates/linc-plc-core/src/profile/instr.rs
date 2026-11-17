@@ -427,15 +427,31 @@ fn check_cell(cell: &Cell, ctx: &Ctx) -> Vec<Diagnostic> {
         preset,
     } = cell
     {
-        if crate::compile::parse_block(block, instance, preset).is_none() {
-            diagnostics.push(Diagnostic::error(
+        // The block and the instance first, with the empty preset every kind has a
+        // default for, then the preset on the same rule the tree form uses — so a
+        // cell may time on a declared word, an array element or one field of an
+        // array of structs, not only on a literal. Demanding a literal here made
+        // the editor's tree-to-cells migration refuse a project it had just
+        // accepted: `Durations[Phase]` and `Recipes[Sel].FillTime` are presets the
+        // compiler resolves at run time.
+        match crate::compile::parse_block(block, instance, "") {
+            None => diagnostics.push(Diagnostic::error(
                 "cell_block",
                 format!(
                     "'{instance}' with preset '{preset}' is not a valid block; use \
                      TON0-3, TOF0-3, TP0-3, CTU0-3 or CTD0-3 and a preset like T#4s"
                 ),
                 ctx.path,
-            ));
+            )),
+            Some((kind, _, _)) => {
+                if let Err(message) = check_preset(preset, kind.is_timer(), ctx) {
+                    diagnostics.push(Diagnostic::error(
+                        "cell_block",
+                        format!("'{instance}' with preset '{preset}': {message}"),
+                        ctx.path,
+                    ));
+                }
+            }
         }
     } else if let Cell::Compare { op, left, right } = cell {
         if crate::compile::compare_op(op).is_none() {
