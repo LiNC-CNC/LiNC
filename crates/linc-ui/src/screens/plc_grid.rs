@@ -3309,6 +3309,13 @@ pub fn group_nodes(plc: &PlcUi, rungs: &[Rung]) -> Vec<Option<bool>> {
     nodes
 }
 
+/// A rung's comment as it reads in the margin: plain text, with the `//` marker
+/// some projects keep in the stored string stripped. The marker is a storage
+/// detail of the importer's comment rows, not part of what the operator wrote.
+pub fn comment_plain(comment: &str) -> String {
+    comment.trim().trim_start_matches("//").trim().to_string()
+}
+
 /// One row's series power, for the link join. Links inside the segment read as
 /// closed (they are the join points, not conditions).
 fn series_power(plc: &PlcUi, cells: &[Cell]) -> bool {
@@ -3353,13 +3360,12 @@ pub fn grid_rung(
     // The comment sits on a line of its own above the operand names, so the rung
     // grows by one band and the names move down into the next one.
     let label = rung.label.trim();
-    let commented = !rung.comment.is_empty();
-    // The rung whose comment is being typed: its band shows the buffer and a
-    // caret, and the rung is banded even before anything is stored.
+    // The rung whose comment is being typed: the margin shows the buffer and a
+    // caret in place of the stored text.
     let editing = plc.rung_comment_edit == Some((section, rung_index));
-    // A labelled rung needs the same upper band a commented one has, so the
-    // label has somewhere to sit.
-    let banded = commented || !label.is_empty() || editing;
+    // Only a label takes the upper band: the comment moved to the right margin,
+    // so a commented rung keeps the same height as a plain one.
+    let banded = !label.is_empty();
     // A row holding a block grows to make room for its label band; a symbol-only
     // row keeps `CELL_HEIGHT`.
     let rows = cells
@@ -3374,7 +3380,7 @@ pub fn grid_rung(
         .unwrap_or(1);
     // A rung with a comment or a label grows by one band: the comment takes the
     // line above the operand names instead of printing over them.
-    let strip_height = row_height(rows) + if banded { COMMENT_BAND } else { 0.0 };
+    let strip_height = row_height(rows) + if banded { LABEL_ROW_BAND } else { 0.0 };
     let name_y = if banded { BANDED_NAME_Y } else { LABEL_Y };
     let strip = ui.horizontal(|ui| {
         // Zero spacing: neighbouring cells share one conductor with no joint.
@@ -3491,6 +3497,41 @@ pub fn grid_rung(
         if plc.cell_cursor == Some((section, rung_index, POSITIONS)) {
             *cursor_rect = Some(coil_rect);
         }
+        // The right margin: reserved like a cell so the strip is as wide as what
+        // it draws, and the comment sits level with the conductor, plain text. The
+        // margin is at least `COMMENT_W` — room to type in — and wider when the
+        // comment needs it, so a long one is never clipped at the window edge.
+        let comment = if editing {
+            format!("{}_", plc.rung_comment_buffer)
+        } else {
+            comment_plain(&rung.comment)
+        };
+        let font = FontId::monospace(theme::font_size(9.0));
+        let needed = if comment.is_empty() {
+            0.0
+        } else {
+            ui.painter()
+                .layout_no_wrap(comment.clone(), font.clone(), theme::FG)
+                .size()
+                .x
+        };
+        let (margin, _) = ui.allocate_exact_size(
+            Vec2::new((needed + 2.0 * COMMENT_GAP).max(COMMENT_W), strip_height),
+            Sense::hover(),
+        );
+        if !comment.is_empty() {
+            ui.painter().text(
+                egui::pos2(margin.left() + COMMENT_GAP, conductor_y(margin)),
+                Align2::LEFT_CENTER,
+                comment,
+                font,
+                if editing {
+                    theme::ACCENT
+                } else {
+                    theme::COMMENT
+                },
+            );
+        }
     });
     if plc.cell_cursor == Some((section, rung_index, POSITIONS)) {
         // A faint edge says the whole rung is the unit being addressed while the
@@ -3503,33 +3544,26 @@ pub fn grid_rung(
         );
     }
     if banded {
-        // The comment line is the top band; the operand names sit one band
-        // below it (see `BANDED_NAME_Y`), so a long comment cannot print over
-        // the first cell's name.
-        let band = if editing {
-            format!("// {}_", plc.rung_comment_buffer)
-        } else {
-            match (label.is_empty(), commented) {
-                (false, true) => format!("{label}: // {}", rung.comment),
-                (false, false) => format!("{label}:"),
-                (true, _) => format!("// {}", rung.comment),
-            }
-        };
-        let ink = if editing {
-            theme::ACCENT
-        } else {
-            theme::COMMENT
-        };
+        // The label's band. The operand names sit one band below it (see
+        // `BANDED_NAME_Y`), so the label cannot print over the first cell's name.
         let rect = strip.response.rect;
         ui.painter().text(
             egui::pos2(rect.left() + 2.0, rect.top() + LABEL_Y),
             Align2::LEFT_CENTER,
-            band,
+            format!("{label}:"),
             FontId::monospace(theme::font_size(8.0)),
-            ink,
+            theme::COMMENT,
         );
     }
-    let row_rect = strip.response.rect;
+    // Only the circuit: the comment margin is outside the right rail, and the
+    // rails span the rows they feed.
+    let row_rect = egui::Rect::from_min_size(
+        strip.response.rect.min,
+        egui::vec2(
+            (POSITIONS + 1) as f32 * CELL_WIDTH,
+            strip.response.rect.height(),
+        ),
+    );
     ui.add_space(ROW_GAP);
     row_rect
 }
@@ -3705,13 +3739,23 @@ pub const LABEL_BAND: f32 = 12.0;
 /// Where a cell's operand name sits. The conductor is centred, so this band
 /// shares the space above the bars with it.
 pub const LABEL_Y: f32 = 8.0;
-/// A rung with a comment or a label grows by this much: the comment takes a line
-/// of its own above the operand names, because both shared `LABEL_Y` and a
-/// comment long enough to reach the next cell printed over its name. It is the
-/// label band plus the 2 px a 13 px line box needs to clear the one above it.
-pub const COMMENT_BAND: f32 = LABEL_BAND + 2.0;
+/// A rung with a label grows by this much: the label takes a line of its own
+/// above the operand names, because both shared `LABEL_Y` and a label printed
+/// over the first cell's name. It is the label band plus the 2 px a 13 px line
+/// box needs to clear the one above it. A rung's *comment* does not grow the row:
+/// it sits in the right margin, level with the conductor.
+pub const LABEL_ROW_BAND: f32 = LABEL_BAND + 2.0;
 /// Where the operand names sit on such a rung.
-pub const BANDED_NAME_Y: f32 = LABEL_Y + COMMENT_BAND;
+pub const BANDED_NAME_Y: f32 = LABEL_Y + LABEL_ROW_BAND;
+
+/// The margin a rung reserves to the right of its coil for the rung comment. It
+/// is part of the strip's width, allocated like a cell, so the scroll area counts
+/// it and the text is never clipped; the conductor still ends at the right rail,
+/// which sits inside this margin.
+pub const COMMENT_W: f32 = 220.0;
+/// The gap between the right rail and the comment, so the text cannot touch the
+/// circuit it describes.
+pub const COMMENT_GAP: f32 = 8.0;
 
 // --- coils -----------------------------------------------------------------
 pub const COIL_R: f32 = 8.0;
@@ -3942,8 +3986,8 @@ fn strip_height_of(rung: &Rung) -> f32 {
         })
         .max()
         .unwrap_or(1);
-    let banded = !rung.comment.is_empty() || !rung.label.trim().is_empty();
-    row_height(rows) + if banded { COMMENT_BAND } else { 0.0 }
+    let banded = !rung.label.trim().is_empty();
+    row_height(rows) + if banded { LABEL_ROW_BAND } else { 0.0 }
 }
 
 /// Draw one symbol. Rung furniture and the symbol are here; the operand label is
@@ -4445,7 +4489,7 @@ mod label_clearance_tests {
                                       // and the label shares it with the symbol's upper half.
         for (name_y, conductor) in [
             (LABEL_Y, CONDUCTOR_Y),
-            (BANDED_NAME_Y, COMMENT_BAND + CONDUCTOR_Y),
+            (BANDED_NAME_Y, LABEL_ROW_BAND + CONDUCTOR_Y),
         ] {
             let label_bottom = name_y + LABEL_HALF;
             let symbol_top = conductor - SYMBOL_HALF;
@@ -5406,11 +5450,16 @@ mod golden_tests {
     /// failure here means: look at what moved, decide whether it was meant, and only
     /// then re-record.
     fn digest(cells: Vec<Cell>, coil: Coil) -> String {
-        let plc = PlcUi::default();
         let rung = Rung {
             cells,
             ..Rung::new(linc_plc_core::model::Logic::Const { value: true }, coil)
         };
+        digest_rung(&PlcUi::default(), &rung)
+    }
+
+    /// The picture a given rung draws, for the tests that need a comment, a label
+    /// or an open field rather than a cell list.
+    fn digest_rung(plc: &PlcUi, rung: &Rung) -> String {
         let ctx = egui::Context::default();
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -5422,7 +5471,7 @@ mod golden_tests {
         let output = ctx.run_ui(input, |ui| {
             let mut actions = Vec::new();
             let mut cursor = None;
-            grid_rung(&plc, ui, 0, 0, &rung, None, None, &mut actions, &mut cursor);
+            grid_rung(plc, ui, 0, 0, rung, None, None, &mut actions, &mut cursor);
         });
         let mut output = output;
         output.textures_delta.clear();
@@ -5482,6 +5531,82 @@ mod golden_tests {
         assert_eq!(
             drawn, golden,
             "the rendered row changed; if that was intended, re-record with UPDATE_GOLDEN=1"
+        );
+    }
+
+    /// The x of the first text shape whose string is exactly `wanted`.
+    fn text_x(drawn: &str, wanted: &str) -> f32 {
+        let needle = format!("text \"{wanted}\" at (");
+        let line = drawn
+            .lines()
+            .find(|line| line.starts_with(&needle))
+            .unwrap_or_else(|| panic!("no text {wanted:?} in:\n{drawn}"));
+        let rest = &line[needle.len()..];
+        rest.split(',').next().unwrap().parse().unwrap()
+    }
+
+    /// The right edge of the circuit: the ten cell spans, coil included. A rung's
+    /// comment sits beyond it, in the margin.
+    fn conductor_right() -> f32 {
+        (POSITIONS + 1) as f32 * CELL_WIDTH
+    }
+
+    /// A rung comment is plain text in the right margin, level with the conductor:
+    /// no `// ` marker, and nothing printed over the rung.
+    #[test]
+    fn the_rung_comment_draws_plain_beyond_the_coil() {
+        let rung = Rung {
+            comment: "// seal in".to_string(),
+            ..Rung::new(
+                linc_plc_core::model::Logic::Const { value: true },
+                Coil::new("run", linc_plc_core::model::CoilKind::Normal),
+            )
+        };
+        let drawn = digest_rung(&PlcUi::default(), &rung);
+        assert!(
+            drawn
+                .lines()
+                .any(|line| line.starts_with("text \"seal in\" at (")),
+            "the comment draws without its marker:\n{drawn}"
+        );
+        assert!(
+            !drawn.contains("//"),
+            "no `//` anywhere in the picture:\n{drawn}"
+        );
+        assert!(
+            text_x(&drawn, "seal in") > conductor_right(),
+            "the comment is beyond the coil, in the margin:\n{drawn}"
+        );
+    }
+
+    /// While the field is open it draws in the margin, where the comment lives,
+    /// with a caret — not in a dialog and not in the label band.
+    #[test]
+    fn the_comment_field_draws_in_the_margin() {
+        let mut plc = PlcUi::default();
+        plc.rung_comment_edit = Some((0, 0));
+        plc.rung_comment_buffer = "typing".to_string();
+        let rung = Rung {
+            comment: "old text".to_string(),
+            ..Rung::new(
+                linc_plc_core::model::Logic::Const { value: true },
+                Coil::new("run", linc_plc_core::model::CoilKind::Normal),
+            )
+        };
+        let drawn = digest_rung(&plc, &rung);
+        assert!(
+            drawn
+                .lines()
+                .any(|line| line.starts_with("text \"typing_\" at (")),
+            "the field carries the buffer and its caret:\n{drawn}"
+        );
+        assert!(
+            !drawn.contains("old text"),
+            "the stored comment is replaced while editing:\n{drawn}"
+        );
+        assert!(
+            text_x(&drawn, "typing_") > conductor_right(),
+            "the field is where the comment will be:\n{drawn}"
         );
     }
 
@@ -5921,8 +6046,8 @@ mod link_tests {
     fn a_link_drops_to_the_next_rows_conductor() {
         assert_eq!(link_drop(CELL_HEIGHT), CELL_HEIGHT - CONDUCTOR_Y);
         assert_eq!(
-            link_drop(CELL_HEIGHT + COMMENT_BAND),
-            CELL_HEIGHT + COMMENT_BAND - CONDUCTOR_Y,
+            link_drop(CELL_HEIGHT + LABEL_ROW_BAND),
+            CELL_HEIGHT + LABEL_ROW_BAND - CONDUCTOR_Y,
             "a banded row's conductor sits one band lower"
         );
         assert_eq!(
@@ -5933,17 +6058,24 @@ mod link_tests {
         assert_eq!(link_drop(0.0), 0.0, "never negative");
     }
 
-    /// The height `grid_rung` hands the row above: a banded row is one band
-    /// taller, so a link above it must reach further.
+    /// The height `grid_rung` hands the row above: a labelled row is one band
+    /// taller, so a link above it must reach further. A comment no longer changes
+    /// the height — it sits in the right margin, level with the conductor.
     #[test]
-    fn a_banded_row_reports_its_full_height() {
+    fn a_labelled_row_reports_its_full_height() {
         let mut rung = Rung::new(
             Logic::Const { value: true },
             Coil::new("run", CoilKind::Normal),
         );
         rung.cells = vec![Cell::Wire; linc_plc_core::grid::POSITIONS];
         assert_eq!(strip_height_of(&rung), CELL_HEIGHT);
-        rung.comment = "// branch of seal".to_string();
-        assert_eq!(strip_height_of(&rung), CELL_HEIGHT + COMMENT_BAND);
+        rung.comment = "branch of seal".to_string();
+        assert_eq!(
+            strip_height_of(&rung),
+            CELL_HEIGHT,
+            "a comment lives in the margin, not in a band"
+        );
+        rung.label = "SEAL".to_string();
+        assert_eq!(strip_height_of(&rung), CELL_HEIGHT + LABEL_ROW_BAND);
     }
 }
