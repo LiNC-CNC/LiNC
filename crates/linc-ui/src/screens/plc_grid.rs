@@ -3203,8 +3203,8 @@ pub fn grid_rung(
     // nothing about what the rung would do.
     let previewing = !plc.preview.is_empty();
     let local = previewing.then(|| preview_scan(plc, &cells));
-    // The comment sits inside the strip's upper band so every rung is exactly
-    // `CELL_HEIGHT` tall: the link's drop to the branch row stays exact.
+    // The comment sits on a line of its own above the operand names, so the rung
+    // grows by one band and the names move down into the next one.
     let label = rung.label.trim();
     let commented = !rung.comment.is_empty();
     // A labelled rung needs the same upper band a commented one has, so the
@@ -3222,7 +3222,10 @@ pub fn grid_rung(
         })
         .max()
         .unwrap_or(1);
-    let strip_height = row_height(rows);
+    // A rung with a comment or a label grows by one band: the comment takes the
+    // line above the operand names instead of printing over them.
+    let strip_height = row_height(rows) + if banded { COMMENT_BAND } else { 0.0 };
+    let name_y = if banded { BANDED_NAME_Y } else { LABEL_Y };
     let strip = ui.horizontal(|ui| {
         // Zero spacing: neighbouring cells share one conductor with no joint.
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -3291,9 +3294,8 @@ pub fn grid_rung(
                 rung_index,
                 position,
                 &label,
-                matches!(cell, Cell::Wire),
                 &face,
-                LABEL_Y,
+                name_y,
                 Vec2::new(if wide { SPAN } else { CELL_WIDTH }, strip_height),
                 live,
             );
@@ -3312,9 +3314,8 @@ pub fn grid_rung(
             rung_index,
             POSITIONS,
             &coil,
-            rung.coil().var.is_empty(),
             &Face::coil(rung.coil().kind),
-            LABEL_Y,
+            name_y,
             Vec2::new(CELL_WIDTH, strip_height),
             // A compute rung writes through its cell, so its coil slot is unused
             // and must not light up from a variable of the same name.
@@ -3344,20 +3345,22 @@ pub fn grid_rung(
         );
     }
     if banded {
-        // Inside the strip: the rung stays exactly CELL_HEIGHT tall, so the link's
-        // drop to the branch row lands on that row's conductor.
+        // The comment line is the top band; the operand names sit one band
+        // below it (see `BANDED_NAME_Y`), so a long comment cannot print over
+        // the first cell's name.
         let band = match (label.is_empty(), commented) {
             (false, true) => format!("{label}: // {}", rung.comment),
             (false, false) => format!("{label}:"),
             (true, _) => format!("// {}", rung.comment),
         };
+        let ink = theme::COMMENT;
         let rect = strip.response.rect;
         ui.painter().text(
             egui::pos2(rect.left() + 2.0, rect.top() + LABEL_Y),
             Align2::LEFT_CENTER,
             band,
             FontId::monospace(theme::font_size(8.0)),
-            theme::COMMENT,
+            ink,
         );
     }
     ui.add_space(ROW_GAP);
@@ -3525,9 +3528,16 @@ pub const EDGE_LETTER_Y: f32 = CONDUCTOR_Y;
 /// symbol-only row is `CELL_HEIGHT` tall; a row holding a block grows by whatever
 /// the body needs beyond that, and `CELL_HEIGHT` itself never changes.
 pub const LABEL_BAND: f32 = 12.0;
-/// Where a cell's operand name, rung label and comment sit. The conductor is
-/// centred, so this band shares the space above the bars with them.
+/// Where a cell's operand name sits. The conductor is centred, so this band
+/// shares the space above the bars with it.
 pub const LABEL_Y: f32 = 8.0;
+/// A rung with a comment or a label grows by this much: the comment takes a line
+/// of its own above the operand names, because both shared `LABEL_Y` and a
+/// comment long enough to reach the next cell printed over its name. It is the
+/// label band plus the 2 px a 13 px line box needs to clear the one above it.
+pub const COMMENT_BAND: f32 = LABEL_BAND + 2.0;
+/// Where the operand names sit on such a rung.
+pub const BANDED_NAME_Y: f32 = LABEL_Y + COMMENT_BAND;
 
 // --- coils -----------------------------------------------------------------
 pub const COIL_R: f32 = 8.0;
@@ -3825,7 +3835,9 @@ fn draw_block(painter: &egui::Painter, rect: egui::Rect, face: &Face<'_>, style:
     let value_size = FontId::monospace(TITLE_PX * s);
     for (index, row) in face.rows.iter().enumerate() {
         let ry = block_row_y(body, index, s);
-        let pin_ink = if row.lit { style.accent } else { theme::MUTED };
+        // Names are text, not elements: they take the same ink the body does, so
+        // a not-lit pin and an Unknown symbol are the same grey rather than two.
+        let pin_ink = if row.lit { style.accent } else { style.ink() };
         if let Some(name) = row.ins {
             painter.text(
                 egui::pos2(body.left() + INNER_PAD * s, ry),
@@ -3956,7 +3968,6 @@ fn cell_box(
     rung: usize,
     position: usize,
     label: &str,
-    quiet: bool,
     face: &Face<'_>,
     name_y: f32,
     size: Vec2,
@@ -3971,8 +3982,6 @@ fn cell_box(
     let color: Color32 = if live == Some(true) {
         // A true element is green, as the manual's monitor shows it.
         theme::C4
-    } else if quiet {
-        theme::MUTED
     } else if selected {
         theme::ACCENT
     } else {
@@ -4189,14 +4198,23 @@ mod label_clearance_tests {
         const SYMBOL_HALF: f32 = 9.0; // tallest one-position symbol above the conductor
                                       // The conductor is centred, so the band above it is `CONDUCTOR_Y` tall
                                       // and the label shares it with the symbol's upper half.
-        for name_y in [LABEL_Y] {
+        for (name_y, conductor) in [
+            (LABEL_Y, CONDUCTOR_Y),
+            (BANDED_NAME_Y, COMMENT_BAND + CONDUCTOR_Y),
+        ] {
             let label_bottom = name_y + LABEL_HALF;
-            let symbol_top = CONDUCTOR_Y - SYMBOL_HALF;
+            let symbol_top = conductor - SYMBOL_HALF;
             assert!(
                 symbol_top - label_bottom >= 2.5,
                 "label bottom {label_bottom} to symbol top {symbol_top} must be 2.5 px"
             );
         }
+        // The comment and the names are two lines, not one: a 13 px line box
+        // must fit between their anchors, or the comment prints over the names.
+        assert!(
+            BANDED_NAME_Y - LABEL_Y >= 13.0,
+            "the comment line and the name line must not share a row"
+        );
         assert!(
             CONDUCTOR_Y < CELL_HEIGHT,
             "the conductor stays inside the strip"
