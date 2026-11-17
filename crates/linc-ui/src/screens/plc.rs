@@ -6688,6 +6688,32 @@ pub fn zero_rung_spacing(ui: &mut Ui) -> f32 {
     ui.spacing().item_spacing.y
 }
 
+/// The two power rails, left and right of a section's rungs.
+///
+/// Other ladder editors draw them, and they are what makes a rung read as a
+/// circuit rather than as a floating line: each rung's conductor starts on the
+/// left rail and ends on the right one. The rails span the rows they feed, from
+/// the first row's top to the last row's bottom, and take the conductor's weight
+/// because a rail is a conductor. A section with no rungs has nothing to feed and
+/// draws none.
+fn ladder_rails(ui: &mut Ui, rows: &[egui::Rect]) {
+    let (Some(first), Some(last)) = (rows.first(), rows.last()) else {
+        return;
+    };
+    let right = rows
+        .iter()
+        .map(|rect| rect.right())
+        .fold(f32::MIN, f32::max);
+    let stroke = egui::Stroke::new(crate::screens::plc_grid::RAIL_W, theme::FG);
+    let painter = ui.painter();
+    for x in [first.left(), right] {
+        painter.line_segment(
+            [egui::pos2(x, first.top()), egui::pos2(x, last.bottom())],
+            stroke,
+        );
+    }
+}
+
 fn ladder_body(
     plc: &mut PlcUi,
     sections: &[linc_plc_core::model::Section],
@@ -6722,6 +6748,7 @@ fn ladder_body(
                         .size(theme::font_size(9.0))
                         .color(theme::C3),
                 );
+                let mut rows: Vec<egui::Rect> = Vec::new();
                 for (rung_index, rung) in section.rungs.iter().enumerate() {
                     if rung.is_comment_row() {
                         comment_row(plc, ui, section_index, rung_index, rung, actions);
@@ -6730,7 +6757,7 @@ fn ladder_body(
                     // One model: every rung is cells. `normalise` lays a tree
                     // out on the way in, and a rung that still has none is
                     // shown as an empty row rather than in a second editor.
-                    crate::screens::plc_grid::grid_rung(
+                    let rect = crate::screens::plc_grid::grid_rung(
                         plc,
                         ui,
                         section_index,
@@ -6739,7 +6766,9 @@ fn ladder_body(
                         actions,
                         &mut cursor_rect,
                     );
+                    rows.push(rect);
                 }
+                ladder_rails(ui, &rows);
             }
             // The scroll belongs to this area, not to the pane around it: the
             // cursor rect lives in this content, and scrolling the outer clip

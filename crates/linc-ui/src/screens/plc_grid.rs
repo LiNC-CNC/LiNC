@@ -3263,7 +3263,7 @@ pub fn grid_rung(
     rung: &Rung,
     actions: &mut Vec<Action>,
     cursor_rect: &mut Option<egui::Rect>,
-) {
+) -> egui::Rect {
     let _ = actions;
     // A rung drawn before the grid existed has no cells; its flat series is
     // shown as cells without being written back, so the canvas is the same
@@ -3449,7 +3449,9 @@ pub fn grid_rung(
             ink,
         );
     }
+    let row_rect = strip.response.rect;
     ui.add_space(ROW_GAP);
+    row_rect
 }
 
 /// How an element is painted. Weight and colour both come from `State`, so a call
@@ -3611,6 +3613,11 @@ pub const SLASH: f32 = BAR_HALF;
 /// The letter on an edge contact sits on the conductor, between the bars: above
 /// the bars it reads as a separate annotation.
 pub const EDGE_LETTER_Y: f32 = CONDUCTOR_Y;
+/// The power rails' stroke, in cell units. A rail is a conductor, not furniture:
+/// it takes the same weight as the leads it terminates and does not change with
+/// the rung's state, because it is fed from outside the ladder.
+pub const RAIL_W: f32 = 1.2;
+
 /// The room a label needs above a block body before the row has to grow. A
 /// symbol-only row is `CELL_HEIGHT` tall; a row holding a block grows by whatever
 /// the body needs beyond that, and `CELL_HEIGHT` itself never changes.
