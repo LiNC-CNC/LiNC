@@ -246,9 +246,13 @@ fn handle_request(request: Request, shared: &Shared) -> Result<Outcome, Error> {
     Ok(outcome)
 }
 
-/// Compile, check the frozen I/O map, persist, then hand the program to the
-/// scan loop for a scan-boundary swap. `Load` stops the ladder; `Reload` keeps
-/// it running.
+/// Compile, check the frozen I/O map, then hand the program to the scan loop for
+/// a scan-boundary swap. `Load` stops the ladder; `Reload` keeps it running.
+///
+/// Nothing is written here. The project file belongs to whoever saves it: a load
+/// used to rewrite it in place, which normalised the caller's file (a tree rung
+/// became cells) and mutated fixtures just by running them. Compiling is not
+/// saving.
 fn prepare(project: &Project, shared: &Shared) -> Result<(Compiled, Vec<Diagnostic>), Response> {
     let (ok, diagnostics, compiled) = evaluate(project);
     let Some(compiled) = compiled else {
@@ -271,12 +275,6 @@ fn prepare(project: &Project, shared: &Shared) -> Result<(Compiled, Vec<Diagnost
                 "the project's I/O bindings ({wanted}) differ from the pin map this daemon \
                  created at startup; restart linc-plc to bind them"
             ),
-        });
-    }
-    if let Err(error) = persist(&shared.project, project) {
-        return Err(Response::Error {
-            code: "persist".to_string(),
-            message: error.to_string(),
         });
     }
     let warnings = compiled.warnings.clone();
@@ -331,48 +329,6 @@ fn dispatch(shared: &Shared, build: impl FnOnce(Sender<Response>) -> Command) ->
             message: "the scan loop stopped".to_string(),
         },
     }
-}
-
-/// Write the project atomically: temp file in the same directory, fsync,
-/// rename, then fsync the directory so the rename itself is durable.
-fn persist(path: &Path, project: &Project) -> Result<(), Error> {
-    let json = serde_json::to_vec_pretty(project)
-        .map_err(|error| Error::Project(format!("cannot serialize the project: {error}")))?;
-    let directory = match path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent,
-        _ => Path::new("."),
-    };
-    fs::create_dir_all(directory)?;
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "ladder.json".to_string());
-    let temporary = directory.join(format!(".{name}.tmp-{}", std::process::id()));
-
-    let written = (|| -> io::Result<()> {
-        let mut file = fs::File::create(&temporary)?;
-        file.write_all(&json)?;
-        file.sync_all()?;
-        fs::rename(&temporary, path)?;
-        Ok(())
-    })();
-    if let Err(error) = written {
-        let _ = fs::remove_file(&temporary);
-        return Err(error.into());
-    }
-    match fs::File::open(directory) {
-        Ok(handle) => {
-            if let Err(error) = handle.sync_all() {
-                log::warn!("linc-plc: cannot fsync {}: {error}", directory.display());
-            }
-        }
-        Err(error) => log::warn!(
-            "linc-plc: cannot open {} for fsync: {error}",
-            directory.display()
-        ),
-    }
-    log::info!("linc-plc: saved the project to {}", path.display());
-    Ok(())
 }
 
 fn describe_map(project: &Project) -> String {

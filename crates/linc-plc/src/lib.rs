@@ -78,8 +78,9 @@ pub use device::{Device, IoImage, Status, TestDevice};
 /// Everything the daemon needs to start.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Ladder project JSON. Read at startup to create the HAL pin map and
-    /// rewritten in place by every successful Load.
+    /// Ladder project JSON. Read at startup to create the HAL pin map. Loading a
+    /// program does not write it: the file changes only when a client asks for a
+    /// save (the UI's Ctrl+S), so a fixture cannot be mutated by running it.
     pub project: PathBuf,
     /// Unix socket to serve. Created with mode 0600 and removed on exit.
     pub socket: PathBuf,
@@ -263,7 +264,6 @@ pub(crate) struct Shared {
     pub(crate) snapshot: Arc<Mutex<StateSnapshot>>,
     pub(crate) shutdown: Arc<AtomicBool>,
     pub(crate) io_map: IoMap,
-    pub(crate) project: PathBuf,
     pub(crate) no_hal: bool,
     pub(crate) allow_force: bool,
     /// Per-scan watch-list samples, written by the scan loop and read by the
@@ -339,7 +339,6 @@ fn serve<D: Device>(
         })),
         shutdown: Arc::clone(&shutdown),
         io_map: io_map.clone(),
-        project: config.project.clone(),
         no_hal: config.no_hal,
         allow_force: config.allow_force,
         trend: Arc::new(Mutex::new(TrendData::default())),

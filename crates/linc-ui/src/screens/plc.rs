@@ -9038,6 +9038,58 @@ mod symbol_focus_tests {
 }
 
 #[cfg(test)]
+mod save_tests {
+    use super::*;
+
+    /// Writing the project file is an explicit act: `Ctrl+S` calls `save`, and
+    /// nothing else does. Reading, validating or running a project must leave it
+    /// alone — the daemon used to rewrite the file on every successful load, which
+    /// turned a tree rung into cells and mutated the fixtures it ran.
+    #[test]
+    fn only_an_explicit_save_writes_the_project_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "linc-save-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("ladder.json");
+
+        let mut plc = PlcUi::default();
+        plc.path_text = path.display().to_string();
+        plc.project.normalise();
+        plc.validate();
+        assert!(
+            !path.exists(),
+            "opening, migrating and validating a project must not create its file"
+        );
+
+        plc.save();
+        assert!(plc.last_error.is_none(), "{:?}", plc.last_error);
+        let text = std::fs::read_to_string(&path).expect("the save wrote the file");
+        let parsed: Project = serde_json::from_str(&text).expect("the file parses");
+        assert_eq!(
+            project_to_json(&parsed).expect("reserialise"),
+            text,
+            "a saved file loads back to the same project"
+        );
+
+        // Saving again with the same content is a no-op in bytes, not a rewrite
+        // that could drift.
+        plc.save();
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read back"),
+            text,
+            "a second save writes the same bytes"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
 mod save_pous_tests {
     use super::*;
 
