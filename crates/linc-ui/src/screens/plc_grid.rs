@@ -1627,6 +1627,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     shape: Shape::Contact,
                     glyph: "",
                     rows: &[],
+                    ..Face::default()
                 },
                 "Wire",
                 "-",
@@ -1637,6 +1638,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     shape: Shape::Contact,
                     glyph: "",
                     rows: &[],
+                    ..Face::default()
                 },
                 "Contact",
                 "C",
@@ -1650,6 +1652,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     shape: Shape::ContactNc,
                     glyph: "",
                     rows: &[],
+                    ..Face::default()
                 },
                 "Negated contact",
                 "X",
@@ -1663,6 +1666,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                     shape: Shape::Contact,
                     glyph: "",
                     rows: &[],
+                    ..Face::default()
                 },
                 "Link",
                 "V",
@@ -1703,6 +1707,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 shape: Shape::Small,
                 glyph: "",
                 rows: &[],
+                ..Face::default()
             },
             label: "Compare",
             chord: "G",
@@ -1714,6 +1719,7 @@ fn element_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
                 shape: Shape::Small,
                 glyph: ":=",
                 rows: &[],
+                ..Face::default()
             },
             label: "Compute",
             chord: "M",
@@ -1948,18 +1954,7 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
     let Some((section, rung, position, cell)) = plc.operand_pick.clone() else {
         return false;
     };
-    let names = plc
-        .project
-        .io
-        .iter()
-        .map(|point| (point.name.clone(), format!("{:?}", point.direction)))
-        .chain(
-            plc.project
-                .vars
-                .iter()
-                .map(|var| (var.name.clone(), "VAR".to_string())),
-        )
-        .collect::<Vec<_>>();
+    let names = operand_choices(plc);
     let mut close = false;
     let keys = modal_keys(ctx);
     // The filter takes this frame's keys before the rows are worked out, so a
@@ -2085,6 +2080,59 @@ fn operand_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
 /// Rows the operand list shows before it pages.
 const OPERAND_ROWS: usize = 8;
 
+/// Every instance the project names, with its instruction-table mnemonic.
+fn block_instances(plc: &PlcUi) -> Vec<(String, &'static str)> {
+    let mut used: Vec<(String, &'static str)> = Vec::new();
+    for pou in plc.project.all_pous() {
+        for section in &pou.sections {
+            for rung in &section.rungs {
+                for cell in &rung.cells {
+                    let Cell::Block {
+                        block, instance, ..
+                    } = cell
+                    else {
+                        continue;
+                    };
+                    let Some(spec) = linc_plc_core::profile::spec::spec(block) else {
+                        continue;
+                    };
+                    if !used.iter().any(|(name, _)| name == instance) {
+                        used.push((instance.clone(), spec.mnemonic));
+                    }
+                }
+            }
+        }
+    }
+    used
+}
+
+/// The names a contact may read: the project's symbols, then each block's
+/// members by instance, so `TON0` narrows to its own two bits. A timer has `Q`
+/// and `TT`; a counter has `Q`; a word member is not listed, because a contact
+/// reads a bit and the validator would refuse it — the compare window is where
+/// `CV` and `ET` are read.
+fn operand_choices(plc: &PlcUi) -> Vec<(String, String)> {
+    let mut names = plc
+        .project
+        .io
+        .iter()
+        .map(|point| (point.name.clone(), format!("{:?}", point.direction)))
+        .chain(
+            plc.project
+                .vars
+                .iter()
+                .map(|var| (var.name.clone(), "VAR".to_string())),
+        )
+        .collect::<Vec<_>>();
+    for (instance, mnemonic) in block_instances(plc) {
+        names.push((format!("{instance}.Q"), format!("{mnemonic} Q")));
+        if matches!(mnemonic, "TON" | "TOF" | "TP") {
+            names.push((format!("{instance}.TT"), format!("{mnemonic} TT")));
+        }
+    }
+    names
+}
+
 /// The cell with its operand replaced, keeping its kind and negation.
 pub fn with_operand(cell: &Cell, name: &str) -> Cell {
     match cell {
@@ -2156,6 +2204,14 @@ fn coil_choices(plc: &PlcUi, section: usize, rung: usize) -> Vec<(String, String
                     .vars
                     .iter()
                     .map(|var| (var.name.clone(), "VAR".to_string())),
+            )
+            // A counter's reset pin is written by a member coil — the corpus
+            // pattern is `reset_count → (R) CTU0.R` — so it is a coil target.
+            .chain(
+                block_instances(plc)
+                    .into_iter()
+                    .filter(|(_, mnemonic)| matches!(*mnemonic, "CTU" | "CTD"))
+                    .map(|(instance, mnemonic)| (format!("{instance}.R"), format!("{mnemonic} R"))),
             )
             .collect(),
     }
@@ -2382,8 +2438,15 @@ fn compare_choices(plc: &PlcUi) -> Vec<Choice> {
     let mut choices: Vec<Choice> = linc_plc_core::profile::resolve::marker_words()
         .map(|(_, text)| Choice::new(text, "WORD"))
         .collect();
-    for (instance, kind) in used_block_instances(plc) {
-        choices.push(Choice::new(format!("{instance}.{kind}"), "BLOCK"));
+    for (instance, mnemonic) in block_instances(plc) {
+        // The word that reads the block's value: `ET` for a timer, `CV` for a
+        // counter. A block with neither is not a compare operand.
+        let member = match mnemonic {
+            "TON" | "TOF" | "TP" => "ET",
+            "CTU" | "CTD" => "CV",
+            _ => continue,
+        };
+        choices.push(Choice::new(format!("{instance}.{member}"), "BLOCK"));
     }
     for value in ["0", "1", "5", "10", "25", "100", "1000"] {
         choices.push(Choice::new(value, "NUMBER"));
@@ -2392,30 +2455,6 @@ fn compare_choices(plc: &PlcUi) -> Vec<Choice> {
         choices.push(Choice::new(value, "TIME"));
     }
     choices
-}
-
-/// The instances the project actually uses, each with the word that reads its
-/// value: `.ET` for a timer, `.CV` for a counter.
-fn used_block_instances(plc: &PlcUi) -> Vec<(String, &'static str)> {
-    let mut used: Vec<(String, &'static str)> = Vec::new();
-    for pou in plc.project.all_pous() {
-        for section in &pou.sections {
-            for rung in &section.rungs {
-                for cell in &rung.cells {
-                    if let Cell::Block {
-                        block, instance, ..
-                    } = cell
-                    {
-                        let member = if block.starts_with("CT") { "CV" } else { "ET" };
-                        if !used.iter().any(|(name, _)| name == instance) {
-                            used.push((instance.clone(), member));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    used
 }
 
 /// What an operand that is not in the list is: the same words the list uses, so
@@ -3353,6 +3392,10 @@ pub fn grid_rung(
     // nothing about what the rung would do.
     let previewing = !plc.preview.is_empty();
     let local = previewing.then(|| preview_scan(plc, &cells, node));
+    // The rung's own output from the snapshot, for the wires and for a coil whose
+    // target the snapshot does not name.
+    let power = rung_power(plc, &cells);
+    let delivered = local.as_ref().map(|(_, coil)| *coil).unwrap_or(power);
     // A link drops to the next row's conductor, which is `CONDUCTOR_Y` above that
     // row's bottom edge; a row that grew for a block body or a comment band moves
     // its conductor down with it, so the drop follows the row it joins.
@@ -3393,7 +3436,7 @@ pub fn grid_rung(
             }
             let cell = cells.get(position).cloned().unwrap_or(Cell::Wire);
             let label = grid_cell_label(plc, &cell);
-            let live = live_at(plc, &local, position, &cell);
+            let live = live_at(plc, &local, power, &cell);
             // A block's rows: pin names from the instruction table, values
             // formatted here, because the renderer positions text and never
             // formats a number.
@@ -3404,31 +3447,25 @@ pub fn grid_rung(
                 },
                 _ => ("", &[][..], &[][..]),
             };
-            let values: Vec<(String, String)> = match &cell {
+            // A block's pins light one at a time, each from the member bit the
+            // scan publishes under that pin's own name: `CTU0.CU` lights the `CU`
+            // label, `TON0.Q` the `Q`. A pin the snapshot does not name — a word
+            // pin, or a pin the scan does not keep — stays dark.
+            let (pin_rows, q, in_power) = match &cell {
                 Cell::Block {
                     instance, preset, ..
-                } if !pins_in.is_empty() => pins_in
-                    .iter()
-                    .zip(pins_out.iter())
-                    .map(|(pin, out)| pin_values(plc, instance, preset, pin, out))
-                    .collect(),
-                _ => Vec::new(),
+                } if !pins_in.is_empty() => block_state(plc, instance, preset, pins_in, pins_out),
+                _ => (Vec::new(), false, false),
             };
-            let rows_slice: Vec<Row<'_>> = (0..values.len())
-                .map(|index| Row {
-                    ins: pins_in.get(index).copied().filter(|name| !name.is_empty()),
-                    out: pins_out.get(index).copied().filter(|name| !name.is_empty()),
-                    value_in: values
-                        .get(index)
-                        .map(|(value, _)| value.as_str())
-                        .filter(|value| !value.is_empty()),
-                    value_out: values
-                        .get(index)
-                        .map(|(_, value)| value.as_str())
-                        .filter(|value| !value.is_empty()),
-                    // A TRUE Boolean pin lights its name; only the power row's
-                    // pair is derived from the rung's own state.
-                    lit: index == 0 && matches!(live, Some(true)),
+            let rows_slice: Vec<Row<'_>> = pin_rows
+                .iter()
+                .map(|row| Row {
+                    ins: row.ins,
+                    out: row.out,
+                    value_in: row.value_in.as_deref().filter(|value| !value.is_empty()),
+                    value_out: row.value_out.as_deref().filter(|value| !value.is_empty()),
+                    ins_lit: row.ins_lit,
+                    out_lit: row.out_lit,
                 })
                 .collect();
             let face = if rows_slice.is_empty() {
@@ -3438,6 +3475,8 @@ pub fn grid_rung(
                     shape: Shape::Block,
                     glyph,
                     rows: &rows_slice,
+                    q,
+                    in_power,
                 }
             };
             let wide = matches!(cell, Cell::Block { .. });
@@ -3489,7 +3528,7 @@ pub fn grid_rung(
             {
                 None
             } else {
-                plc.bit_value(&rung.coil().var)
+                coil_live(plc, &rung.coil().var, delivered)
             },
         );
         if plc.cell_cursor == Some((section, rung_index, POSITIONS)) {
@@ -3635,16 +3674,40 @@ pub(crate) struct Row<'a> {
     pub value_in: Option<&'a str>,
     /// The output value, outside the body, left-aligned.
     pub value_out: Option<&'a str>,
-    /// This row's Boolean pins are TRUE, so their names light.
-    pub lit: bool,
+    /// The input pin on this row is TRUE, so its name lights.
+    pub ins_lit: bool,
+    /// The output pin on this row is TRUE, so its name lights.
+    pub out_lit: bool,
 }
 
 /// What to draw for one cell: a shape from the table, a glyph, and the block rows.
+///
+/// A block's live state is per pin, not per box: `q` lights the frame, the `Q`
+/// label and the output lead, `in_power` lights the power row's input label and
+/// its lead, and each row's own flags light its two labels. Nothing else
+/// changes, so a timer that is timing does not turn its whole box green.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Face<'a> {
     pub shape: Shape,
     pub glyph: &'a str,
     pub rows: &'a [Row<'a>],
+    /// The block's `Q` this scan.
+    pub q: bool,
+    /// The power reaching the block's first input pin this scan.
+    pub in_power: bool,
+}
+
+impl Default for Face<'_> {
+    /// A face with no state of its own: the picker draws a face, not a scan.
+    fn default() -> Self {
+        Face {
+            shape: Shape::Contact,
+            glyph: "",
+            rows: &[],
+            q: false,
+            in_power: false,
+        }
+    }
 }
 
 impl<'a> Face<'a> {
@@ -3678,6 +3741,7 @@ impl<'a> Face<'a> {
             shape,
             glyph,
             rows: &[],
+            ..Face::default()
         }
     }
 
@@ -3696,6 +3760,7 @@ impl<'a> Face<'a> {
             shape: Shape::Coil,
             glyph,
             rows: &[],
+            ..Face::default()
         }
     }
 }
@@ -4110,6 +4175,9 @@ fn block_leads(rect: egui::Rect, body: egui::Rect, s: f32) -> [[egui::Pos2; 2]; 
 }
 
 fn draw_block(painter: &egui::Painter, rect: egui::Rect, face: &Face<'_>, style: Style, s: f32) {
+    // A lit conductor is the same weight `Style::lead` gives a true element.
+    let lead = style.lead(s);
+    let hot = Stroke::new(1.6 * s, style.accent);
     let y = conductor_y(rect);
     let cx = rect.center().x;
     let rows = face.rows.len().max(1);
@@ -4118,12 +4186,24 @@ fn draw_block(painter: &egui::Painter, rect: egui::Rect, face: &Face<'_>, style:
         egui::vec2(BLOCK_W * s, block_height(rows) * s),
     );
     // The power row is the only row with conductor: the block is in series, so the
-    // wire runs from the span's edges to the body on both sides.
-    let lead = style.lead(s);
-    for segment in block_leads(rect, body, s) {
-        painter.line_segment(segment, lead);
+    // wire runs from the span's edges to the body on both sides. Each side carries
+    // its own state — the input lead the power arriving, the output lead `Q` — so a
+    // timer that is enabled reads lit on the left and dark on the right.
+    let leads = block_leads(rect, body, s);
+    painter.line_segment(leads[0], if face.in_power { hot } else { lead });
+    painter.line_segment(leads[1], if face.q { hot } else { lead });
+    // The frame is the block's output, not its input: only `Q` lights the outline,
+    // so a timing timer keeps a grey box with a green `TT`/`IN`.
+    if face.q {
+        painter.rect_stroke(
+            body,
+            BLOCK_R * s,
+            Stroke::new(2.2 * s, style.accent),
+            egui::StrokeKind::Middle,
+        );
+    } else {
+        painter.rect_stroke(body, BLOCK_R * s, style.body(s), egui::StrokeKind::Middle);
     }
-    painter.rect_stroke(body, BLOCK_R * s, style.body(s), egui::StrokeKind::Middle);
     if !face.glyph.is_empty() {
         // The type text is the block's own name, not its instance: the instance is
         // in the label above the span. It is the first line of the content block,
@@ -4142,14 +4222,17 @@ fn draw_block(painter: &egui::Painter, rect: egui::Rect, face: &Face<'_>, style:
         let ry = block_line_y(body, index + 1, rows, s);
         // Names are text, not elements: they take the same ink the body does, so
         // a not-lit pin and an Unknown symbol are the same grey rather than two.
-        let pin_ink = if row.lit { style.accent } else { style.ink() };
         if let Some(name) = row.ins {
             painter.text(
                 egui::pos2(body.left() + INNER_PAD * s, ry),
                 Align2::LEFT_CENTER,
                 name,
                 name_size.clone(),
-                pin_ink,
+                if row.ins_lit {
+                    style.accent
+                } else {
+                    style.ink()
+                },
             );
         }
         if let Some(name) = row.out {
@@ -4158,7 +4241,11 @@ fn draw_block(painter: &egui::Painter, rect: egui::Rect, face: &Face<'_>, style:
                 Align2::RIGHT_CENTER,
                 name,
                 name_size.clone(),
-                pin_ink,
+                if row.out_lit {
+                    style.accent
+                } else {
+                    style.ink()
+                },
             );
         }
         // Values sit outside the body, on their own row, and no line is drawn to
@@ -4212,25 +4299,114 @@ pub fn cell_active(plc: &PlcUi, cell: &Cell) -> Option<bool> {
     }
 }
 
+/// The power a rung delivers to its coil, from the snapshot alone.
+///
+/// Three-valued: a rung with a false condition is off whatever else is unknown,
+/// and a rung whose conditions are all true but for one unanswered cell is
+/// unknown, not off.
+pub fn rung_power(plc: &PlcUi, cells: &[Cell]) -> Option<bool> {
+    let mut unknown = false;
+    for cell in cells {
+        let value = match cell {
+            Cell::Contact { .. }
+            | Cell::Edge { .. }
+            | Cell::Compare { .. }
+            | Cell::Block { .. }
+            | Cell::Expr { .. } => cell_active(plc, cell),
+            // A bare wire, a link, a compute cell: the conductor itself.
+            _ => continue,
+        };
+        match value {
+            Some(false) => return Some(false),
+            Some(true) => {}
+            None => unknown = true,
+        }
+    }
+    (!unknown).then_some(true)
+}
+
+/// A coil's live state. Its own bit when the snapshot names it; for a member
+/// write (`CTU0.R`, a counter's reset) the snapshot has no readable bit, so the
+/// coil shows the power that reached it — the write *is* that power.
+pub(crate) fn coil_live(plc: &PlcUi, var: &str, delivered: Option<bool>) -> Option<bool> {
+    plc.bit_value(var)
+        .or_else(|| var.contains('.').then_some(delivered).flatten())
+}
+
 /// The element's live state from the preview when one is held, otherwise from the
 /// snapshot.
 fn live_at(
     plc: &PlcUi,
     local: &Option<(Vec<Option<bool>>, Option<bool>)>,
-    position: usize,
+    power: Option<bool>,
     cell: &Cell,
 ) -> Option<bool> {
-    let _ = position;
     match cell {
         // A wire carries the rung's *output*, not the power that happens to have
         // reached its column: lighting every wire upstream of a toggled contact
-        // said the rung was true when its output was still false.
-        Cell::Wire | Cell::Link => local.as_ref().and_then(|(_, coil)| *coil),
+        // said the rung was true when its output was still false. With no preview
+        // held the output comes from the snapshot, so a live ladder's wires show
+        // the rung's state as it is.
+        Cell::Wire | Cell::Link => match local {
+            Some((_, coil)) => *coil,
+            None => power,
+        },
         // A symbol answers for itself: a contact's bars follow its own bit, so
         // toggling it shows on the contact even when the rung's output does not
         // move.
         _ => cell_active(plc, cell),
     }
+}
+
+/// One pin row of a block face, with the two facts the renderer needs about it:
+/// the labels, the formatted values, and whether each label is lit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PinRow<'a> {
+    pub ins: Option<&'a str>,
+    pub out: Option<&'a str>,
+    pub value_in: Option<String>,
+    pub value_out: Option<String>,
+    pub ins_lit: bool,
+    pub out_lit: bool,
+}
+
+/// A block's pin rows and its two facts, read from the member bits the scan
+/// publishes: `q` is `Q` (the frame and the output lead), `in_power` is the
+/// first input pin (the input lead). Pure, so a test can read it without a UI.
+pub(crate) fn block_state<'a>(
+    plc: &PlcUi,
+    instance: &str,
+    preset: &str,
+    pins_in: &[&'a str],
+    pins_out: &[&'a str],
+) -> (Vec<PinRow<'a>>, bool, bool) {
+    let bit = |pin: &str| plc.bit_value(&format!("{instance}.{pin}")) == Some(true);
+    let rows = (0..pins_in.len().max(pins_out.len()))
+        .map(|index| {
+            let ins = pins_in.get(index).copied().filter(|name| !name.is_empty());
+            let out = pins_out.get(index).copied().filter(|name| !name.is_empty());
+            let (value_in, value_out) = match (ins, out) {
+                (Some(pin), Some(out)) => {
+                    let (left, right) = pin_values(plc, instance, preset, pin, out);
+                    (Some(left), Some(right))
+                }
+                (Some(pin), None) => (Some(pin_values(plc, instance, preset, pin, "").0), None),
+                (None, Some(out)) => (None, Some(pin_values(plc, instance, preset, "", out).1)),
+                (None, None) => (None, None),
+            };
+            PinRow {
+                ins,
+                out,
+                value_in,
+                value_out,
+                ins_lit: ins.map(bit).unwrap_or(false),
+                out_lit: out.map(bit).unwrap_or(false),
+            }
+        })
+        .collect::<Vec<_>>();
+    let q = bit("Q");
+    let in_power = pins_in.first().map(|pin| bit(pin)).unwrap_or(false);
+    (rows, q, in_power)
 }
 
 /// A block pin's value, formatted for display. The UI decides what a value means;
@@ -5985,37 +6161,72 @@ mod preview_colour_tests {
         ];
         let local = Some(preview_scan(&plc, &cells, None));
         let scan = preview_scan(&plc, &cells, None);
+        let power = rung_power(&plc, &cells);
         assert_eq!(
             scan.0[0],
             Some(true),
             "the scan still carries power up to the wire's column"
         );
         assert_eq!(
-            live_at(&plc, &local, 1, &cells[1]),
+            live_at(&plc, &local, power, &cells[1]),
             Some(true),
             "the toggled contact shows its own bit"
         );
         assert_eq!(
-            live_at(&plc, &local, 2, &cells[2]),
+            live_at(&plc, &local, power, &cells[2]),
             Some(false),
             "the untoggled contact stays dark"
         );
         assert_eq!(
-            live_at(&plc, &local, 0, &cells[0]),
+            live_at(&plc, &local, power, &cells[0]),
             Some(false),
             "a AND b is false, so the wire is not lit"
         );
     }
 
-    /// With no preview held nothing is evaluated locally: a wire has no rung
-    /// state to show and stays neutral rather than reading as off.
+    /// A live ladder's wires show the rung's own output from the snapshot: before
+    /// this, a wire had a state only while a contact was held in the preview, so
+    /// every wire in a running program stayed neutral.
     #[test]
-    fn a_wire_without_a_preview_stays_unknown() {
-        let plc = plc_with(&[("a", true)]);
-        let empty = preview_scan(&plc, &[], None);
-        assert_eq!(empty.1, Some(true));
-        let wire = Cell::Wire;
-        assert_eq!(live_at(&plc, &None, 0, &wire), None);
+    fn a_wire_follows_the_rung_from_the_snapshot() {
+        let plc = plc_with(&[("a", true), ("b", false)]);
+        let on = [Cell::Contact {
+            var: "a".to_string(),
+            negated: false,
+        }];
+        let off = [
+            Cell::Contact {
+                var: "a".to_string(),
+                negated: false,
+            },
+            Cell::Contact {
+                var: "b".to_string(),
+                negated: false,
+            },
+        ];
+        assert_eq!(rung_power(&plc, &on), Some(true));
+        assert_eq!(rung_power(&plc, &off), Some(false));
+        assert_eq!(
+            live_at(&plc, &None, rung_power(&plc, &on), &Cell::Wire),
+            Some(true),
+            "the wire carries the rung's output with no preview held"
+        );
+        // A computed cell has no local evaluator, so the rung is unknown; but one
+        // false condition still settles it.
+        let unknown = [Cell::Expr {
+            text: "bogus".to_string(),
+        }];
+        assert_eq!(rung_power(&plc, &unknown), None, "unknown, not off");
+        let mut mixed = unknown.to_vec();
+        mixed.push(Cell::Contact {
+            var: "b".to_string(),
+            negated: false,
+        });
+        assert_eq!(
+            rung_power(&plc, &mixed),
+            Some(false),
+            "a false condition settles the rung whatever else is unknown"
+        );
     }
 }
 
@@ -6307,6 +6518,221 @@ mod block_value_tests {
             pin_values(&plc, "CTU0", "100", "PV", "CV"),
             ("100".to_string(), "4".to_string()),
             "the face shows the live count, with no unit"
+        );
+    }
+}
+
+#[cfg(test)]
+mod block_light_tests {
+    use super::*;
+
+    fn plc_with_bits(bits: &[(&str, bool)]) -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.vars = bits
+            .iter()
+            .map(|(name, value)| linc_plc_core::VarValue {
+                name: (*name).to_string(),
+                value: *value,
+                kind: linc_plc_core::SymbolKind::Output,
+                forced: false,
+            })
+            .collect();
+        plc
+    }
+
+    /// A block lights one pin at a time. Timing: the power pin and `IN` are on, so
+    /// the input lead and the `IN` label light; `Q` is off, so the frame, the `Q`
+    /// label and the output lead stay dark. Before this the whole box went green
+    /// from the rung's condition, and the `Q` row never lit at all.
+    #[test]
+    fn a_timer_lights_its_input_pin_and_not_its_output() {
+        let plc = plc_with_bits(&[("TON0.IN", true), ("TON0.Q", false), ("TON0.TT", true)]);
+        let (rows, q, in_power) = block_state(&plc, "TON0", "T#2s", &["IN", "PT"], &["Q", "ET"]);
+        assert!(in_power, "the power pin is on");
+        assert!(!q, "the output is not on");
+        assert!(rows[0].ins_lit, "IN lights from its own bit");
+        assert!(!rows[0].out_lit, "Q stays dark while the timer runs");
+        assert_eq!(rows[1].ins.as_deref(), Some("PT"));
+
+        // Done: Q on, TT off, IN still on. The frame and the Q label light; the
+        // input is still lit because it is still asserted.
+        let plc = plc_with_bits(&[("TON0.IN", true), ("TON0.Q", true), ("TON0.TT", false)]);
+        let (rows, q, in_power) = block_state(&plc, "TON0", "T#2s", &["IN", "PT"], &["Q", "ET"]);
+        assert!(q, "the frame follows Q");
+        assert!(in_power);
+        assert!(rows[0].out_lit, "the Q label lights");
+        assert!(rows[0].ins_lit);
+
+        // Idle: nothing lights, and the box is drawn off rather than unknown.
+        let plc = plc_with_bits(&[("TON0.IN", false), ("TON0.Q", false)]);
+        let (rows, q, in_power) = block_state(&plc, "TON0", "T#2s", &["IN", "PT"], &["Q", "ET"]);
+        assert!(!q && !in_power);
+        assert!(!rows[0].ins_lit && !rows[0].out_lit);
+    }
+
+    /// A counter's three rows answer for themselves: `CU` from the power pin, `R`
+    /// from the reset pin, `Q` from the count. The `R` row exists and has no
+    /// output pin, so it must not borrow the row above.
+    #[test]
+    fn a_counter_lights_cu_r_and_q_on_their_own_rows() {
+        let plc = plc_with_bits(&[("CTU0.CU", true), ("CTU0.R", true), ("CTU0.Q", false)]);
+        let (rows, q, in_power) =
+            block_state(&plc, "CTU0", "5", &["CU", "R", "PV"], &["Q", "", "CV"]);
+        assert!(in_power, "CU is the power pin");
+        assert!(!q);
+        assert_eq!(rows.len(), 3, "three rows, one per pin pair");
+        assert!(rows[0].ins_lit, "CU lights");
+        assert!(rows[1].ins_lit, "R lights from its own bit");
+        assert!(rows[2].ins.is_some(), "PV keeps its row");
+        assert!(!rows[2].ins_lit, "a word pin never lights");
+        assert!(!rows[0].out_lit, "Q is off");
+    }
+
+    /// A pin the snapshot does not name stays dark instead of borrowing a
+    /// neighbour's state: a block whose rows cannot be answered is grey.
+    #[test]
+    fn an_unpublished_pin_stays_dark() {
+        let plc = plc_with_bits(&[("TON0.Q", true)]);
+        let (rows, q, in_power) = block_state(&plc, "TON0", "T#2s", &["IN", "PT"], &["Q", "ET"]);
+        assert!(q);
+        assert!(!in_power, "no IN bit, no lit lead");
+        assert!(!rows[0].ins_lit, "the IN label does not borrow Q");
+        assert!(rows[0].out_lit, "each pin answers for itself");
+    }
+
+    /// The reset rung: `reset_count` closes onto a member-write coil `CTU0.R`,
+    /// which has no readable bit — the coil shows the power that reached it, so
+    /// the rung lights when its contact does.
+    #[test]
+    fn a_member_write_coil_lights_with_the_power_it_carries() {
+        let plc = plc_with_bits(&[("reset_count", true)]);
+        let cells = [Cell::Contact {
+            var: "reset_count".to_string(),
+            negated: false,
+        }];
+        let delivered = rung_power(&plc, &cells);
+        assert_eq!(delivered, Some(true), "the rung's power");
+        assert_eq!(
+            coil_live(&plc, "CTU0.R", delivered),
+            Some(true),
+            "the reset coil lights although R is not a published bit"
+        );
+        // A coil whose target *is* a bit answers with its own value: the write is
+        // what the coil stores, not the power alone.
+        assert_eq!(
+            coil_live(&plc, "lamp", Some(false)),
+            None,
+            "an unknown bit is not invented from the rung"
+        );
+        let plc = plc_with_bits(&[("lamp", false)]);
+        assert_eq!(coil_live(&plc, "lamp", Some(true)), Some(false));
+    }
+}
+
+#[cfg(test)]
+mod operand_member_tests {
+    use super::*;
+    use linc_plc_core::model::{Logic, Pou, PouLanguage, Project, Rung, Section};
+
+    /// A project with a timer, a counter and an edge block, one rung each.
+    fn plc_with_blocks() -> PlcUi {
+        let rung = |block: &str, instance: &str, preset: &str| Rung {
+            label: String::new(),
+            comment: String::new(),
+            logic: Logic::Const { value: true },
+            coil: None,
+            cells: vec![
+                Cell::Block {
+                    block: block.to_string(),
+                    instance: instance.to_string(),
+                    preset: preset.to_string(),
+                },
+                Cell::Wire,
+            ],
+        };
+        let mut pou = Pou::new("main", PouLanguage::Ld);
+        pou.sections = vec![Section {
+            name: String::new(),
+            rungs: vec![
+                rung("TON", "TON0", "T#2s"),
+                rung("CTU", "CTU0", "5"),
+                rung("R_TRIG", "RT0", ""),
+            ],
+        }];
+        let mut plc = PlcUi::default();
+        plc.project = Project::new("members");
+        plc.project.pous = vec![pou];
+        plc.pou = 0;
+        plc
+    }
+
+    /// A contact can name a block's bit members, which it could not before: the
+    /// list held only the project's I/O and variables, so `TON0.Q` and `TON0.TT`
+    /// had to be typed. The members are listed per instance and carry the family
+    /// in their kind, so typing the instance narrows to its own bits.
+    #[test]
+    fn the_contact_list_offers_a_blocks_bit_members() {
+        let plc = plc_with_blocks();
+        let names = operand_choices(&plc)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        for expected in ["TON0.Q", "TON0.TT", "CTU0.Q", "RT0.Q"] {
+            assert!(
+                names.iter().any(|name| name == expected),
+                "{expected} is missing from {names:?}"
+            );
+        }
+        // A timer has no `TT`; an edge block has none and no word member either.
+        assert!(!names.iter().any(|name| name == "CTU0.TT"));
+        assert!(!names.iter().any(|name| name == "RT0.TT"));
+        // A word member is not a contact operand: the compare window reads those,
+        // and the picker must not offer what the validator refuses.
+        assert!(!names
+            .iter()
+            .any(|name| name.ends_with(".CV") || name.ends_with(".ET")));
+        // Grouped by instance: the timer's two rows sit together.
+        let ton = names
+            .iter()
+            .filter(|name| name.starts_with("TON0."))
+            .collect::<Vec<_>>();
+        assert_eq!(ton.len(), 2, "Q and TT, no more: {ton:?}");
+    }
+
+    /// A coil writes, so its list carries the one member a coil may write: a
+    /// counter's reset, the pattern `reset_count → (R) CTU0.R` uses.
+    #[test]
+    fn the_coil_list_offers_a_counters_reset_member() {
+        let plc = plc_with_blocks();
+        let names = coil_choices(&plc, 0, 0)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        assert!(names.iter().any(|name| name == "CTU0.R"), "{names:?}");
+        assert!(
+            !names.iter().any(|name| name == "TON0.R"),
+            "a timer has no reset pin: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|name| name == "CTU0.CV"),
+            "a coil writes a bit, not the count: {names:?}"
+        );
+    }
+
+    /// The compare window keeps reading the value members, and now names them by
+    /// the family the table gives instead of guessing from the block's spelling.
+    #[test]
+    fn the_compare_list_offers_the_value_member_of_each_block() {
+        let plc = plc_with_blocks();
+        let names = compare_choices(&plc)
+            .into_iter()
+            .map(|choice| choice.value)
+            .collect::<Vec<_>>();
+        assert!(names.iter().any(|name| name == "TON0.ET"), "{names:?}");
+        assert!(names.iter().any(|name| name == "CTU0.CV"), "{names:?}");
+        assert!(
+            !names.iter().any(|name| name == "RT0.ET"),
+            "a bit block has no value: {names:?}"
         );
     }
 }
