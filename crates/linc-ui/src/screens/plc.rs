@@ -504,6 +504,22 @@ pub fn delete_node(project: &mut Project, node: &NodePath) -> bool {
     true
 }
 
+/// A fresh row: one bare conductor, no contact and no coil.
+///
+/// A new row used to arrive with the first input contact and the first output
+/// coil already on it, which read as a program nobody wrote and made a second
+/// `Ctrl+N` a duplicate write the validator refuses. The operator adds the cells;
+/// the row is empty until then.
+fn empty_rung() -> Rung {
+    Rung {
+        label: String::new(),
+        comment: String::new(),
+        logic: Logic::Const { value: false },
+        coil: None,
+        cells: vec![linc_plc_core::grid::Cell::Wire; linc_plc_core::grid::POSITIONS],
+    }
+}
+
 /// Append (or insert after the given rung) a contact driving a new coil.
 pub fn add_rung(project: &mut Project, section: usize, after: Option<usize>) -> Option<NodePath> {
     let input = default_input_var(project);
@@ -1827,63 +1843,27 @@ impl PlcUi {
                 self.project.set_pous(pous);
             }
             Action::AddRungAfter { section, row } => {
-                let input = default_input_var(&self.project);
-                // A new row writes somewhere new: reusing the first output made
-                // the second row a duplicate write, which the validator refuses
-                // and the daemon will not load at startup.
-                let used: Vec<String> = self
-                    .project
-                    .all_pous()
-                    .iter()
-                    .flat_map(|pou| pou.sections.iter())
-                    .flat_map(|section| section.rungs.iter())
-                    .map(|rung| rung.coil().var.clone())
-                    .collect();
-                let output = self
-                    .project
-                    .io
-                    .iter()
-                    .filter(|point| point.direction == IoDirection::Out)
-                    .map(|point| point.name.clone())
-                    .chain(self.project.vars.iter().map(|var| var.name.clone()))
-                    .find(|name| !used.contains(name))
-                    .unwrap_or_else(|| {
-                        let mut index = 1;
-                        loop {
-                            let name = format!("aux{index}");
-                            if !self.project.vars.iter().any(|var| var.name == name) {
-                                self.project
-                                    .vars
-                                    .push(linc_plc_core::model::VarDecl::new(name.clone()));
-                                break name;
-                            }
-                            index += 1;
-                        }
-                    });
                 let mut pous = self.project.all_pous();
                 let mut made = None;
                 if let Some(pou) = pous.get_mut(self.pou) {
-                    if let Some(target) = pou.sections.get_mut(section) {
+                    // Ctrl+N on a fresh program has no section to add to, so the
+                    // first new row creates it: the key must never be dead.
+                    if pou.sections.is_empty() {
+                        pou.sections.push(linc_plc_core::model::Section {
+                            name: "MAIN".to_string(),
+                            rungs: Vec::new(),
+                        });
+                    }
+                    let index = section.min(pou.sections.len() - 1);
+                    if let Some(target) = pou.sections.get_mut(index) {
                         let at = (row + 1).min(target.rungs.len());
-                        target.rungs.insert(
-                            at,
-                            Rung {
-                                label: String::new(),
-                                cells: Vec::new(),
-                                comment: String::new(),
-                                logic: Logic::Contact {
-                                    var: input,
-                                    negated: false,
-                                },
-                                coil: Some(Coil::new(output, CoilKind::Normal)),
-                            },
-                        );
-                        made = Some(at);
+                        target.rungs.insert(at, empty_rung());
+                        made = Some((index, at));
                     }
                 }
                 self.project.set_pous(pous);
-                if let Some(at) = made {
-                    self.selection = Some(NodePath::root(section, at));
+                if let Some((index, at)) = made {
+                    self.selection = Some(NodePath::root(index, at));
                 }
                 self.normalise_selection();
             }
@@ -1919,29 +1899,22 @@ impl PlcUi {
                 // both representations and the compiler see the new row.
                 let after = self.selection.as_ref().map(|node| node.rung);
                 let section = self.selected_section();
-                let input = default_input_var(&self.project);
-                let output = default_output_var(&self.project);
                 let mut pous = self.project.all_pous();
                 if let Some(pou) = pous.get_mut(self.pou) {
-                    if let Some(target) = pou.sections.get_mut(section) {
+                    if pou.sections.is_empty() {
+                        pou.sections.push(linc_plc_core::model::Section {
+                            name: "MAIN".to_string(),
+                            rungs: Vec::new(),
+                        });
+                    }
+                    let index = section.min(pou.sections.len() - 1);
+                    if let Some(target) = pou.sections.get_mut(index) {
                         let at = match after {
                             Some(index) if index < target.rungs.len() => index + 1,
                             _ => target.rungs.len(),
                         };
-                        target.rungs.insert(
-                            at,
-                            Rung {
-                                label: String::new(),
-                                cells: Vec::new(),
-                                comment: String::new(),
-                                logic: Logic::Contact {
-                                    var: input,
-                                    negated: false,
-                                },
-                                coil: Some(Coil::new(output, CoilKind::Normal)),
-                            },
-                        );
-                        self.selection = Some(NodePath::root(section, at));
+                        target.rungs.insert(at, empty_rung());
+                        self.selection = Some(NodePath::root(index, at));
                     }
                 }
                 self.project.set_pous(pous);
@@ -9345,11 +9318,11 @@ mod pou_list_n_tests {
 mod new_row_tests {
     use super::*;
 
-    /// Rows added after one another must not write the same coil: the second
-    /// write made the project invalid, and a saved file then stopped the daemon
-    /// at startup with no I/O and no message.
+    /// A new row arrives empty: no prefilled contact and no coil, so two new
+    /// rows can never write the same output. The row is still a grid row, not a
+    /// comment row — an empty row is where the operator starts drawing.
     #[test]
-    fn new_rows_get_distinct_coils() {
+    fn a_new_row_is_empty_and_still_a_grid_row() {
         let mut plc = PlcUi::default();
         plc.project = linc_plc_core::model::Project::new("t");
         plc.project
@@ -9374,19 +9347,59 @@ mod new_row_tests {
         plc.project.set_pous(plc.project.all_pous());
         plc.apply(Action::AddRungAfter { section: 0, row: 0 });
         plc.apply(Action::AddRungAfter { section: 0, row: 1 });
+
         let pous = plc.project.all_pous();
-        let coils: Vec<String> = pous[0].sections[0]
-            .rungs
-            .iter()
-            .map(|rung| rung.coil().var.clone())
-            .collect();
-        let mut unique = coils.clone();
-        unique.sort();
-        unique.dedup();
-        assert_eq!(
-            unique.len(),
-            coils.len(),
-            "duplicate coil target: {coils:?}"
+        let rungs = &pous[0].sections[0].rungs;
+        assert_eq!(rungs.len(), 3, "both rows were added after the cursor");
+        for rung in &rungs[1..] {
+            assert!(!rung.has_coil(), "a new row writes nothing: {rung:?}");
+            assert!(
+                rung.cells
+                    .iter()
+                    .all(|cell| matches!(cell, linc_plc_core::grid::Cell::Wire)),
+                "no prefilled contact: {rung:?}"
+            );
+            assert!(
+                !rung.is_comment_row(),
+                "an empty row is still a row to draw on"
+            );
+        }
+    }
+
+    /// Ctrl+N on a program with no sections at all: the first new row starts the
+    /// section, because the key was dead on a fresh ladder.
+    #[test]
+    fn the_first_new_row_starts_the_section() {
+        let mut plc = PlcUi::default();
+        plc.project = linc_plc_core::model::Project::new("t");
+        plc.project.sections.clear();
+        plc.project.set_pous(plc.project.all_pous());
+        assert!(
+            plc.project.all_pous()[0].sections.is_empty(),
+            "the fixture starts with no sections"
+        );
+
+        plc.apply(Action::AddRungAfter { section: 0, row: 0 });
+        let pous = plc.project.all_pous();
+        assert_eq!(pous[0].sections.len(), 1, "the first row starts a section");
+        assert_eq!(pous[0].sections[0].rungs.len(), 1);
+        assert!(!pous[0].sections[0].rungs[0].has_coil());
+    }
+
+    /// A comment row still reads as one: the text is what marks it.
+    #[test]
+    fn a_row_with_comment_text_and_nothing_drawn_is_a_comment_row() {
+        let mut row = Rung::new(
+            Logic::Const { value: true },
+            Coil::new(String::new(), linc_plc_core::model::CoilKind::Normal),
+        );
+        row.cells = vec![linc_plc_core::grid::Cell::Wire; linc_plc_core::grid::POSITIONS];
+        row.coil = None;
+        assert!(!row.is_comment_row(), "no text: an empty grid row");
+        row.comment = "// seal in".into();
+        assert!(
+            row.is_comment_row(),
+            "text and nothing drawn: a comment row"
         );
     }
 }

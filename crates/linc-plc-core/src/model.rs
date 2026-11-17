@@ -1015,7 +1015,10 @@ impl Rung {
     pub fn is_comment_row(&self) -> bool {
         // A jump, call or compute coil is an instruction even with no operand:
         // an empty one is an error the validator must see, not a comment. A rung
-        // with no coil at all is a comment only when it draws nothing either.
+        // with no coil at all is a comment only when it draws nothing either —
+        // and only when it carries comment text, because a freshly added row is
+        // empty too (no contact, no coil) and must stay a rung the editor can put
+        // cells on. The text is what tells the two apart.
         let blank = match &self.coil {
             None => true,
             Some(coil) => {
@@ -1026,6 +1029,7 @@ impl Rung {
             }
         };
         blank
+            && !self.comment.trim().is_empty()
             && self
                 .cells
                 .iter()

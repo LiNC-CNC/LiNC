@@ -3392,7 +3392,13 @@ pub fn grid_rung(
             rung_index,
             POSITIONS,
             &coil,
-            &Face::coil(rung.coil().kind),
+            // A rung with no coil has an empty coil slot: draw the conductor,
+            // not a coil symbol with nothing written in it.
+            &if rung.has_coil() {
+                Face::coil(rung.coil().kind)
+            } else {
+                Face::from_cell(&Cell::Wire)
+            },
             name_y,
             Vec2::new(CELL_WIDTH, strip_height),
             // A compute rung writes through its cell, so its coil slot is unused
