@@ -3467,7 +3467,8 @@ impl<'a> Face<'a> {
             ),
             Cell::Compare { .. } | Cell::Expr { .. } => (Shape::Small, ""),
             Cell::Compute { .. } => (Shape::Small, ":="),
-            Cell::Wire | Cell::Link => (Shape::Contact, ""),
+            Cell::Wire => (Shape::Wire, ""),
+            Cell::Link => (Shape::Link, ""),
         };
         Face {
             shape,
@@ -3718,6 +3719,9 @@ pub(crate) fn draw_face(painter: &egui::Painter, rect: egui::Rect, face: &Face<'
     let right = rect.right();
     let lead = style.lead(s);
     match face.shape {
+        // A bare conductor and its branch draw no symbol: the span is one line.
+        Shape::Wire => draw_wire(painter, rect, style),
+        Shape::Link => draw_link(painter, rect, style),
         Shape::Contact | Shape::ContactNc => {
             let bar = BAR_HALF * s;
             painter.line_segment([egui::pos2(left, y), egui::pos2(cx - bar, y)], lead);
@@ -4144,6 +4148,11 @@ mod symbol_tests {
         });
         assert_eq!(edge.shape, Shape::Contact);
         assert_eq!(edge.glyph, "P", "the letter is inside the gap");
+
+        // A wire is a conductor with no symbol. Mapping it to a contact drew two
+        // bars in the middle of every empty cell, so the shapes are their own.
+        assert_eq!(Face::from_cell(&Cell::Wire).shape, Shape::Wire);
+        assert_eq!(Face::from_cell(&Cell::Link).shape, Shape::Link);
     }
 
     /// A cell keeps room for its operand name beside the symbol.

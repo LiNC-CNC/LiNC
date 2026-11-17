@@ -139,6 +139,10 @@ pub enum Shape {
     Small,
     /// A function-block box
     Block,
+    /// A bare conductor: no symbol, one unbroken line
+    Wire,
+    /// A conductor with a junction that reaches the branch row below
+    Link,
 }
 
 /// What an instruction reads.
