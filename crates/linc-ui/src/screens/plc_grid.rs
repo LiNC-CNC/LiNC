@@ -3554,7 +3554,8 @@ impl<'a> Face<'a> {
                     .map(|spec| spec.mnemonic)
                     .unwrap_or(""),
             ),
-            Cell::Compare { .. } | Cell::Expr { .. } => (Shape::Small, ""),
+            Cell::Compare { op, .. } => (Shape::Small, compare_sign(op)),
+            Cell::Expr { .. } => (Shape::Small, ""),
             Cell::Compute { .. } => (Shape::Small, ":="),
             Cell::Wire => (Shape::Wire, ""),
             Cell::Link => (Shape::Link, ""),
@@ -4161,6 +4162,21 @@ pub fn grid_cell_label(plc: &PlcUi, cell: &Cell) -> String {
     }
 }
 
+/// The sign a compare draws, in the label and in the box: one table, so the
+/// operand above the cell and the operator inside it cannot disagree. An operator
+/// the profile does not know draws `?` rather than an empty box, because an empty
+/// box reads as a symbol with nothing to say.
+fn compare_sign(op: &str) -> &'static str {
+    match op.to_ascii_uppercase().as_str() {
+        "GT" => ">",
+        "GE" => ">=",
+        "EQ" => "=",
+        "NE" => "<>",
+        "LE" => "<=",
+        "LT" => "<",
+        _ => "?",
+    }
+}
 
 fn cell_label(cell: &Cell) -> String {
     match cell {
@@ -4174,19 +4190,7 @@ fn cell_label(cell: &Cell) -> String {
         }
         Cell::Edge { var, rising } => format!("{}{var}", if *rising { "P " } else { "N " }),
         Cell::Block { instance, .. } => instance.clone(),
-        Cell::Compare { op, left, right } => {
-            let upper = op.to_ascii_uppercase();
-            let symbol = match upper.as_str() {
-                "GT" => ">",
-                "GE" => ">=",
-                "EQ" => "=",
-                "NE" => "<>",
-                "LE" => "<=",
-                "LT" => "<",
-                other => other,
-            };
-            format!("{left}{symbol}{right}")
-        }
+        Cell::Compare { op, left, right } => format!("{left}{}{right}", compare_sign(op)),
         Cell::Expr { text } => text.clone(),
         Cell::Compute {
             op,
@@ -5534,5 +5538,51 @@ mod coil_shape_tests {
             "{drawn} of {circle}: the arcs cover the circle"
         );
         assert_eq!(COIL_SPAN, std::f32::consts::PI);
+    }
+}
+
+#[cfg(test)]
+mod compare_face_tests {
+    use super::*;
+
+    fn compare(op: &str, left: &str, right: &str) -> Cell {
+        Cell::Compare {
+            op: op.to_string(),
+            left: left.to_string(),
+            right: right.to_string(),
+        }
+    }
+
+    /// A compare box carries its operator, on the same rule the compute box uses
+    /// for `:=`: the sign is the cell's glyph, drawn centred in the body. An empty
+    /// box reads as a symbol the operator cannot identify.
+    #[test]
+    fn a_compare_box_carries_its_operator() {
+        for (op, sign) in [
+            ("GT", ">"),
+            ("GE", ">="),
+            ("EQ", "="),
+            ("NE", "<>"),
+            ("LE", "<="),
+            ("LT", "<"),
+        ] {
+            let face = Face::from_cell(&compare(op, "MW1", "5"));
+            assert_eq!(face.shape, Shape::Small);
+            assert_eq!(face.glyph, sign, "{op} draws its sign inside the box");
+            // The operand label keeps the whole expression, as the compute label
+            // does: the box says which operator, the label says on what.
+            assert_eq!(cell_label(&compare(op, "MW1", "5")), format!("MW1{sign}5"));
+        }
+        // The same placement as `:=`: both are `Shape::Small` glyphs.
+        let compute = Face::from_cell(&Cell::Compute {
+            op: "ADD".to_string(),
+            target: "MW2".to_string(),
+            left: "MW1".to_string(),
+            right: "5".to_string(),
+        });
+        assert_eq!(compute.shape, Shape::Small);
+        assert_eq!(compute.glyph, ":=");
+        // An operator outside the table is marked, not left blank.
+        assert_eq!(Face::from_cell(&compare("XX", "MW1", "5")).glyph, "?");
     }
 }
