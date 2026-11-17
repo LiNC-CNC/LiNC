@@ -15,6 +15,75 @@ use crate::shell::LincApp;
 use crate::theme;
 
 /// Keys the ladder editor owns. Consumed before any widget sees them.
+/// The rung comment's own field, one line above the rung.
+///
+/// `Shift+C` opens it on the rung under the cursor (`C` alone is a contact), the
+/// band shows the buffer with a caret, Enter stores it through
+/// `Action::SetRungComment`, and Escape drops it. The band is drawn by
+/// `grid_rung`, so the field is where the comment will end up rather than in a
+/// dialog over the ladder.
+///
+/// Returns true while the field owns the keyboard, so the grid's keys stay out.
+pub fn rung_comment_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) -> bool {
+    if let Some((section, rung)) = plc.rung_comment_edit {
+        let mut buffer = std::mem::take(&mut plc.rung_comment_buffer);
+        for event in ui.input(|input| input.events.clone()) {
+            match event {
+                egui::Event::Text(text) => buffer.push_str(&text),
+                egui::Event::Key {
+                    key, pressed: true, ..
+                } => match key {
+                    egui::Key::Backspace => {
+                        buffer.pop();
+                    }
+                    egui::Key::Escape => {
+                        plc.rung_comment_edit = None;
+                        plc.rung_comment_buffer.clear();
+                        plc.text_editing = false;
+                        return true;
+                    }
+                    egui::Key::Enter => {
+                        actions.push(Action::SetRungComment {
+                            section,
+                            rung,
+                            comment: buffer.trim().to_string(),
+                        });
+                        plc.rung_comment_edit = None;
+                        plc.rung_comment_buffer.clear();
+                        plc.text_editing = false;
+                        return true;
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        plc.rung_comment_buffer = buffer;
+        return true;
+    }
+    let open = ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::C));
+    if !open {
+        return false;
+    }
+    let cursor = plc.cell_cursor.unwrap_or((0, 0, 0));
+    let comment = plc
+        .current_pou_sections()
+        .get(cursor.0)
+        .and_then(|section| section.rungs.get(cursor.1))
+        .map(|rung| {
+            rung.comment
+                .trim()
+                .trim_start_matches("//")
+                .trim()
+                .to_string()
+        })
+        .unwrap_or_default();
+    plc.rung_comment_edit = Some((cursor.0, cursor.1));
+    plc.rung_comment_buffer = comment;
+    plc.text_editing = true;
+    true
+}
+
 pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     if matches!(app.plc.page, PlcPage::Trend | PlcPage::Watch) {
         // Z cycles the window, as the manual's trend page does; the daemon
@@ -29,6 +98,12 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 app.plc.trend_remote.samples.clear();
             }
         }
+        return;
+    }
+    // The rung's comment is typed into the band above it, with the field's own
+    // keys: it must run before the blanket Escape rule, or Escape would drop
+    // `text_editing` and leave the buffer behind.
+    if rung_comment_keys(&mut app.plc, ui, actions) {
         return;
     }
     // Escape always gives the keyboard back to the grid: a property field that
@@ -3207,9 +3282,12 @@ pub fn grid_rung(
     // grows by one band and the names move down into the next one.
     let label = rung.label.trim();
     let commented = !rung.comment.is_empty();
+    // The rung whose comment is being typed: its band shows the buffer and a
+    // caret, and the rung is banded even before anything is stored.
+    let editing = plc.rung_comment_edit == Some((section, rung_index));
     // A labelled rung needs the same upper band a commented one has, so the
     // label has somewhere to sit.
-    let banded = commented || !label.is_empty();
+    let banded = commented || !label.is_empty() || editing;
     // A row holding a block grows to make room for its label band; a symbol-only
     // row keeps `CELL_HEIGHT`.
     let rows = cells
@@ -3348,12 +3426,20 @@ pub fn grid_rung(
         // The comment line is the top band; the operand names sit one band
         // below it (see `BANDED_NAME_Y`), so a long comment cannot print over
         // the first cell's name.
-        let band = match (label.is_empty(), commented) {
-            (false, true) => format!("{label}: // {}", rung.comment),
-            (false, false) => format!("{label}:"),
-            (true, _) => format!("// {}", rung.comment),
+        let band = if editing {
+            format!("// {}_", plc.rung_comment_buffer)
+        } else {
+            match (label.is_empty(), commented) {
+                (false, true) => format!("{label}: // {}", rung.comment),
+                (false, false) => format!("{label}:"),
+                (true, _) => format!("// {}", rung.comment),
+            }
         };
-        let ink = theme::COMMENT;
+        let ink = if editing {
+            theme::ACCENT
+        } else {
+            theme::COMMENT
+        };
         let rect = strip.response.rect;
         ui.painter().text(
             egui::pos2(rect.left() + 2.0, rect.top() + LABEL_Y),
@@ -3709,7 +3795,12 @@ pub(crate) fn draw_link(painter: &egui::Painter, rect: egui::Rect, style: Style)
         [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
         style.lead(s),
     );
-    // The junction reaches the branch row's conductor exactly.
+    // The junction reaches the next row's conductor exactly, because every row's
+    // conductor sits `CONDUCTOR_Y` above its own bottom edge and a plain row is
+    // `CELL_HEIGHT` tall. A row that grows for a label or a comment keeps that
+    // offset from its own bottom, so a link drawn *above* such a row stops one
+    // band short; a block row already behaves that way. Threading the next row's
+    // band through here is the fix if it ever shows on a real branch.
     painter.line_segment(
         [
             egui::pos2(cx, y),
@@ -5257,5 +5348,126 @@ mod golden_tests {
         let path = GOLDEN.replace("plc-ton-row", "plc-coil-row");
         let golden = std::fs::read_to_string(&path).expect("the coil golden is committed");
         assert_eq!(drawn, golden, "the rendered coil changed");
+    }
+}
+
+#[cfg(test)]
+mod rung_comment_tests {
+    use super::*;
+
+    fn keys(plc: &mut PlcUi, events: Vec<egui::Event>) -> (bool, Vec<Action>) {
+        let ctx = egui::Context::default();
+        let mut actions = Vec::new();
+        let mut owned = false;
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Area::new(egui::Id::unique("rung-comment"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    owned = rung_comment_keys(plc, ui, &mut actions);
+                });
+        });
+        output.textures_delta.clear();
+        (owned, actions)
+    }
+
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    fn ld_pou() -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.add_pou(PouLanguage::Ld);
+        // A new POU has no sections; the field needs a rung to sit above.
+        let mut pous = plc.project.all_pous();
+        pous[plc.pou].sections = vec![linc_plc_core::model::Section {
+            name: "main".to_string(),
+            rungs: vec![Rung::new(
+                linc_plc_core::model::Logic::Const { value: true },
+                Coil::new("run", CoilKind::Normal),
+            )],
+        }];
+        plc.project.set_pous(pous);
+        plc.page = PlcPage::Edit;
+        plc.cell_cursor = Some((0, 0, 0));
+        plc
+    }
+
+    /// `Shift+C` opens the rung's comment field, typing reaches it, Enter stores
+    /// what was typed and Escape stores nothing.
+    #[test]
+    fn shift_c_opens_the_rung_comment_field_and_enter_stores_it() {
+        let mut plc = ld_pou();
+        let (owned, actions) = keys(&mut plc, vec![key(egui::Key::C, egui::Modifiers::SHIFT)]);
+        assert!(owned, "the field owns the keyboard once it opens");
+        assert_eq!(plc.rung_comment_edit, Some((0, 0)));
+        assert!(actions.is_empty(), "opening stores nothing");
+        assert!(plc.text_editing, "the grid's keys stay out while typing");
+
+        let (owned, actions) = keys(&mut plc, vec![egui::Event::Text("seal in".to_string())]);
+        assert!(owned);
+        assert_eq!(plc.rung_comment_buffer, "seal in");
+        assert!(actions.is_empty(), "typing stores nothing yet");
+
+        let (owned, actions) = keys(&mut plc, vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+        assert!(owned);
+        assert_eq!(plc.rung_comment_edit, None);
+        assert!(!plc.text_editing, "Enter gives the keyboard back");
+        assert_eq!(actions.len(), 1, "one store action: {:?}", actions.len());
+        match &actions[0] {
+            Action::SetRungComment {
+                section,
+                rung,
+                comment,
+            } => {
+                assert_eq!((*section, *rung), (0, 0));
+                assert_eq!(comment, "seal in");
+            }
+            other => panic!("unexpected action {other:?}"),
+        }
+    }
+
+    /// Reopening prefills the field with the stored comment, and Escape drops the
+    /// edit without an action.
+    #[test]
+    fn the_field_prefills_and_escape_cancels() {
+        let mut plc = ld_pou();
+        let mut pous = plc.project.all_pous();
+        pous[plc.pou].sections[0].rungs[0].comment = "// seal in".to_string();
+        plc.project.set_pous(pous);
+
+        let (_, _) = keys(&mut plc, vec![key(egui::Key::C, egui::Modifiers::SHIFT)]);
+        assert_eq!(
+            plc.rung_comment_buffer, "seal in",
+            "the marker is not part of the text"
+        );
+
+        let (owned, actions) = keys(
+            &mut plc,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert!(owned);
+        assert!(actions.is_empty(), "Escape stores nothing");
+        assert_eq!(plc.rung_comment_edit, None);
+        assert!(!plc.text_editing);
+    }
+
+    /// `C` alone is a contact, not a comment: the field must not open.
+    #[test]
+    fn a_plain_c_does_not_open_the_comment_field() {
+        let mut plc = ld_pou();
+        let (owned, actions) = keys(&mut plc, vec![key(egui::Key::C, egui::Modifiers::NONE)]);
+        assert!(!owned);
+        assert!(actions.is_empty());
+        assert_eq!(plc.rung_comment_edit, None);
     }
 }

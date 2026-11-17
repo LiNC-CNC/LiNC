@@ -1101,6 +1101,11 @@ pub struct PlcUi {
     /// The comment row being typed into, with its text.
     pub comment_row: Option<(usize, usize)>,
     pub comment_buffer: String,
+    /// The rung whose comment is being typed, and the text so far. Not
+    /// `comment_row`: that one is a row of its own, this is the comment band
+    /// above an ordinary rung.
+    pub rung_comment_edit: Option<(usize, usize)>,
+    pub rung_comment_buffer: String,
     /// Boolean traces for the trend page.
     pub trend: TrendBuffer,
     /// Per-scan window from the daemon, when one is connected.
@@ -1215,6 +1220,8 @@ impl Default for PlcUi {
             symbol_comment_edit: None,
             comment_row: None,
             comment_buffer: String::new(),
+            rung_comment_edit: None,
+            rung_comment_buffer: String::new(),
             trend: TrendBuffer::default(),
             trend_remote: TrendData::default(),
             words: Vec::new(),
@@ -2974,6 +2981,7 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(Heading("RUNG"));
             entries.push(row("New row", "Ctrl+N", false));
             entries.push(row("Delete row", "Ctrl+Bksp", false));
+            entries.push(row("Rung comment", "Shift+C", false));
             entries.push(Heading("PREVIEW"));
             entries.push(row("Hold contact · cycle coil", "Space", false));
             entries.push(row("Drawing only", "no HAL", false));
