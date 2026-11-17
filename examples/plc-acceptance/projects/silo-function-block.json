@@ -371,11 +371,6 @@
                 "op": "const",
                 "value": true
               },
-              "coil": {
-                "var": "",
-                "kind": "normal",
-                "expr": null
-              },
               "cells": [
                 {
                   "cell": "contact",
@@ -560,11 +555,6 @@
               "logic": {
                 "op": "const",
                 "value": true
-              },
-              "coil": {
-                "var": "",
-                "kind": "normal",
-                "expr": null
               },
               "cells": [
                 {

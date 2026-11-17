@@ -374,15 +374,11 @@ pub fn migrate_section(section: &mut crate::model::Section) {
         section.rungs[index].cells = padded(first);
         let coil = section.rungs[index].coil().clone();
         for (offset, row) in rows.into_iter().enumerate() {
-            let mut branch = crate::model::Rung::new(
-                Logic::Const { value: true },
-                crate::model::Coil {
-                    args: Vec::new(),
-                    var: String::new(),
-                    expr: None,
-                    kind: crate::model::CoilKind::Normal,
-                },
-            );
+            // A branch row has no coil of its own: the row above carries the one
+            // this branch feeds. It used to be given a blank coil, which reads as
+            // "a coil with no operand" — an invalid coil in IEC 61131-3 and a
+            // nameless `( )` on the ladder.
+            let mut branch = crate::model::Rung::without_coil(Logic::Const { value: true });
             branch.cells = padded(row);
             branch.comment = if offset == 0 {
                 format!("branch of {}", coil.var)

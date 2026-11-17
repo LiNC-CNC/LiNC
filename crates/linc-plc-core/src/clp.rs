@@ -1285,7 +1285,9 @@ impl Importer {
             coil: Some(coil),
             cells,
         };
-        // The branch row is that link's continuation, so its coil is blank.
+        // The branch row is that link's continuation, so it carries no coil: the
+        // row above holds the one the branch feeds. A blank coil here would be a
+        // nameless `( )` — invalid, and a store to nowhere.
         let mut branch_cells = self.map_strip(raw, y, 0, k, consumed)?;
         trim_trailing_wires(&mut branch_cells);
         pad_cells(&mut branch_cells, raw.index)?;
@@ -1293,7 +1295,7 @@ impl Importer {
             label: format!("{}-b", labels[&raw.index]),
             comment: String::new(),
             logic: crate::model::Logic::Const { value: true },
-            coil: Some(Coil::new("", CoilKind::Normal)),
+            coil: None,
             cells: branch_cells,
         };
         Ok(vec![main_rung, branch_rung])

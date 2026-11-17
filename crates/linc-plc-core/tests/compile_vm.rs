@@ -1984,10 +1984,7 @@ fn a_linked_branch_parallels_one_cell_and_not_the_estop() {
         Coil::new("run", CoilKind::Normal),
     );
     latch.cells = vec![contact("pump", false), Cell::Link, contact("estop", true)];
-    let mut branch = Rung::new(
-        Logic::contact("run", false),
-        Coil::new("", CoilKind::Normal),
-    );
+    let mut branch = Rung::without_coil(Logic::contact("run", false));
     branch.cells = vec![contact("run", false)];
     let project = project_with(
         vec![
@@ -2099,7 +2096,7 @@ fn compute_rows_run_and_chain_their_words() {
         }],
         comment: String::new(),
         logic: Logic::Const { value: true },
-        coil: Some(Coil::new("", CoilKind::Normal)),
+        coil: None,
     };
     let project = project_with(
         vec![IoPoint::new("lamp", IoDirection::Out)],
@@ -2635,7 +2632,7 @@ fn compute_rung(target: &str, op: &str, left: &str, right: &str) -> Rung {
         }],
         comment: String::new(),
         logic: Logic::Const { value: true },
-        coil: Some(Coil::new("", CoilKind::Normal)),
+        coil: None,
     }
 }
 

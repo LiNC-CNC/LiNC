@@ -327,7 +327,40 @@
               }
             ]
           },
-          "cells": []
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "busy",
+              "negated": false
+            },
+            {
+              "cell": "block",
+              "block": "TON",
+              "instance": "TON0",
+              "preset": "Recipes[Sel].FillTime"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
         },
         {
           "label": "",
@@ -348,7 +381,40 @@
               }
             ]
           },
-          "cells": []
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON0.Q",
+              "negated": false
+            },
+            {
+              "cell": "block",
+              "block": "TON",
+              "instance": "TON1",
+              "preset": "Recipes[Sel].MixTime"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
         },
         {
           "label": "",
@@ -821,7 +887,40 @@
                   }
                 ]
               },
-              "cells": []
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "busy",
+                  "negated": false
+                },
+                {
+                  "cell": "block",
+                  "block": "TON",
+                  "instance": "TON0",
+                  "preset": "Recipes[Sel].FillTime"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
             },
             {
               "label": "",
@@ -842,7 +941,40 @@
                   }
                 ]
               },
-              "cells": []
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON0.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "block",
+                  "block": "TON",
+                  "instance": "TON1",
+                  "preset": "Recipes[Sel].MixTime"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
             },
             {
               "label": "",

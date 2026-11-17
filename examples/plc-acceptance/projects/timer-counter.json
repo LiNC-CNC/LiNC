@@ -63,7 +63,42 @@
               }
             ]
           },
-          "cells": []
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "n__i0_0",
+              "negated": false
+            },
+            {
+              "cell": "contact",
+              "var": "TON1.Q",
+              "negated": true
+            },
+            {
+              "cell": "block",
+              "block": "TON",
+              "instance": "TON0",
+              "preset": "T#3000ms"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
         },
         {
           "label": "",
@@ -84,7 +119,40 @@
               }
             ]
           },
-          "cells": []
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON0.Q",
+              "negated": false
+            },
+            {
+              "cell": "block",
+              "block": "TON",
+              "instance": "TON1",
+              "preset": "T#2000ms"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
         },
         {
           "label": "",
@@ -150,7 +218,40 @@
               }
             ]
           },
-          "cells": []
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON0.Q",
+              "negated": false
+            },
+            {
+              "cell": "block",
+              "block": "CTU",
+              "instance": "CTU0",
+              "preset": "5"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
         },
         {
           "label": "",
@@ -285,7 +386,42 @@
                   }
                 ]
               },
-              "cells": []
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "n__i0_0",
+                  "negated": false
+                },
+                {
+                  "cell": "contact",
+                  "var": "TON1.Q",
+                  "negated": true
+                },
+                {
+                  "cell": "block",
+                  "block": "TON",
+                  "instance": "TON0",
+                  "preset": "T#3000ms"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
             },
             {
               "label": "",
@@ -306,7 +442,40 @@
                   }
                 ]
               },
-              "cells": []
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON0.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "block",
+                  "block": "TON",
+                  "instance": "TON1",
+                  "preset": "T#2000ms"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
             },
             {
               "label": "",
@@ -372,7 +541,40 @@
                   }
                 ]
               },
-              "cells": []
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON0.Q",
+                  "negated": false
+                },
+                {
+                  "cell": "block",
+                  "block": "CTU",
+                  "instance": "CTU0",
+                  "preset": "5"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
             },
             {
               "label": "",

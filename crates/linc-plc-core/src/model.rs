@@ -744,6 +744,24 @@ pub enum Logic {
     },
 }
 
+impl Coil {
+    /// Does this coil name what it writes?
+    ///
+    /// IEC 61131-3's coil assigns to a variable, so `Normal`, `Negated`, `Set` and
+    /// `Reset` with an empty operand are not coils at all: they would be a nameless
+    /// `( )` on the ladder and a store nowhere in the program. A `Compute` coil
+    /// carries its target in the cell, and a `Jump`/`Call` names a label or a POU,
+    /// so those are judged elsewhere.
+    pub fn names_a_target(&self) -> bool {
+        match self.kind {
+            CoilKind::Compute | CoilKind::Jump | CoilKind::Call => true,
+            CoilKind::Normal | CoilKind::Negated | CoilKind::Set | CoilKind::Reset => {
+                !self.var.trim().is_empty()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Coil {
     pub var: String,
@@ -847,6 +865,19 @@ impl Project {
             }
             for section in pou.sections.iter_mut() {
                 crate::grid::migrate_section(section);
+                // A coil slot with no operand is not a coil: the coil-the-target
+                // forms keep a target in the cell or the arguments, and every
+                // other kind must name the bit it writes. Clearing it here means a
+                // saved project never carries a nameless `( )`.
+                for rung in section.rungs.iter_mut() {
+                    if rung
+                        .coil
+                        .as_ref()
+                        .is_some_and(|coil| !coil.names_a_target())
+                    {
+                        rung.coil = None;
+                    }
+                }
             }
         }
         self.pous = pous.clone();
@@ -971,6 +1002,16 @@ impl Rung {
     /// The rung's coil, or a blank one when it has none. A blank coil is the
     /// no-coil answer for readers that only need a default; `has_coil` is the
     /// question to ask before writing or reporting.
+    /// Does this coil name what it writes? A `Compute` coil carries its target in
+    /// the cell and a `Jump`/`Call` names a label or a POU, so an empty `var` is
+    /// only an error for the kinds that actually write a bit.
+    pub fn names_a_target(&self) -> bool {
+        match self.coil.as_ref() {
+            None => true,
+            Some(coil) => coil.names_a_target(),
+        }
+    }
+
     pub fn coil(&self) -> &Coil {
         self.coil.as_ref().unwrap_or(&BLANK_COIL)
     }

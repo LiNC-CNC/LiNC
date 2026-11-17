@@ -333,11 +333,6 @@
                 "op": "const",
                 "value": true
               },
-              "coil": {
-                "var": "",
-                "kind": "normal",
-                "expr": null
-              },
               "cells": [
                 {
                   "cell": "contact",
@@ -389,7 +384,40 @@
                   }
                 ]
               },
-              "cells": []
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "run",
+                  "negated": false
+                },
+                {
+                  "cell": "block",
+                  "block": "TON",
+                  "instance": "TON0",
+                  "preset": "T#3s"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
             },
             {
               "label": "",

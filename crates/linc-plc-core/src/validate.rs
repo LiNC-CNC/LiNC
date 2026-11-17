@@ -660,6 +660,18 @@ pub fn validate(project: &Project) -> Vec<Diagnostic> {
                 continue;
             }
             let coil_path = format!("{rung_path}.coil.var");
+            // A coil assigns to a variable. One with no operand is not a coil: it
+            // draws as a nameless `( )` and stores nowhere, so it is refused by
+            // name rather than quietly ignored — a converted project that carried
+            // one used to load and then write nothing.
+            if !rung.names_a_target() {
+                diagnostics.push(Diagnostic::error(
+                    "coil_operand",
+                    "a coil must name the variable it writes".to_string(),
+                    &rung_path,
+                ));
+                continue;
+            }
             let ctx = facts.ctx(&rung_path);
             // A compute cell ends the rung before the coil, so an instruction
             // after it would never run or would test a bit nobody pushed.

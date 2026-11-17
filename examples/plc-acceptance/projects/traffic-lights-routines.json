@@ -201,7 +201,38 @@
                   }
                 ]
               },
-              "cells": []
+              "cells": [
+                {
+                  "cell": "block",
+                  "block": "TON",
+                  "instance": "TON0",
+                  "preset": "Durations[Phase]"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
             },
             {
               "label": "",
@@ -656,11 +687,6 @@
               "logic": {
                 "op": "const",
                 "value": true
-              },
-              "coil": {
-                "var": "",
-                "kind": "normal",
-                "expr": null
               },
               "cells": [
                 {

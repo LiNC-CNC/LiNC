@@ -333,7 +333,40 @@
               }
             ]
           },
-          "cells": []
+          "cells": [
+            {
+              "cell": "contact",
+              "var": "TON0.Q",
+              "negated": true
+            },
+            {
+              "cell": "block",
+              "block": "TON",
+              "instance": "TON0",
+              "preset": "T#1000ms"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            },
+            {
+              "cell": "wire"
+            }
+          ]
         },
         {
           "label": "",
@@ -410,11 +443,6 @@
           "logic": {
             "op": "const",
             "value": true
-          },
-          "coil": {
-            "var": "",
-            "kind": "normal",
-            "expr": null
           },
           "cells": [
             {
@@ -754,7 +782,40 @@
                   }
                 ]
               },
-              "cells": []
+              "cells": [
+                {
+                  "cell": "contact",
+                  "var": "TON0.Q",
+                  "negated": true
+                },
+                {
+                  "cell": "block",
+                  "block": "TON",
+                  "instance": "TON0",
+                  "preset": "T#1000ms"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                },
+                {
+                  "cell": "wire"
+                }
+              ]
             },
             {
               "label": "",
@@ -831,11 +892,6 @@
               "logic": {
                 "op": "const",
                 "value": true
-              },
-              "coil": {
-                "var": "",
-                "kind": "normal",
-                "expr": null
               },
               "cells": [
                 {

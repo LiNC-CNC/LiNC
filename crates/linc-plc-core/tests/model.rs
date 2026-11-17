@@ -352,9 +352,10 @@ fn symbol_comments_round_trip_and_default_to_empty() {
 }
 
 /// A row directly under a `Link` is that link's parallel branch: it carries no
-/// coil of its own, and the ladder must still validate and compile.
+/// coil at all — the row above holds the one the branch feeds — and the ladder
+/// still validates and compiles.
 #[test]
-fn a_linked_continuation_row_may_have_a_blank_coil() {
+fn a_linked_continuation_row_has_no_coil() {
     use linc_plc_core::grid::Cell;
     let mut project = base_project();
     project.sections[0].rungs[0].cells = vec![
@@ -364,10 +365,7 @@ fn a_linked_continuation_row_may_have_a_blank_coil() {
         },
         Cell::Link,
     ];
-    let mut branch = Rung::new(
-        Logic::contact("seal", false),
-        Coil::new("", CoilKind::Normal),
-    );
+    let mut branch = Rung::without_coil(Logic::contact("seal", false));
     branch.cells = vec![Cell::Contact {
         var: "seal".into(),
         negated: false,
@@ -375,13 +373,44 @@ fn a_linked_continuation_row_may_have_a_blank_coil() {
     project.sections[0].rungs.push(branch);
     let diagnostics = validate(&project);
     assert!(
-        !codes(&diagnostics).contains(&"unknown_symbol"),
-        "a branch row's blank coil is not an undeclared symbol: {diagnostics:?}"
+        !diagnostics
+            .iter()
+            .any(|item| item.severity == linc_plc_core::Severity::Error),
+        "a branch row without a coil is valid: {diagnostics:?}"
     );
     assert!(
         linc_plc_core::compile::compile(&project).is_ok(),
         "the ladder compiles"
     );
+}
+
+/// A coil with no operand is refused by name: IEC 61131-3's coil assigns to a
+/// variable, so a nameless one would draw as `( )` and store nowhere.
+#[test]
+fn a_nameless_coil_is_refused_by_the_rung() {
+    for kind in [
+        CoilKind::Normal,
+        CoilKind::Negated,
+        CoilKind::Set,
+        CoilKind::Reset,
+    ] {
+        let mut project = base_project();
+        project.sections[0].rungs[0].coil = Some(Coil::new("", kind));
+        let diagnostics = validate(&project);
+        let found = diagnostics
+            .iter()
+            .find(|item| item.code == "coil_operand")
+            .unwrap_or_else(|| panic!("{kind:?}: no coil_operand: {diagnostics:?}"));
+        assert!(
+            found.message.contains("must name the variable"),
+            "{kind:?}: {}",
+            found.message
+        );
+        assert_eq!(
+            found.path, "sections[0].rungs[0]",
+            "{kind:?}: the diagnostic names the rung"
+        );
+    }
 }
 
 /// A grid that starts with no columns must still accept a cell: `set_cell` grew
