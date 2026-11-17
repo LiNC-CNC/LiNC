@@ -2418,6 +2418,7 @@ fn point(name: &str, direction: IoDirection, kind: IoKind) -> IoPoint {
         direction,
         kind,
         comment: String::new(),
+        address: String::new(),
     }
 }
 

@@ -7,43 +7,50 @@
       "name": "n__i0_0",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.0"
     },
     {
       "name": "n__i0_1",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.1"
     },
     {
       "name": "n__i0_2",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.2"
     },
     {
       "name": "n__q0_0",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.0"
     },
     {
       "name": "n__q0_1",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.1"
     },
     {
       "name": "n__q0_2",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.2"
     },
     {
       "name": "n__q0_3",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.3"
     }
   ],
   "vars": [

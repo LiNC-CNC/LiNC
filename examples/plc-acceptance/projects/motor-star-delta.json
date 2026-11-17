@@ -4,70 +4,81 @@
   "description": "",
   "io": [
     {
-      "name": "n__i0_0",
+      "name": "forward",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.0"
     },
     {
-      "name": "n__i0_1",
+      "name": "reverse",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.1"
     },
     {
-      "name": "n__i0_2",
+      "name": "stop",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.2"
     },
     {
-      "name": "n__i0_3",
+      "name": "overload_relay_ok",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.3"
     },
     {
-      "name": "n__i0_4",
+      "name": "motor_stopped",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.4"
     },
     {
-      "name": "n__q0_0",
+      "name": "km1_forward",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.0"
     },
     {
-      "name": "n__q0_1",
+      "name": "km2_reverse",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.1"
     },
     {
-      "name": "n__q0_2",
+      "name": "km3_star",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.2"
     },
     {
-      "name": "n__q0_3",
+      "name": "km4_delta",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.3"
     },
     {
-      "name": "n__q0_4",
+      "name": "run_lamp",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.4"
     },
     {
-      "name": "n__q0_5",
+      "name": "fault_lamp",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.5"
     }
   ],
   "vars": [],
@@ -99,53 +110,53 @@
                                 "items": [
                                   {
                                     "op": "contact",
-                                    "var": "n__i0_0",
+                                    "var": "forward",
                                     "negated": false
                                   },
                                   {
                                     "op": "contact",
-                                    "var": "n__i0_1",
+                                    "var": "reverse",
                                     "negated": true
                                   }
                                 ]
                               },
                               {
                                 "op": "contact",
-                                "var": "n__i0_4",
+                                "var": "motor_stopped",
                                 "negated": false
                               }
                             ]
                           },
                           {
                             "op": "contact",
-                            "var": "n__q0_0",
+                            "var": "km1_forward",
                             "negated": false
                           }
                         ]
                       },
                       {
                         "op": "contact",
-                        "var": "n__i0_2",
+                        "var": "stop",
                         "negated": false
                       }
                     ]
                   },
                   {
                     "op": "contact",
-                    "var": "n__i0_3",
+                    "var": "overload_relay_ok",
                     "negated": false
                   }
                 ]
               },
               {
                 "op": "contact",
-                "var": "n__q0_1",
+                "var": "km2_reverse",
                 "negated": true
               }
             ]
           },
           "coil": {
-            "var": "n__q0_0",
+            "var": "km1_forward",
             "kind": "normal",
             "expr": null
           },
@@ -174,53 +185,53 @@
                                 "items": [
                                   {
                                     "op": "contact",
-                                    "var": "n__i0_1",
+                                    "var": "reverse",
                                     "negated": false
                                   },
                                   {
                                     "op": "contact",
-                                    "var": "n__i0_0",
+                                    "var": "forward",
                                     "negated": true
                                   }
                                 ]
                               },
                               {
                                 "op": "contact",
-                                "var": "n__i0_4",
+                                "var": "motor_stopped",
                                 "negated": false
                               }
                             ]
                           },
                           {
                             "op": "contact",
-                            "var": "n__q0_1",
+                            "var": "km2_reverse",
                             "negated": false
                           }
                         ]
                       },
                       {
                         "op": "contact",
-                        "var": "n__i0_2",
+                        "var": "stop",
                         "negated": false
                       }
                     ]
                   },
                   {
                     "op": "contact",
-                    "var": "n__i0_3",
+                    "var": "overload_relay_ok",
                     "negated": false
                   }
                 ]
               },
               {
                 "op": "contact",
-                "var": "n__q0_0",
+                "var": "km1_forward",
                 "negated": true
               }
             ]
           },
           "coil": {
-            "var": "n__q0_1",
+            "var": "km2_reverse",
             "kind": "normal",
             "expr": null
           },
@@ -237,12 +248,12 @@
                 "items": [
                   {
                     "op": "contact",
-                    "var": "n__q0_0",
+                    "var": "km1_forward",
                     "negated": false
                   },
                   {
                     "op": "contact",
-                    "var": "n__q0_1",
+                    "var": "km2_reverse",
                     "negated": false
                   }
                 ]
@@ -271,12 +282,12 @@
                     "items": [
                       {
                         "op": "contact",
-                        "var": "n__q0_0",
+                        "var": "km1_forward",
                         "negated": false
                       },
                       {
                         "op": "contact",
-                        "var": "n__q0_1",
+                        "var": "km2_reverse",
                         "negated": false
                       }
                     ]
@@ -290,13 +301,13 @@
               },
               {
                 "op": "contact",
-                "var": "n__q0_3",
+                "var": "km4_delta",
                 "negated": true
               }
             ]
           },
           "coil": {
-            "var": "n__q0_2",
+            "var": "km3_star",
             "kind": "normal",
             "expr": null
           },
@@ -316,12 +327,12 @@
                     "items": [
                       {
                         "op": "contact",
-                        "var": "n__q0_0",
+                        "var": "km1_forward",
                         "negated": false
                       },
                       {
                         "op": "contact",
-                        "var": "n__q0_1",
+                        "var": "km2_reverse",
                         "negated": false
                       }
                     ]
@@ -335,13 +346,13 @@
               },
               {
                 "op": "contact",
-                "var": "n__q0_2",
+                "var": "km3_star",
                 "negated": true
               }
             ]
           },
           "coil": {
-            "var": "n__q0_3",
+            "var": "km4_delta",
             "kind": "normal",
             "expr": null
           },
@@ -355,25 +366,25 @@
             "items": [
               {
                 "op": "contact",
-                "var": "n__q0_0",
+                "var": "km1_forward",
                 "negated": false
               },
               {
                 "op": "contact",
-                "var": "n__q0_1",
+                "var": "km2_reverse",
                 "negated": false
               }
             ]
           },
           "coil": {
-            "var": "n__q0_4",
+            "var": "run_lamp",
             "kind": "normal",
             "expr": null
           },
           "cells": [
             {
               "cell": "contact",
-              "var": "n__q0_0",
+              "var": "km1_forward",
               "negated": false
             },
             {
@@ -412,7 +423,7 @@
           "cells": [
             {
               "cell": "contact",
-              "var": "n__q0_1",
+              "var": "km2_reverse",
               "negated": false
             },
             {
@@ -446,18 +457,18 @@
           "comment": "",
           "logic": {
             "op": "contact",
-            "var": "n__i0_3",
+            "var": "overload_relay_ok",
             "negated": true
           },
           "coil": {
-            "var": "n__q0_5",
+            "var": "fault_lamp",
             "kind": "normal",
             "expr": null
           },
           "cells": [
             {
               "cell": "contact",
-              "var": "n__i0_3",
+              "var": "overload_relay_ok",
               "negated": true
             },
             {
@@ -523,53 +534,53 @@
                                     "items": [
                                       {
                                         "op": "contact",
-                                        "var": "n__i0_0",
+                                        "var": "forward",
                                         "negated": false
                                       },
                                       {
                                         "op": "contact",
-                                        "var": "n__i0_1",
+                                        "var": "reverse",
                                         "negated": true
                                       }
                                     ]
                                   },
                                   {
                                     "op": "contact",
-                                    "var": "n__i0_4",
+                                    "var": "motor_stopped",
                                     "negated": false
                                   }
                                 ]
                               },
                               {
                                 "op": "contact",
-                                "var": "n__q0_0",
+                                "var": "km1_forward",
                                 "negated": false
                               }
                             ]
                           },
                           {
                             "op": "contact",
-                            "var": "n__i0_2",
+                            "var": "stop",
                             "negated": false
                           }
                         ]
                       },
                       {
                         "op": "contact",
-                        "var": "n__i0_3",
+                        "var": "overload_relay_ok",
                         "negated": false
                       }
                     ]
                   },
                   {
                     "op": "contact",
-                    "var": "n__q0_1",
+                    "var": "km2_reverse",
                     "negated": true
                   }
                 ]
               },
               "coil": {
-                "var": "n__q0_0",
+                "var": "km1_forward",
                 "kind": "normal",
                 "expr": null
               },
@@ -598,53 +609,53 @@
                                     "items": [
                                       {
                                         "op": "contact",
-                                        "var": "n__i0_1",
+                                        "var": "reverse",
                                         "negated": false
                                       },
                                       {
                                         "op": "contact",
-                                        "var": "n__i0_0",
+                                        "var": "forward",
                                         "negated": true
                                       }
                                     ]
                                   },
                                   {
                                     "op": "contact",
-                                    "var": "n__i0_4",
+                                    "var": "motor_stopped",
                                     "negated": false
                                   }
                                 ]
                               },
                               {
                                 "op": "contact",
-                                "var": "n__q0_1",
+                                "var": "km2_reverse",
                                 "negated": false
                               }
                             ]
                           },
                           {
                             "op": "contact",
-                            "var": "n__i0_2",
+                            "var": "stop",
                             "negated": false
                           }
                         ]
                       },
                       {
                         "op": "contact",
-                        "var": "n__i0_3",
+                        "var": "overload_relay_ok",
                         "negated": false
                       }
                     ]
                   },
                   {
                     "op": "contact",
-                    "var": "n__q0_0",
+                    "var": "km1_forward",
                     "negated": true
                   }
                 ]
               },
               "coil": {
-                "var": "n__q0_1",
+                "var": "km2_reverse",
                 "kind": "normal",
                 "expr": null
               },
@@ -661,12 +672,12 @@
                     "items": [
                       {
                         "op": "contact",
-                        "var": "n__q0_0",
+                        "var": "km1_forward",
                         "negated": false
                       },
                       {
                         "op": "contact",
-                        "var": "n__q0_1",
+                        "var": "km2_reverse",
                         "negated": false
                       }
                     ]
@@ -695,12 +706,12 @@
                         "items": [
                           {
                             "op": "contact",
-                            "var": "n__q0_0",
+                            "var": "km1_forward",
                             "negated": false
                           },
                           {
                             "op": "contact",
-                            "var": "n__q0_1",
+                            "var": "km2_reverse",
                             "negated": false
                           }
                         ]
@@ -714,13 +725,13 @@
                   },
                   {
                     "op": "contact",
-                    "var": "n__q0_3",
+                    "var": "km4_delta",
                     "negated": true
                   }
                 ]
               },
               "coil": {
-                "var": "n__q0_2",
+                "var": "km3_star",
                 "kind": "normal",
                 "expr": null
               },
@@ -740,12 +751,12 @@
                         "items": [
                           {
                             "op": "contact",
-                            "var": "n__q0_0",
+                            "var": "km1_forward",
                             "negated": false
                           },
                           {
                             "op": "contact",
-                            "var": "n__q0_1",
+                            "var": "km2_reverse",
                             "negated": false
                           }
                         ]
@@ -759,13 +770,13 @@
                   },
                   {
                     "op": "contact",
-                    "var": "n__q0_2",
+                    "var": "km3_star",
                     "negated": true
                   }
                 ]
               },
               "coil": {
-                "var": "n__q0_3",
+                "var": "km4_delta",
                 "kind": "normal",
                 "expr": null
               },
@@ -779,25 +790,25 @@
                 "items": [
                   {
                     "op": "contact",
-                    "var": "n__q0_0",
+                    "var": "km1_forward",
                     "negated": false
                   },
                   {
                     "op": "contact",
-                    "var": "n__q0_1",
+                    "var": "km2_reverse",
                     "negated": false
                   }
                 ]
               },
               "coil": {
-                "var": "n__q0_4",
+                "var": "run_lamp",
                 "kind": "normal",
                 "expr": null
               },
               "cells": [
                 {
                   "cell": "contact",
-                  "var": "n__q0_0",
+                  "var": "km1_forward",
                   "negated": false
                 },
                 {
@@ -836,7 +847,7 @@
               "cells": [
                 {
                   "cell": "contact",
-                  "var": "n__q0_1",
+                  "var": "km2_reverse",
                   "negated": false
                 },
                 {
@@ -870,18 +881,18 @@
               "comment": "",
               "logic": {
                 "op": "contact",
-                "var": "n__i0_3",
+                "var": "overload_relay_ok",
                 "negated": true
               },
               "coil": {
-                "var": "n__q0_5",
+                "var": "fault_lamp",
                 "kind": "normal",
                 "expr": null
               },
               "cells": [
                 {
                   "cell": "contact",
-                  "var": "n__i0_3",
+                  "var": "overload_relay_ok",
                   "negated": true
                 },
                 {

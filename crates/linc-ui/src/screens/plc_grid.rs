@@ -4929,6 +4929,7 @@ mod compare_window_tests {
                 direction,
                 kind: linc_plc_core::model::IoKind::Bit,
                 comment: String::new(),
+                address: String::new(),
             })
         };
         point("pump", linc_plc_core::model::IoDirection::In);

@@ -354,6 +354,15 @@ pub struct IoPoint {
     /// Free text shown next to the operand, as a symbol table has.
     #[serde(default)]
     pub comment: String,
+    /// The declaration's address spelling, when the source had one (`%I0.0`).
+    ///
+    /// The name is what the ladder reads — an alias when the source has one, the
+    /// address when it does not — and this is the binding behind it: the PLCopen
+    /// declaration carries name and address together, and a trace or a HAL pin map
+    /// that speaks addresses finds the point through this. Empty means the name is
+    /// the only spelling there is.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub address: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -953,6 +962,7 @@ impl IoPoint {
             direction,
             kind: IoKind::Bit,
             comment: String::new(),
+            address: String::new(),
         }
     }
 }

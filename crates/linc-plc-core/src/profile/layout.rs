@@ -750,6 +750,7 @@ mod tests {
             direction,
             kind,
             comment: String::new(),
+            address: String::new(),
         }
     }
 

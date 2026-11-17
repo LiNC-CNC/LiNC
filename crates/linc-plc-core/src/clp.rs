@@ -987,6 +987,8 @@ impl Importer {
                 direction,
                 kind,
                 comment: String::new(),
+                // ClassicLadder binds by symbol, not by a PLCopen address.
+                address: String::new(),
             }),
             None => {
                 let mut var = VarDecl::new(name.clone());

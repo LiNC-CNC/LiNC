@@ -271,6 +271,7 @@ fn word_io_project() -> Project {
         direction,
         kind,
         comment: String::new(),
+        address: String::new(),
     };
     project.io = vec![
         point("iw0", IoDirection::In, IoKind::Word),

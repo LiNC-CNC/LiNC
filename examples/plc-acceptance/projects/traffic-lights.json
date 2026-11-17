@@ -7,37 +7,43 @@
       "name": "n__q0_0",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.0"
     },
     {
       "name": "n__q0_1",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.1"
     },
     {
       "name": "n__q0_2",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.2"
     },
     {
       "name": "n__q0_4",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.4"
     },
     {
       "name": "n__q0_5",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.5"
     },
     {
       "name": "n__q0_6",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.6"
     }
   ],
   "vars": [],

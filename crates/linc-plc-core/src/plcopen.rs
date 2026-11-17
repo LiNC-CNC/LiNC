@@ -427,6 +427,9 @@ fn import_interface_of(
                 ));
                 continue;
             };
+            // The declaration's own spelling before the importer renames it: an
+            // address (`%I0.0`) is the binding an alias sits on top of.
+            let declared = name.trim().to_string();
             let name = operand_name(name);
             if function_block {
                 // A pin is a declaration with a direction; an internal has neither.
@@ -453,11 +456,19 @@ fn import_interface_of(
                         ));
                         continue;
                     };
+                    // The declaration's own spelling is the binding: `name` is the
+                    // operand the ladder reads, `address` the address it stands for.
+                    let address = if declared.starts_with('%') {
+                        declared.clone()
+                    } else {
+                        String::new()
+                    };
                     io.push(IoPoint {
                         name,
                         direction,
                         kind,
                         comment: String::new(),
+                        address,
                     });
                 }
                 None => {

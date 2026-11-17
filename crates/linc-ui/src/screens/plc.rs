@@ -8356,12 +8356,14 @@ mod picker_key_tests {
                 direction: IoDirection::In,
                 kind: IoKind::Bit,
                 comment: String::new(),
+                address: String::new(),
             },
             IoPoint {
                 name: "estop".into(),
                 direction: IoDirection::In,
                 kind: IoKind::Bit,
                 comment: String::new(),
+                address: String::new(),
             },
         ];
         plc
@@ -8479,6 +8481,7 @@ mod picker_key_tests {
             direction: IoDirection::Out,
             kind: IoKind::Bit,
             comment: String::new(),
+            address: String::new(),
         });
         plc.coil_pick = Some((0, 0));
         let mut events = text("run");
@@ -8702,6 +8705,7 @@ mod sim_keys_tests {
                 direction: linc_plc_core::IoDirection::In,
                 kind: linc_plc_core::IoKind::Bit,
                 comment: String::new(),
+                address: String::new(),
             })
             .collect();
         plc
@@ -9814,6 +9818,7 @@ mod watch_page_tests {
                 direction: linc_plc_core::IoDirection::Out,
                 kind: linc_plc_core::IoKind::Bit,
                 comment: String::new(),
+                address: String::new(),
             })
             .collect();
         plc.project.watch = names.iter().map(|name| (*name).to_string()).collect();
@@ -9866,6 +9871,7 @@ mod watch_page_tests {
             direction: linc_plc_core::IoDirection::Out,
             kind: linc_plc_core::IoKind::Bit,
             comment: String::new(),
+            address: String::new(),
         });
         frame(&mut plc, vec![key(egui::Key::ArrowDown)]);
         assert_eq!(plc.watch_cursor, 1);
@@ -10065,6 +10071,7 @@ mod watch_page_tests {
                 direction: linc_plc_core::IoDirection::Out,
                 kind: linc_plc_core::IoKind::Bit,
                 comment: String::new(),
+                address: String::new(),
             })
             .collect();
         for index in 0..16 {
@@ -10301,6 +10308,7 @@ mod fbd_place_keyboard_tests {
             direction: linc_plc_core::IoDirection::In,
             kind: linc_plc_core::IoKind::Bit,
             comment: String::new(),
+            address: String::new(),
         }];
         plc
     }
@@ -10389,6 +10397,7 @@ mod fbd_filter_tests {
             direction: linc_plc_core::IoDirection::In,
             kind: linc_plc_core::IoKind::Bit,
             comment: String::new(),
+            address: String::new(),
         }];
         plc
     }

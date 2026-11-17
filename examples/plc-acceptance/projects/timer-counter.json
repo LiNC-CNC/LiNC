@@ -4,28 +4,32 @@
   "description": "",
   "io": [
     {
-      "name": "n__i0_0",
+      "name": "enable",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.0"
     },
     {
-      "name": "n__i0_1",
+      "name": "reset_count",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.1"
     },
     {
-      "name": "n__q0_0",
+      "name": "lamp",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.0"
     },
     {
-      "name": "n__q0_1",
+      "name": "five_cycles",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.1"
     }
   ],
   "vars": [],
@@ -45,7 +49,7 @@
                 "items": [
                   {
                     "op": "contact",
-                    "var": "n__i0_0",
+                    "var": "enable",
                     "negated": false
                   },
                   {
@@ -66,7 +70,7 @@
           "cells": [
             {
               "cell": "contact",
-              "var": "n__i0_0",
+              "var": "enable",
               "negated": false
             },
             {
@@ -163,7 +167,7 @@
             "negated": false
           },
           "coil": {
-            "var": "n__q0_0",
+            "var": "lamp",
             "kind": "normal",
             "expr": null
           },
@@ -262,7 +266,7 @@
             "negated": false
           },
           "coil": {
-            "var": "n__q0_1",
+            "var": "five_cycles",
             "kind": "normal",
             "expr": null
           },
@@ -303,7 +307,7 @@
           "comment": "",
           "logic": {
             "op": "contact",
-            "var": "n__i0_1",
+            "var": "reset_count",
             "negated": false
           },
           "coil": {
@@ -314,7 +318,7 @@
           "cells": [
             {
               "cell": "contact",
-              "var": "n__i0_1",
+              "var": "reset_count",
               "negated": false
             },
             {
@@ -368,7 +372,7 @@
                     "items": [
                       {
                         "op": "contact",
-                        "var": "n__i0_0",
+                        "var": "enable",
                         "negated": false
                       },
                       {
@@ -389,7 +393,7 @@
               "cells": [
                 {
                   "cell": "contact",
-                  "var": "n__i0_0",
+                  "var": "enable",
                   "negated": false
                 },
                 {
@@ -486,7 +490,7 @@
                 "negated": false
               },
               "coil": {
-                "var": "n__q0_0",
+                "var": "lamp",
                 "kind": "normal",
                 "expr": null
               },
@@ -585,7 +589,7 @@
                 "negated": false
               },
               "coil": {
-                "var": "n__q0_1",
+                "var": "five_cycles",
                 "kind": "normal",
                 "expr": null
               },
@@ -626,7 +630,7 @@
               "comment": "",
               "logic": {
                 "op": "contact",
-                "var": "n__i0_1",
+                "var": "reset_count",
                 "negated": false
               },
               "coil": {
@@ -637,7 +641,7 @@
               "cells": [
                 {
                   "cell": "contact",
-                  "var": "n__i0_1",
+                  "var": "reset_count",
                   "negated": false
                 },
                 {

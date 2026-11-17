@@ -4,64 +4,74 @@
   "description": "",
   "io": [
     {
-      "name": "n__i0_0",
+      "name": "open",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.0"
     },
     {
-      "name": "n__i0_1",
+      "name": "close",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.1"
     },
     {
-      "name": "n__i0_2",
+      "name": "stop",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.2"
     },
     {
       "name": "n__i0_3",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.3"
     },
     {
       "name": "n__i0_4",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.4"
     },
     {
       "name": "n__i0_5",
       "direction": "in",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%I0.5"
     },
     {
       "name": "n__q0_0",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.0"
     },
     {
       "name": "n__q0_1",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.1"
     },
     {
       "name": "n__q0_2",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.2"
     },
     {
       "name": "n__q0_3",
       "direction": "out",
       "kind": "bit",
-      "comment": ""
+      "comment": "",
+      "address": "%Q0.3"
     }
   ],
   "vars": [
@@ -196,7 +206,7 @@
                         "items": [
                           {
                             "op": "contact",
-                            "var": "n__i0_0",
+                            "var": "open",
                             "negated": false
                           },
                           {
@@ -213,7 +223,7 @@
                       },
                       {
                         "op": "contact",
-                        "var": "n__i0_2",
+                        "var": "stop",
                         "negated": false
                       }
                     ]
@@ -262,7 +272,7 @@
                                 "items": [
                                   {
                                     "op": "contact",
-                                    "var": "n__i0_1",
+                                    "var": "close",
                                     "negated": false
                                   },
                                   {
@@ -274,7 +284,7 @@
                               },
                               {
                                 "op": "contact",
-                                "var": "n__i0_2",
+                                "var": "stop",
                                 "negated": false
                               }
                             ]
@@ -645,7 +655,7 @@
                             "items": [
                               {
                                 "op": "contact",
-                                "var": "n__i0_0",
+                                "var": "open",
                                 "negated": false
                               },
                               {
@@ -662,7 +672,7 @@
                           },
                           {
                             "op": "contact",
-                            "var": "n__i0_2",
+                            "var": "stop",
                             "negated": false
                           }
                         ]
@@ -711,7 +721,7 @@
                                     "items": [
                                       {
                                         "op": "contact",
-                                        "var": "n__i0_1",
+                                        "var": "close",
                                         "negated": false
                                       },
                                       {
@@ -723,7 +733,7 @@
                                   },
                                   {
                                     "op": "contact",
-                                    "var": "n__i0_2",
+                                    "var": "stop",
                                     "negated": false
                                   }
                                 ]

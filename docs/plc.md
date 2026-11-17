@@ -151,6 +151,18 @@ swap, and a servo-thread realtime component. Timers, counters, compare/compute
 and a PLCopen XML import exist (see **Import**). The scan is userspace (1–5 ms target, soft
 realtime); do not use it for encoder phasing or step timing.
 
+## Names and addresses
+
+An I/O point has a name and, when its source declared one, an address. The name is
+what the ladder reads and what the HAL pin is called; the address is the binding
+behind it. A PLCYard source comments its points with symbols (`"%I0.0": "Enable"`),
+so the converted project reads `enable` and carries `%I0.0` as that point's
+`address` — a trace or a pin map that speaks addresses still finds it. A symbol that
+is a description (`Open (PB)`, `Reset count`) loses its qualifier and its spaces
+become underscores; a symbol that cannot be an I/O name at all is dropped and the
+importer's own spelling stands. I/O names are HAL pin names, so they stay lowercase
+and match `[a-z][a-z0-9_-]{0,31}`.
+
 ## Import
 
 `linc_plc_core::plcopen::import(xml)` reads a PLCopen TC6 / IEC 61131-10 file

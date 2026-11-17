@@ -102,6 +102,18 @@ struct ManifestFile {
 // Replay. Every output starts at `"0"` and takes the last change at or before
 // the scan under test; a one-scan offset is a failure.
 
+/// The model's name for a spelling the source uses: the point whose `address` is
+/// that spelling — an alias is the name, the address is the binding — or the
+/// importer's own naming when the project has no address for it.
+fn model_name<'a>(project: &'a Project, tag: &str) -> String {
+    project
+        .io
+        .iter()
+        .find(|point| !point.address.is_empty() && point.address.eq_ignore_ascii_case(tag.trim()))
+        .map(|point| point.name.clone())
+        .unwrap_or_else(|| plcopen::operand_name(tag))
+}
+
 fn expected_at(trace: &Trace, scan: u32) -> BTreeMap<&str, f64> {
     let mut now = trace
         .outputs
@@ -195,7 +207,7 @@ fn run(
     let traced = trace
         .outputs
         .iter()
-        .map(|tag| plcopen::operand_name(tag))
+        .map(|tag| model_name(&project, tag))
         .collect::<Vec<_>>();
     let traced_set: std::collections::BTreeSet<&str> = traced.iter().map(String::as_str).collect();
     // Every bit output is traced, and a trace may add a declared word variable: an
@@ -261,7 +273,7 @@ fn run(
                 let tag = stimulus
                     .words
                     .keys()
-                    .find(|tag| plcopen::operand_name(tag) == binding.name)
+                    .find(|tag| model_name(&project, tag) == binding.name)
                     .cloned()
                     .unwrap_or_else(|| binding.name.clone());
                 level_word(&stimulus, &tag, tick)

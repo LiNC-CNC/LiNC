@@ -427,6 +427,7 @@ fn a_coil_on_a_word_point_is_an_operand_side_error() {
             direction: IoDirection::In,
             kind: IoKind::Word,
             comment: String::new(),
+            address: String::new(),
         },
     ];
     let diagnostics = validate(&project);
@@ -950,6 +951,7 @@ fn the_bank_and_edge_caps_are_the_profiles_and_are_reported_here() {
             direction: IoDirection::In,
             kind: IoKind::Word,
             comment: String::new(),
+            address: String::new(),
         })
         .collect();
     let diagnostics = validate(&project);
