@@ -3028,6 +3028,10 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(Heading("PREVIEW"));
             entries.push(row("Hold contact · cycle coil", "Space", false));
             entries.push(row("Drawing only", "no HAL", false));
+            // The ladder page does not answer the start chord — `Ctrl+Enter` is
+            // "new row" here — so the live values have to be reached through the
+            // test run, which starts the ladder when it opens.
+            entries.push(row("Run the ladder", "Ctrl+3", false));
             entries.push(Heading("TOOLS"));
             entries.push(row("Cross references", "Ctrl+X", false));
             entries.push(row("Undo / redo", "Ctrl+Z Y", false));
@@ -7882,6 +7886,55 @@ mod tests {
             text,
             "a saved project must load back unchanged"
         );
+    }
+
+    /// The page's word list is the daemon's: a snapshot's `words` are adopted whole,
+    /// block members included, so `CTU0.CV` and `TON0.ET` reach `word_value` and the
+    /// face paints the live number instead of `-`.
+    #[test]
+    fn a_snapshot_carries_block_members_into_the_page_words() {
+        let mut plc = PlcUi::default();
+        let mut snapshot = linc_plc_core::protocol::StateSnapshot {
+            state: linc_plc_core::protocol::RunState::Running,
+            project: String::new(),
+            hash: String::new(),
+            scan_count: 400,
+            scan_time_us: 20,
+            overruns: 0,
+            alive: true,
+            fault: None,
+            timing: linc_plc_core::timing::TimingSnapshot::default(),
+            vars: Vec::new(),
+            words: vec![
+                linc_plc_core::WordValue {
+                    name: "MW0".to_string(),
+                    value: 0,
+                },
+                linc_plc_core::WordValue {
+                    name: "CTU0.CV".to_string(),
+                    value: 3,
+                },
+                linc_plc_core::WordValue {
+                    name: "TON0.ET".to_string(),
+                    value: 2400,
+                },
+            ],
+            output_image: Vec::new(),
+            forced: Vec::new(),
+        };
+        plc.adopt(snapshot.clone());
+        assert_eq!(
+            plc.word_value("CTU0.CV"),
+            Some(3),
+            "a block member survives the hand-over"
+        );
+        assert_eq!(plc.word_value("TON0.ET"), Some(2400));
+        assert_eq!(plc.scan_count, 400);
+
+        // ...and it follows the daemon: the next snapshot's count is the one kept.
+        snapshot.words[1].value = 4;
+        plc.adopt(snapshot);
+        assert_eq!(plc.word_value("CTU0.CV"), Some(4));
     }
 
     #[test]
