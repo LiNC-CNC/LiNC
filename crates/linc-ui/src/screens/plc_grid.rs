@@ -4231,12 +4231,23 @@ fn pin_values(plc: &PlcUi, instance: &str, preset: &str, pin: &str, out: &str) -
     let member = |name: &str| plc.word_value(&format!("{instance}.{name}"));
     let mut left = String::new();
     let mut right = String::new();
+    // The pin name is the family's own marker: a timer reads `PT`/`ET` and counts
+    // milliseconds, a counter reads `PV`/`CV` and counts pulses. Printing `CV`
+    // through the timer's formatter showed `0.0s` for a counter that had counted.
     match pin {
-        "PT" | "PV" => left = display_preset(preset),
+        "PT" => left = display_preset(preset, true),
+        "PV" => left = display_preset(preset, false),
         _ => {}
     }
     match out {
-        "ET" | "CV" => right = member(out).map(display_ms).unwrap_or_else(|| "-".into()),
+        // Milliseconds turned into seconds, for a timer's elapsed time.
+        "ET" => right = member(out).map(display_ms).unwrap_or_else(|| "-".into()),
+        // The count itself, dimensionless, updating per scan like `ET`.
+        "CV" => {
+            right = member(out)
+                .map(|count| count.to_string())
+                .unwrap_or_else(|| "-".into())
+        }
         _ => {}
     }
     (left, right)
@@ -4244,8 +4255,7 @@ fn pin_values(plc: &PlcUi, instance: &str, preset: &str, pin: &str, out: &str) -
 
 /// `T#2400ms` and `2400` both read as a time on the face, because a timer's preset
 /// is a time whichever way the cell spells it.
-fn display_preset(preset: &str) -> String {
-    let timer = preset.trim_start().to_ascii_uppercase().starts_with("T#");
+fn display_preset(preset: &str, timer: bool) -> String {
     match linc_plc_core::profile::resolve::parse_preset(preset, timer) {
         Some(value) if timer => display_ms(value),
         _ => preset.to_string(),
@@ -5473,9 +5483,9 @@ mod block_face_tests {
         assert_eq!(display_ms(2_400), "2.4s");
         // A sub-second preset rounds to the column's one decimal: `T#250ms` reads
         // `0.2s`. The width is fixed so a counting value does not jitter.
-        assert_eq!(display_preset("T#250ms"), "0.2s");
-        assert_eq!(display_preset("T#1s"), "1s");
-        assert_eq!(display_preset("10"), "10");
+        assert_eq!(display_preset("T#250ms", true), "0.2s");
+        assert_eq!(display_preset("T#1s", true), "1s");
+        assert_eq!(display_preset("10", false), "10");
     }
 }
 #[cfg(test)]
@@ -6117,5 +6127,143 @@ mod link_tests {
         );
         rung.label = "SEAL".to_string();
         assert_eq!(strip_height_of(&rung), CELL_HEIGHT + LABEL_ROW_BAND);
+    }
+}
+
+#[cfg(test)]
+mod block_value_tests {
+    use super::*;
+
+    fn plc_with_words(words: &[(&str, i32)]) -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.words = words
+            .iter()
+            .map(|(name, value)| linc_plc_core::WordValue {
+                name: (*name).to_string(),
+                value: *value,
+            })
+            .collect();
+        plc
+    }
+
+    /// A counter's CV is the count itself; a timer's ET is milliseconds turned into
+    /// seconds. `CV` printed through the timer's formatter showed `0.0s` for a
+    /// counter that had counted.
+    #[test]
+    fn a_counter_shows_its_count_and_a_timer_its_time() {
+        let plc = plc_with_words(&[("CTU0.CV", 3), ("TON0.ET", 2400)]);
+        assert_eq!(
+            pin_values(&plc, "CTU0", "5", "PV", "CV"),
+            ("5".to_string(), "3".to_string()),
+            "the count, dimensionless"
+        );
+        assert_eq!(
+            pin_values(&plc, "TON0", "T#3000ms", "PT", "ET"),
+            ("3s".to_string(), "2.4s".to_string()),
+            "the elapsed time in seconds"
+        );
+        // An unanswered pin is `-`, never `0`, so a snapshot that cannot answer
+        // never reads as a count of nothing.
+        assert_eq!(pin_values(&plc, "CTU1", "5", "PV", "CV").1, "-");
+        let plc = plc_with_words(&[("R_TRIG0.CLK", 0)]);
+        assert_eq!(
+            pin_values(&plc, "R_TRIG0", "", "CLK", "Q"),
+            (String::new(), String::new()),
+            "a bit block carries no value text"
+        );
+    }
+
+    /// The pin names are the family's own markers: `CV`/`PV` on counters, `ET`/`PT`
+    /// on timers. The formatter keys on them, so this is what keeps a value and its
+    /// unit together.
+    #[test]
+    fn the_value_pins_belong_to_their_family() {
+        for spec in linc_plc_core::profile::spec::SPECS {
+            let linc_plc_core::profile::spec::Family::Fb(name) = spec.family else {
+                continue;
+            };
+            // The family's own markers, read from the pins the table declares.
+            let _ = name;
+            let pins: Vec<&str> = spec
+                .pins
+                .0
+                .iter()
+                .chain(spec.pins.1.iter())
+                .copied()
+                .collect();
+            let counter = spec.mnemonic.starts_with("CT");
+            let timer = matches!(spec.mnemonic, "TON" | "TOF" | "TP");
+            assert_eq!(
+                pins.contains(&"CV"),
+                counter,
+                "{}: CV belongs to counters only",
+                spec.mnemonic
+            );
+            assert_eq!(
+                pins.contains(&"ET"),
+                timer,
+                "{}: ET belongs to timers only",
+                spec.mnemonic
+            );
+        }
+    }
+
+    /// The count is live: after a scan run the CV the block shows is the count the
+    /// VM holds, updated per scan like a timer's ET.
+    #[test]
+    fn a_counter_counts_up_in_a_scan_run() {
+        use linc_plc_core::grid::Cell;
+        use linc_plc_core::{Coil, CoilKind, IoDirection, IoPoint, Logic, Project, Rung, Section};
+        let mut project = Project::new("counter");
+        project.io = vec![IoPoint::new("pulse", IoDirection::In)];
+        let mut rung = Rung::new(
+            Logic::Const { value: true },
+            Coil::new("", CoilKind::Normal),
+        );
+        rung.coil = None;
+        rung.cells = vec![
+            Cell::Contact {
+                var: "pulse".to_string(),
+                negated: false,
+            },
+            Cell::Block {
+                block: "CTU".to_string(),
+                instance: "CTU0".to_string(),
+                preset: "100".to_string(),
+            },
+        ];
+        project.sections = vec![Section {
+            name: "main".to_string(),
+            rungs: vec![rung],
+        }];
+        project.set_pous(project.all_pous());
+        let compiled = linc_plc_core::compile(&project).expect("compiles");
+        let mut vm = linc_plc_core::Vm::new(&compiled);
+
+        // Four pulses: a rising edge on each true scan after a false one.
+        for _ in 0..4 {
+            vm.scan(&[true]);
+            vm.scan(&[false]);
+        }
+        // A block's members are published with the banks, not as declared symbols:
+        // the snapshot the page reads carries `CTU0.CV` this way.
+        let count = vm
+            .word_snapshot()
+            .iter()
+            .find(|word| word.name == "CTU0.CV")
+            .map(|word| word.value)
+            .expect("CV is published with the words");
+        assert_eq!(count, 4, "the counter counted the four pulses");
+
+        let mut plc = PlcUi::default();
+        plc.words = vec![linc_plc_core::WordValue {
+            name: "CTU0.CV".to_string(),
+            value: count,
+        }];
+        assert_eq!(
+            pin_values(&plc, "CTU0", "100", "PV", "CV"),
+            ("100".to_string(), "4".to_string()),
+            "the face shows the live count, with no unit"
+        );
     }
 }
