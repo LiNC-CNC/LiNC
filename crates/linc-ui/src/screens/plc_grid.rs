@@ -3627,11 +3627,17 @@ pub const BANDED_NAME_Y: f32 = LABEL_Y + COMMENT_BAND;
 
 // --- coils -----------------------------------------------------------------
 pub const COIL_R: f32 = 8.0;
-/// A half circle, symmetric about the conductor, so its ends lie *on* the
-/// conductor line and the leads meet them exactly. An arc under 180 degrees puts
-/// its ends above and below the conductor, the lead meets the arc mid-stroke and
-/// the two visibly cross.
+/// A half circle, symmetric about the conductor. An arc under 180 degrees puts its
+/// ends above and below the conductor; two 180 degree arcs of one circle meet at
+/// the conductor's left and right points instead, and their strokes weld into a
+/// single closed ring, which reads as a circle and not as the two half circles
+/// Table 62 draws. `COIL_OPEN` trims each end so the pair keeps the opening the
+/// leads enter.
 pub const COIL_SPAN: f32 = std::f32::consts::PI;
+/// The opening at each end of a coil arc, in radians (about 17 degrees): wide
+/// enough to show at the 1.6 unit stroke, and no wider, so the lead still ends at
+/// the coil's own radius.
+pub const COIL_OPEN: f32 = 0.30;
 /// Where a coil's lead ends: on the arc, not at a contact's half-gap.
 pub const COIL_LEAD_X: f32 = COIL_R;
 
@@ -3730,16 +3736,16 @@ fn edge_letter_at(cx: f32, y: f32, s: f32) -> egui::Pos2 {
     egui::pos2(cx, y + (EDGE_LETTER_Y - CONDUCTOR_Y) * s)
 }
 
-/// A coil's two arcs, each a half circle, meeting on the conductor at
-/// `cx +- COIL_R`. The leads end at exactly those two points, so a lead cannot
-/// cross an arc: the ends of a half circle lie on the conductor line by
-/// construction, and an arc of less than `PI` puts them above and below it.
+/// A coil's two arcs: an upper half circle and a lower one, each trimmed by
+/// `COIL_OPEN` at both ends so the two strokes cannot weld into one closed ring.
+/// The opening sits on the conductor, where the leads end at `COIL_LEAD_X`, so a
+/// lead still stops at the arc's radius and never crosses into the coil.
 fn coil_arcs(cx: f32, y: f32, s: f32) -> (Vec<egui::Pos2>, Vec<egui::Pos2>) {
     let centre = egui::pos2(cx, y);
     let radius = COIL_R * s;
     let half = std::f32::consts::PI;
-    let upper = arc_points(centre, radius, half, 2.0 * half, 16);
-    let lower = arc_points(centre, radius, 0.0, half, 16);
+    let upper = arc_points(centre, radius, half + COIL_OPEN, 2.0 * half - COIL_OPEN, 16);
+    let lower = arc_points(centre, radius, COIL_OPEN, half - COIL_OPEN, 16);
     (upper, lower)
 }
 
@@ -4154,6 +4160,7 @@ pub fn grid_cell_label(plc: &PlcUi, cell: &Cell) -> String {
         other => cell_label(other),
     }
 }
+
 
 fn cell_label(cell: &Cell) -> String {
     match cell {
@@ -5469,5 +5476,63 @@ mod rung_comment_tests {
         assert!(!owned);
         assert!(actions.is_empty());
         assert_eq!(plc.rung_comment_edit, None);
+    }
+}
+
+#[cfg(test)]
+mod coil_shape_tests {
+    use super::*;
+
+    /// A coil is two half circles that stay two: each arc ends clear of the
+    /// conductor, so the pair cannot stroke into one closed ring. Two 180 degree
+    /// arcs of one circle meet at the conductor's left and right points and weld.
+    #[test]
+    fn the_coil_is_two_open_arcs_not_a_ring() {
+        let (upper, lower) = coil_arcs(100.0, 50.0, 1.0);
+        assert!(upper.len() > 8, "an arc is a polyline, not a chord");
+        assert!(lower.len() > 8);
+
+        let clear = |arc: &[egui::Pos2], above: bool| {
+            for point in [arc[0], arc[arc.len() - 1]] {
+                let offset = point.y - 50.0;
+                assert!(
+                    if above { offset < -1.5 } else { offset > 1.5 },
+                    "an arc ends on the conductor at {point:?}: the two arcs meet and read as a ring"
+                );
+            }
+            // ...and the arc's far point is a full radius away, so it is a half
+            // circle and not a shorter symbol.
+            let far = arc
+                .iter()
+                .map(|point| (point.y - 50.0).abs())
+                .fold(0.0, f32::max);
+            assert!((far - COIL_R).abs() < 0.01, "the arc reaches the radius");
+        };
+        clear(&upper, true);
+        clear(&lower, false);
+
+        // No point of either arc lies on the conductor, so nothing closes the loop.
+        for arc in [&upper, &lower] {
+            for point in arc {
+                assert!(
+                    (point.y - 50.0).abs() > 0.4,
+                    "a point sits on the conductor: {point:?}"
+                );
+                assert!((point.x - 100.0).abs() <= COIL_R + 0.01);
+            }
+        }
+        // The opening: the drawn length is short of a full circle in proportion to
+        // the trim, which a welded ring would not be.
+        let drawn: f32 = [&upper, &lower]
+            .iter()
+            .flat_map(|arc| arc.windows(2))
+            .map(|pair| (pair[1] - pair[0]).length())
+            .sum();
+        let circle = 2.0 * std::f32::consts::PI * COIL_R;
+        assert!(
+            drawn < circle * 0.95,
+            "{drawn} of {circle}: the arcs cover the circle"
+        );
+        assert_eq!(COIL_SPAN, std::f32::consts::PI);
     }
 }
