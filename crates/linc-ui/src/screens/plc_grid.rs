@@ -3377,9 +3377,7 @@ pub fn grid_rung(
             _ => None,
         })
         .max()
-        .unwrap_or(1);
-    // A rung with a comment or a label grows by one band: the comment takes the
-    // line above the operand names instead of printing over them.
+        .unwrap_or(0);
     let strip_height = row_height(rows) + if banded { LABEL_ROW_BAND } else { 0.0 };
     let name_y = if banded { BANDED_NAME_Y } else { LABEL_Y };
     let strip = ui.horizontal(|ui| {
@@ -3922,8 +3920,26 @@ fn block_row_y(body: egui::Rect, row: usize, s: f32) -> f32 {
 /// The height a strip needs when it holds a block of `rows` rows: the body, plus
 /// the label band it needs above it. `CELL_HEIGHT` itself does not change — only
 /// the stride between rows does, so a symbol-only row keeps its size.
+/// The lowest a block's own rim may sit below the strip's top edge: the instance
+/// label is drawn in the band above it, and its line box plus the clearance the
+/// name tests ask for must fit there. Without this floor a one-row body (23 tall)
+/// put its rim at 13.5 while the label's line ran to 14.5 and the instance printed
+/// over the box.
+pub const BLOCK_LABEL_BAND: f32 = LABEL_Y + 6.5 + 2.5;
+
+/// The height a row's strip takes: `CELL_HEIGHT` for symbols, and for a block body
+/// whichever is larger — the body plus the label band above it, or the body's own
+/// half-height plus the conductor offset and the band the label needs.
 fn row_height(rows: usize) -> f32 {
-    CELL_HEIGHT.max(block_height(rows) + 2.0 * LABEL_BAND)
+    // `0` rows means the row holds no block at all: a symbol-only row is
+    // `CELL_HEIGHT` and the block floor below does not apply to it.
+    if rows == 0 {
+        return CELL_HEIGHT;
+    }
+    let body = block_height(rows);
+    CELL_HEIGHT
+        .max(body + 2.0 * LABEL_BAND)
+        .max(body / 2.0 + CONDUCTOR_Y + BLOCK_LABEL_BAND)
 }
 
 /// One strip's conductor, `CONDUCTOR_Y` above the strip's bottom edge.
@@ -3985,7 +4001,7 @@ fn strip_height_of(rung: &Rung) -> f32 {
             _ => None,
         })
         .max()
-        .unwrap_or(1);
+        .unwrap_or(0);
     let banded = !rung.label.trim().is_empty();
     row_height(rows) + if banded { LABEL_ROW_BAND } else { 0.0 }
 }
@@ -4477,6 +4493,25 @@ mod symbol_tests {
 #[cfg(test)]
 mod label_clearance_tests {
     use super::*;
+
+    /// A block's instance label sits in the band above its body, and the band must
+    /// clear the rim: a one-row body is 23 tall and its rim landed on the label's
+    /// last line, which is how `RT0` came to print over the box.
+    #[test]
+    fn the_instance_label_clears_a_block_rim() {
+        const LABEL_HALF: f32 = 6.5; // half a 13 px line box, as the editor draws it
+        const CLEARANCE: f32 = 2.5;
+        for rows in 1..=3 {
+            let height = row_height(rows);
+            let rim = height - CONDUCTOR_Y - block_height(rows) / 2.0;
+            let label_bottom = LABEL_Y + LABEL_HALF;
+            assert!(
+                rim - label_bottom >= CLEARANCE,
+                "{rows} rows: the rim at {rim} to the label bottom at {label_bottom} \
+                 is under {CLEARANCE} px (row height {height})"
+            );
+        }
+    }
 
     /// The operand label must sit clear of the symbol. With the strip's fixed
     /// geometry the gap is arithmetic, so a change to either constant that closes
@@ -5381,8 +5416,12 @@ mod block_face_tests {
     #[test]
     fn a_block_row_grows_only_for_the_label_band() {
         assert_eq!(CELL_HEIGHT, 50.0);
-        assert_eq!(row_height(1), 50.0, "a one-row body fits the cell");
-        assert_eq!(row_height(2), 56.0);
+        assert_eq!(
+            row_height(1),
+            53.5,
+            "a one-row body grows so its instance label clears the rim"
+        );
+        assert_eq!(row_height(2), 58.0);
         assert_eq!(row_height(3), 65.0);
         for rows in 1..=3 {
             assert!(row_height(rows) >= block_height(rows) + 2.0 * LABEL_BAND);
