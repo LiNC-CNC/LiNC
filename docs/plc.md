@@ -129,6 +129,18 @@ sections of rungs. A rung is a `Logic` tree plus a coil:
 }
 ```
 
+**A coil has a name, or it is not a coil.** IEC 61131-3's coil is an assignment:
+`--( )--` writes the bit above it. A coil with no operand assigns nowhere, so
+`validate()` refuses it as `coil_operand` — "a coil must name the variable it
+writes" — and names the rung. The rule is what keeps a converted ladder honest: a
+row that is the continuation of a `Link` above it carries no coil at all (the row
+above holds the one the branch feeds), rather than a blank slot that draws as a
+nameless `( )`. The importers and the `.clp` reader emit no coil where there is
+nothing to write, `normalise()` clears a blank slot in an older file, and the
+editor cannot create one — a new rung's coil slot is a bare conductor until it is
+named. `Compute` coils (target in the cell) and `Jump`/`Call` coils (label or POU
+name) are judged by their own rules.
+
 Supported in this slice: NO/NC contacts, normal/set/reset coils, jump and call
 coils, series/parallel branches, multiple sections, constants, a 32-bit word bank
 with `word` and `float` I/O points, validation, local offline editing, download,
