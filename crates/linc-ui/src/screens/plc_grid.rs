@@ -3801,6 +3801,13 @@ pub const MARGIN: f32 = 2.0;
 pub const SIDE: f32 = PAD_GAP + VALUE_W + MARGIN;
 /// Pin names and values, and the block's type name.
 pub const TITLE_PX: f32 = 6.5;
+/// Half a text line's box at `TITLE_PX`: the glyphs span this either side of the
+/// line's centre.
+pub const TEXT_HALF: f32 = 5.0;
+/// The clearance a pin line keeps from the body's rim, top and bottom. With the
+/// content centred, `BLOCK_H`, `BLOCK_PAD` and `ROW_PITCH` give exactly this at
+/// every row count: a one-row body is 23 tall and keeps 11.5 - (4.5 + 5).
+pub const BLOCK_TEXT_PAD: f32 = 2.0;
 /// Padding from the body's edge to its text.
 pub const INNER_PAD: f32 = 6.0;
 /// A symbol's lead to the strip edge, for a symbol that fits in one position.
@@ -3913,8 +3920,12 @@ fn coil_slash(cx: f32, y: f32, s: f32) -> [egui::Pos2; 2] {
 
 /// The row baselines of a block body, top to bottom, in the body's coordinates.
 /// Row 0 sits on the conductor; each row after it is one pitch lower.
-fn block_row_y(body: egui::Rect, row: usize, s: f32) -> f32 {
-    body.center().y + ROW_PITCH * row as f32 * s
+/// The y of one line in a block body, `line` 0 being the type name and 1.. the pin
+/// rows, with the whole content block centred: a body of `rows` pin rows holds
+/// `rows + 1` lines one `ROW_PITCH` apart, centred on the body's centre.
+fn block_line_y(body: egui::Rect, line: usize, rows: usize, s: f32) -> f32 {
+    let lines = (rows + 1) as f32;
+    body.center().y + ROW_PITCH * s * (line as f32 - (lines - 1.0) / 2.0)
 }
 
 /// The height a strip needs when it holds a block of `rows` rows: the body, plus
@@ -4115,9 +4126,10 @@ fn draw_block(painter: &egui::Painter, rect: egui::Rect, face: &Face<'_>, style:
     painter.rect_stroke(body, BLOCK_R * s, style.body(s), egui::StrokeKind::Middle);
     if !face.glyph.is_empty() {
         // The type text is the block's own name, not its instance: the instance is
-        // in the label above the span.
+        // in the label above the span. It is the first line of the content block,
+        // one pitch above the first pin row and centred with it.
         painter.text(
-            egui::pos2(cx, y - 10.0 * s),
+            egui::pos2(cx, block_line_y(body, 0, rows, s)),
             Align2::CENTER_CENTER,
             face.glyph,
             FontId::monospace(TITLE_PX * s),
@@ -4127,7 +4139,7 @@ fn draw_block(painter: &egui::Painter, rect: egui::Rect, face: &Face<'_>, style:
     let name_size = FontId::monospace(TITLE_PX * s);
     let value_size = FontId::monospace(TITLE_PX * s);
     for (index, row) in face.rows.iter().enumerate() {
-        let ry = block_row_y(body, index, s);
+        let ry = block_line_y(body, index + 1, rows, s);
         // Names are text, not elements: they take the same ink the body does, so
         // a not-lit pin and an Unknown symbol are the same grey rather than two.
         let pin_ink = if row.lit { style.accent } else { style.ink() };
@@ -4519,6 +4531,37 @@ mod label_clearance_tests {
                 rim - label_bottom >= CLEARANCE,
                 "{rows} rows: the rim at {rim} to the label bottom at {label_bottom} \
                  is under {CLEARANCE} px (row height {height})"
+            );
+        }
+    }
+
+    /// The pin rows and the type name are one content block, centred in the body,
+    /// and it keeps `BLOCK_TEXT_PAD` from the rim top and bottom. A row that sat on
+    /// the body's centre pushed the last pin line through the bottom border.
+    #[test]
+    fn the_block_content_is_centred_and_clears_the_rim() {
+        for rows in 1..=3 {
+            let body = egui::Rect::from_center_size(
+                egui::pos2(100.0, 33.0),
+                egui::vec2(BLOCK_W, block_height(rows)),
+            );
+            let lines: Vec<f32> = (0..=rows)
+                .map(|line| block_line_y(body, line, rows, 1.0))
+                .collect();
+            // Centred: the first and last lines are the same distance from the
+            // body's centre.
+            let first = lines[0] - body.center().y;
+            let last = lines[rows] - body.center().y;
+            assert!(
+                (first + last).abs() < 0.01,
+                "{rows} rows: content {lines:?} is not centred in {body:?}"
+            );
+            // Clear of the rim, top and bottom, by the named pad.
+            let half = block_height(rows) / 2.0;
+            let pad = half - (last.abs() + TEXT_HALF);
+            assert!(
+                pad >= BLOCK_TEXT_PAD - 0.01,
+                "{rows} rows: {pad} from the rim, want {BLOCK_TEXT_PAD}"
             );
         }
     }
