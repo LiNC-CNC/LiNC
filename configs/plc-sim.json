@@ -721,6 +721,8 @@
     {
       "name": "DEMO_LD",
       "language": "ld",
+      "kind": "program",
+      "vars": [],
       "comment": "Two buttons latch a run output and reset an alarm.",
       "sections": [
         {
@@ -1281,6 +1283,8 @@
     {
       "name": "MAIN",
       "language": "il",
+      "kind": "program",
+      "vars": [],
       "comment": "",
       "sections": [],
       "il": [
@@ -1293,6 +1297,8 @@
     {
       "name": "DEMO_IL",
       "language": "il",
+      "kind": "program",
+      "vars": [],
       "comment": "",
       "sections": [],
       "il": [
