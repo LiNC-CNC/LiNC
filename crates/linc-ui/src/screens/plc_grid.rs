@@ -4041,10 +4041,17 @@ fn live_at(
     position: usize,
     cell: &Cell,
 ) -> Option<bool> {
-    local
-        .as_ref()
-        .and_then(|(values, _)| values.get(position).copied().flatten())
-        .or_else(|| cell_active(plc, cell))
+    let _ = position;
+    match cell {
+        // A wire carries the rung's *output*, not the power that happens to have
+        // reached its column: lighting every wire upstream of a toggled contact
+        // said the rung was true when its output was still false.
+        Cell::Wire | Cell::Link => local.as_ref().and_then(|(_, coil)| *coil),
+        // A symbol answers for itself: a contact's bars follow its own bit, so
+        // toggling it shows on the contact even when the rung's output does not
+        // move.
+        _ => cell_active(plc, cell),
+    }
 }
 
 /// A block pin's value, formatted for display. The UI decides what a value means;
@@ -5591,5 +5598,77 @@ mod coil_shape_tests {
             "{drawn} of {circle}: the arcs cover the circle"
         );
         assert_eq!(COIL_SPAN, std::f32::consts::PI);
+    }
+}
+
+#[cfg(test)]
+mod preview_colour_tests {
+    use super::*;
+
+    fn plc_with(vars: &[(&str, bool)]) -> PlcUi {
+        let mut plc = PlcUi::default();
+        plc.preview = vec![("a".to_string(), true)];
+        plc.vars = vars
+            .iter()
+            .map(|(name, value)| linc_plc_core::VarValue {
+                name: (*name).to_string(),
+                value: *value,
+                kind: linc_plc_core::SymbolKind::Input,
+                forced: false,
+            })
+            .collect();
+        plc
+    }
+
+    /// A contact lights on its own bit; a wire lights on the rung's output. The
+    /// old rule gave both the power that had reached their column, so a toggled
+    /// contact lit every wire to its right even when the rung's coil stayed off.
+    #[test]
+    fn a_contact_lights_by_its_bit_and_a_wire_by_the_rung_output() {
+        let plc = plc_with(&[("a", true), ("b", false)]);
+        let cells = vec![
+            Cell::Wire,
+            Cell::Contact {
+                var: "a".to_string(),
+                negated: false,
+            },
+            Cell::Contact {
+                var: "b".to_string(),
+                negated: false,
+            },
+        ];
+        let local = Some(preview_scan(&plc, &cells));
+        let scan = preview_scan(&plc, &cells);
+        assert_eq!(
+            scan.0[0],
+            Some(true),
+            "the scan still carries power up to the wire's column"
+        );
+        assert_eq!(
+            live_at(&plc, &local, 1, &cells[1]),
+            Some(true),
+            "the toggled contact shows its own bit"
+        );
+        assert_eq!(
+            live_at(&plc, &local, 2, &cells[2]),
+            Some(false),
+            "the untoggled contact stays dark"
+        );
+        assert_eq!(
+            live_at(&plc, &local, 0, &cells[0]),
+            Some(false),
+            "a AND b is false, so the wire is not lit"
+        );
+    }
+
+    /// With no preview held nothing is evaluated locally: a wire has no rung
+    /// state to show and stays neutral rather than reading as off.
+    #[test]
+    fn a_wire_without_a_preview_stays_unknown() {
+        let plc = plc_with(&[("a", true)]);
+        let empty = preview_scan(&plc, &[]);
+        assert_eq!(empty.1, Some(true));
+        let wire = Cell::Wire;
+        assert_eq!(live_at(&plc, &None, 0, &wire), None);
     }
 }
