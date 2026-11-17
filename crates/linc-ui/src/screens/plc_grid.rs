@@ -3212,7 +3212,7 @@ fn compute_editor(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action
 fn preview_scan(
     plc: &PlcUi,
     cells: &[Cell],
-    below: Option<&[Cell]>,
+    node: Option<bool>,
 ) -> (Vec<Option<bool>>, Option<bool>) {
     let mut local = vec![None; POSITIONS];
     let mut power = true;
@@ -3256,18 +3256,57 @@ fn preview_scan(
             *slot = value;
         }
     }
-    // A link joins the row below into the parallel, so the rung's output is
-    // (before the link OR the branch) AND everything after the link. Without
-    // this the preview said a linked rung was false whenever its own row was.
+    // A row in a linked group is fed by the group's node, not by its own cells
+    // alone: the junction takes power from every joined row. The top row ANDs its
+    // continuation after the junction; a branch row's whole row is an entry, so
+    // the node is its output.
     let mut output = power;
-    if let Some(link) = cells.iter().position(|cell| matches!(cell, Cell::Link)) {
-        if let Some(branch) = below {
-            let before = series_power(plc, &cells[..link]);
-            let after = series_power(plc, &cells[link + 1..]);
-            output = (before || series_power(plc, branch)) && after;
-        }
+    if let Some(node) = node {
+        output = if let Some(link) = cells.iter().position(|cell| matches!(cell, Cell::Link)) {
+            node && series_power(plc, &cells[link + 1..])
+        } else {
+            node
+        };
     }
     (local, Some(output))
+}
+
+/// The node each row of a linked group sees, in row order.
+///
+/// A link joins the row below at its column, and that junction is shared: every
+/// joined row feeds it from the left and every joined row's continuation is fed
+/// by it. The node is therefore `OR` of the top row's cells before the junction
+/// and each branch row's whole row — the same value `compile::lower_grid_rung`
+/// builds, so the picture and the program agree.
+///
+/// Rows outside a group get `None`, and so does a link with no row under it.
+pub fn group_nodes(plc: &PlcUi, rungs: &[Rung]) -> Vec<Option<bool>> {
+    let mut nodes = vec![None; rungs.len()];
+    let mut index = 0;
+    while index < rungs.len() {
+        let cells = &rungs[index].cells;
+        let links = cells
+            .iter()
+            .filter(|cell| matches!(cell, Cell::Link))
+            .count();
+        if links == 0 || index + links >= rungs.len() {
+            index += 1;
+            continue;
+        }
+        let junction = cells
+            .iter()
+            .position(|cell| matches!(cell, Cell::Link))
+            .unwrap_or(0);
+        let mut node = series_power(plc, &cells[..junction]);
+        for step in 1..=links {
+            node = node || series_power(plc, &rungs[index + step].cells);
+        }
+        for offset in 0..=links {
+            nodes[index + offset] = Some(node);
+        }
+        index += 1 + links;
+    }
+    nodes
 }
 
 /// One row's series power, for the link join. Links inside the segment read as
@@ -3289,6 +3328,7 @@ pub fn grid_rung(
     rung_index: usize,
     rung: &Rung,
     below: Option<&Rung>,
+    node: Option<bool>,
     actions: &mut Vec<Action>,
     cursor_rect: &mut Option<egui::Rect>,
 ) -> egui::Rect {
@@ -3305,12 +3345,11 @@ pub fn grid_rung(
     // logic follows the held input: only the toggled contact turning green said
     // nothing about what the rung would do.
     let previewing = !plc.preview.is_empty();
-    let branch = below.map(|row| row.cells.as_slice());
-    let local = previewing.then(|| preview_scan(plc, &cells, branch));
+    let local = previewing.then(|| preview_scan(plc, &cells, node));
     // A link drops to the next row's conductor, which is `CONDUCTOR_Y` above that
     // row's bottom edge; a row that grew for a block body or a comment band moves
     // its conductor down with it, so the drop follows the row it joins.
-    let below_height = below.map(|row| strip_height_of(row)).unwrap_or(CELL_HEIGHT);
+    let below_height = below.map(strip_height_of).unwrap_or(CELL_HEIGHT);
     // The comment sits on a line of its own above the operand names, so the rung
     // grows by one band and the names move down into the next one.
     let label = rung.label.trim();
@@ -4476,9 +4515,29 @@ mod rung_pitch_tests {
             crate::screens::plc::zero_rung_spacing(ui);
             let before = ui.cursor().top();
             let mut cursor_rect = None;
-            grid_rung(&plc, ui, 0, 0, &rung, None, &mut actions, &mut cursor_rect);
+            grid_rung(
+                &plc,
+                ui,
+                0,
+                0,
+                &rung,
+                None,
+                None,
+                &mut actions,
+                &mut cursor_rect,
+            );
             let step = ui.cursor().top() - before;
-            grid_rung(&plc, ui, 0, 1, &rung, None, &mut actions, &mut cursor_rect);
+            grid_rung(
+                &plc,
+                ui,
+                0,
+                1,
+                &rung,
+                None,
+                None,
+                &mut actions,
+                &mut cursor_rect,
+            );
             let two = ui.cursor().top() - before;
             (step, two - step)
         });
@@ -5363,7 +5422,7 @@ mod golden_tests {
         let output = ctx.run_ui(input, |ui| {
             let mut actions = Vec::new();
             let mut cursor = None;
-            grid_rung(&plc, ui, 0, 0, &rung, None, &mut actions, &mut cursor);
+            grid_rung(&plc, ui, 0, 0, &rung, None, None, &mut actions, &mut cursor);
         });
         let mut output = output;
         output.textures_delta.clear();
@@ -5745,6 +5804,7 @@ mod preview_colour_tests {
 #[cfg(test)]
 mod link_tests {
     use super::*;
+    use linc_plc_core::model::Logic;
 
     fn contact(var: &str, negated: bool) -> Cell {
         Cell::Contact {
@@ -5767,40 +5827,92 @@ mod link_tests {
         plc
     }
 
-    /// The compiler joins a linked row into the parallel
-    /// (`compile_vm::a_linked_branch_parallels_one_cell_and_not_the_estop`); the
-    /// preview must do the same, or Space on a branch row says nothing about the
-    /// rung the branch belongs to.
+    fn rung(coil: &str, cells: Vec<Cell>) -> Rung {
+        let mut rung = Rung::new(
+            Logic::Const { value: true },
+            Coil::new(coil, CoilKind::Normal),
+        );
+        rung.cells = cells;
+        rung
+    }
+
+    /// A latching pair: the top row has a junction at column 2, the branch row
+    /// below it, and both rows end in their own coil.
+    fn pair(plc: &PlcUi) -> (Option<bool>, Option<bool>, Option<bool>) {
+        let rows = vec![
+            rung(
+                "q0_0",
+                vec![contact("i0_0", false), contact("i0_1", false), Cell::Link]
+                    .into_iter()
+                    .chain(std::iter::repeat_n(Cell::Wire, 6))
+                    .collect(),
+            ),
+            rung(
+                "q0_1",
+                vec![contact("i0_2", false)]
+                    .into_iter()
+                    .chain(std::iter::repeat_n(Cell::Wire, 8))
+                    .collect(),
+            ),
+        ];
+        let nodes = group_nodes(plc, &rows);
+        let top = preview_scan(&plc_top(plc), &rows[0].cells, nodes[0]).1;
+        let bottom = preview_scan(plc, &rows[1].cells, nodes[1]).1;
+        (nodes[0], top, bottom)
+    }
+
+    fn plc_top(plc: &PlcUi) -> PlcUi {
+        let mut copy = PlcUi::default();
+        copy.vars = plc.vars.clone();
+        copy
+    }
+
+    /// The link is a shared node: power from either row's input feeds both rows
+    /// and both coils. Only the upward direction worked before — the junction fed
+    /// the top row's continuation and the branch row got nothing.
     #[test]
-    fn a_link_joins_the_branch_into_the_preview() {
-        let row = vec![contact("pump", false), Cell::Link, contact("estop", true)];
-        let branch = vec![contact("run", false)];
+    fn a_link_feeds_both_rows_in_the_preview() {
+        // Top input held: the bottom row and its coil must light too.
+        let top_held = plc_with(&[("i0_0", true), ("i0_1", true), ("i0_2", false)]);
+        let (node, top, bottom) = pair(&top_held);
+        assert_eq!(node, Some(true));
+        assert_eq!(top, Some(true));
+        assert_eq!(bottom, Some(true), "power flows down through the node");
 
-        let sealed = plc_with(&[("pump", false), ("run", true), ("estop", false)]);
-        assert_eq!(
-            preview_scan(&sealed, &row, Some(&branch)).1,
-            Some(true),
-            "the branch holds the rung on with pump false"
-        );
+        // Bottom input held: the top row lights, as it did before.
+        let bottom_held = plc_with(&[("i0_0", false), ("i0_1", false), ("i0_2", true)]);
+        let (node, top, bottom) = pair(&bottom_held);
+        assert_eq!(node, Some(true));
+        assert_eq!(top, Some(true), "power flows up through the node");
+        assert_eq!(bottom, Some(true));
 
-        let idle = plc_with(&[("pump", false), ("run", false), ("estop", false)]);
-        assert_eq!(
-            preview_scan(&idle, &row, Some(&branch)).1,
-            Some(false),
-            "with neither path made the rung is false"
-        );
+        // Neither: both dark.
+        let idle = plc_with(&[("i0_0", false), ("i0_1", false), ("i0_2", false)]);
+        assert_eq!(pair(&idle), (Some(false), Some(false), Some(false)));
 
-        // The cells after the link stay in series with the whole parallel.
-        let stopped = plc_with(&[("pump", false), ("run", true), ("estop", true)]);
-        assert_eq!(
-            preview_scan(&stopped, &row, Some(&branch)).1,
-            Some(false),
-            "the estop breaks the branch"
-        );
+        // Both: both lit.
+        let both = plc_with(&[("i0_0", true), ("i0_1", true), ("i0_2", true)]);
+        assert_eq!(pair(&both), (Some(true), Some(true), Some(true)));
+    }
 
-        // Without the row below in hand there is nothing to join, and the row's
-        // own series is all the preview can claim.
-        assert_eq!(preview_scan(&sealed, &row, None).1, Some(false));
+    /// Mixed contacts on each row: the top row's entry is a series, so a false
+    /// contact there makes its entry false, and the branch alone decides the node.
+    #[test]
+    fn mixed_contacts_on_each_row_still_share_one_node() {
+        // Top entry i0_0 AND i0_1 is false (i0_1 open), branch i0_2 is true.
+        let plc = plc_with(&[("i0_0", true), ("i0_1", false), ("i0_2", true)]);
+        let (node, top, bottom) = pair(&plc);
+        assert_eq!(node, Some(true), "the branch keeps the node live");
+        assert_eq!(top, Some(true), "the node feeds the top row's continuation");
+        assert_eq!(bottom, Some(true));
+
+        // Both entries false: the node is false and nothing lights.
+        let plc = plc_with(&[("i0_0", true), ("i0_1", false), ("i0_2", false)]);
+        assert_eq!(pair(&plc), (Some(false), Some(false), Some(false)));
+
+        // The top entry true through both contacts, branch false: both light.
+        let plc = plc_with(&[("i0_0", true), ("i0_1", true), ("i0_2", false)]);
+        assert_eq!(pair(&plc), (Some(true), Some(true), Some(true)));
     }
 
     /// The junction ends on the next row's conductor, not a half cell down: a row
@@ -5826,7 +5938,7 @@ mod link_tests {
     #[test]
     fn a_banded_row_reports_its_full_height() {
         let mut rung = Rung::new(
-            linc_plc_core::model::Logic::Const { value: true },
+            Logic::Const { value: true },
             Coil::new("run", CoilKind::Normal),
         );
         rung.cells = vec![Cell::Wire; linc_plc_core::grid::POSITIONS];

@@ -6721,6 +6721,9 @@ fn ladder_body(
                         .size(theme::font_size(9.0))
                         .color(theme::C3),
                 );
+                // The shared node of every linked group in this section, in row
+                // order: a link feeds its branch and the branch feeds it back.
+                let nodes = crate::screens::plc_grid::group_nodes(plc, &section.rungs);
                 let mut rows: Vec<egui::Rect> = Vec::new();
                 for (rung_index, rung) in section.rungs.iter().enumerate() {
                     if rung.is_comment_row() {
@@ -6744,6 +6747,7 @@ fn ladder_body(
                         rung_index,
                         rung,
                         below,
+                        nodes[rung_index],
                         actions,
                         &mut cursor_rect,
                     );

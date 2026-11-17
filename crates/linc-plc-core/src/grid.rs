@@ -121,48 +121,6 @@ pub fn lower_row(cells: &[Cell]) -> Logic {
     }
 }
 
-/// Lower row `index` that may join the row below with a link.
-///
-/// A link at the right edge of a position makes the next row a parallel path:
-/// the row keeps its own series and the branch is `OR`ed in. The branch is the
-/// next row in full, and a branch that links again consumes one more row, so a
-/// stack of links folds bottom-up. The returned count is the rows used.
-pub fn lower_rung(rows: &[Vec<Cell>], index: usize) -> (Logic, usize) {
-    let Some(cells) = rows.get(index) else {
-        return (Logic::Const { value: true }, 1);
-    };
-    // A `Link` at position k joins the row below at that column: cells left of
-    // the link run in parallel with the branch, and everything from the link on
-    // runs in series with both. Treating the whole row as parallel (the old
-    // behaviour) let a branch contact bypass a contact to the right of the link,
-    // so `/estop` could never break the pump latch.
-    if let Some(link) = cells
-        .iter()
-        .take(POSITIONS)
-        .position(|cell| matches!(cell, Cell::Link))
-    {
-        if rows.get(index + 1).is_some() {
-            let before = lower_row(&cells[..link]);
-            let after = lower_row(&cells[link + 1..]);
-            let (branch, used) = lower_rung(rows, index + 1);
-            let joined = Logic::Parallel {
-                items: vec![before, branch],
-            };
-            let combined = if matches!(after, Logic::Const { value: true }) {
-                joined
-            } else if matches!(joined, Logic::Const { value: true }) {
-                after
-            } else {
-                Logic::Series {
-                    items: vec![joined, after],
-                }
-            };
-            return (combined, 1 + used);
-        }
-    }
-    (lower_row(cells), 1)
-}
-
 /// Turn a version-2 series rung into cells.
 ///
 /// Only a flat series of contacts is expressible one-to-one; a parallel branch
@@ -265,38 +223,6 @@ mod tests {
             "edge contacts compile now"
         );
         assert_eq!(Cell::Wire.unsupported(), None);
-    }
-
-    #[test]
-    fn a_link_ors_the_row_below() {
-        let a = Cell::Contact {
-            var: "a".into(),
-            negated: false,
-        };
-        let b = Cell::Contact {
-            var: "b".into(),
-            negated: false,
-        };
-        let c = Cell::Contact {
-            var: "c".into(),
-            negated: false,
-        };
-        let rows = vec![
-            vec![a.clone(), b.clone(), Cell::Wire, Cell::Link],
-            vec![Cell::Wire, Cell::Wire, Cell::Wire, c.clone()],
-            vec![Cell::Wire],
-        ];
-        let (logic, used) = lower_rung(&rows, 0);
-        assert_eq!(used, 2, "the branch row belongs to the rung above");
-        assert_eq!(
-            logic,
-            Logic::Parallel {
-                items: vec![
-                    Logic::series(vec![Logic::contact("a", false), Logic::contact("b", false)]),
-                    Logic::series(vec![Logic::contact("c", false)]),
-                ],
-            }
-        );
     }
 }
 

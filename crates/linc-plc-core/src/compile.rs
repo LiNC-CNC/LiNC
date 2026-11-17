@@ -1078,15 +1078,34 @@ fn lower_pou(
                     }
                     let mut offset = 0;
                     while offset < run.len() {
-                        let (used, compute) = lower_grid_rung(&run, offset, lookup, ops, edges);
+                        let (used, compute) =
+                            lower_grid_rung(&run, offset, lookup, ops, edges, true);
                         if !compute {
                             let row = &section.rungs[index + offset];
-                            if row.has_coil() {
+                            if stores_power(row.coil()) {
                                 lower_coil(ops, lookup, pous, row.coil(), &mut jumps, edges, depth);
                             } else {
                                 // Nothing stores the row's power bit.
                                 ops.push(Op::Drop);
                             }
+                        }
+                        // A row joined by a link is fed by the same node as the
+                        // row above it, so its coil stores the node. The node is
+                        // lowered again for it: the VM has no duplicate op and a
+                        // group is a handful of rows.
+                        for step in 1..used {
+                            let row = &section.rungs[index + offset + step];
+                            if !stores_power(row.coil()) {
+                                continue;
+                            }
+                            let (_, branch_compute) =
+                                lower_grid_rung(&run, offset, lookup, ops, edges, false);
+                            if branch_compute {
+                                // A compute cell leaves no power bit; the branch
+                                // coil must still see a bit.
+                                ops.push(Op::PushConst(false));
+                            }
+                            lower_coil(ops, lookup, pous, row.coil(), &mut jumps, edges, depth);
                         }
                         offset += used;
                     }
@@ -1714,28 +1733,54 @@ fn lower_cells(
     false
 }
 
-/// Lower a row and, when it links, the branch below it. Returns rows used.
+/// Does this coil write anything?
+///
+/// A coil slot that is empty is not a write. `lower_coil` resolves an unknown or
+/// empty operand to slot 0 and stores there, so a blank coil on a row that draws
+/// nothing would quietly drive the first bit in the program. `Rung::is_comment_row`
+/// treats the same slot as blank; the compiler has to agree.
+fn stores_power(coil: &crate::model::Coil) -> bool {
+    matches!(
+        coil.kind,
+        crate::model::CoilKind::Jump
+            | crate::model::CoilKind::Call
+            | crate::model::CoilKind::Compute
+    ) || !coil.var.trim().is_empty()
+}
+
+/// Lower a linked group: the rows joined by links share one *node*.
+///
+/// A `Link` at column k of a row joins the row below it there. The junction is a
+/// node, not a one-way merge: every row in the group feeds it from the left, and
+/// every row's continuation to the right of the junction is fed *by* it. So the
+/// node is `OR` of the top row's cells before k and each branch row's whole row,
+/// and the top row's output is that node `AND` its continuation.
+///
+/// Branch rows used to be consumed without a word about their own coils, and a
+/// branch contact could only ever push power *up* into the row above. Both coils
+/// of a latching pair are now fed by the same node.
+///
+/// `continuation` decides how far the group is lowered: `true` leaves the top
+/// row's output on the stack (what its coil stores), `false` leaves the node
+/// itself, which is what a branch row's coil stores.
+///
+/// Returns the rows the group used and whether the last thing lowered was a
+/// compute cell (which leaves no power bit on the stack).
 fn lower_grid_rung(
     run: &[Vec<crate::grid::Cell>],
     index: usize,
     lookup: &Lowering<'_>,
     ops: &mut Vec<Op>,
     edges: &mut u16,
+    continuation: bool,
 ) -> (usize, bool) {
     let Some(cells) = run.get(index) else {
         ops.push(Op::PushConst(true));
         return (1, false);
     };
-    // A `Link` at position k joins the row below at that column, so the branch is
-    // in parallel with the cells left of the link only; cells from the link on
-    // stay in series with both. Lowering the whole row in parallel let a branch
-    // contact bypass a series contact to the right of the link.
-    //
-    // A row can carry several links, one per extra branch of the same parallel
-    // (`split_parallel` writes them onto the first branch, and a three-way branch
-    // whose members have different lengths needs one column each). Each link owns
-    // the next row: the segments between links are in series and every branch row
-    // is in parallel with what is already on the stack.
+    // A row can carry several links, one per branch of the same parallel: the
+    // first is the junction's column, and each link owns the row below it in
+    // order. Links with no row under them are not junctions at all.
     let links = cells
         .iter()
         .enumerate()
@@ -1751,40 +1796,50 @@ fn lower_grid_rung(
         let compute = lower_cells(cells, lookup, ops, edges);
         return (1, compute);
     }
-    let mut compute = false;
-    let mut powered = false;
-    let mut cursor = 0;
-    let mut used = 1;
-    for link in &links {
-        let segment = &cells[cursor..*link];
-        if !segment
+
+    let junction = links[0];
+    // A link in a segment is a junction, not a condition: a continuation made of
+    // links and wires is nothing to lower. A row with several links puts each
+    // column's junction in the node, so the cells between them are trivial.
+    let wire_only = |segment: &[crate::grid::Cell]| {
+        segment
             .iter()
-            .all(|cell| matches!(cell, crate::grid::Cell::Wire))
-        {
-            compute |= lower_cells(segment, lookup, ops, edges);
-            if powered {
-                ops.push(Op::And);
-            }
-            powered = true;
+            .all(|cell| matches!(cell, crate::grid::Cell::Wire | crate::grid::Cell::Link))
+    };
+    let mut compute = false;
+    let mut entries = 0usize;
+    // The top row's own entry: everything left of the junction.
+    if !wire_only(&cells[..junction]) {
+        compute |= lower_cells(&cells[..junction], lookup, ops, edges);
+        entries += 1;
+    }
+    // Each branch row is one more entry, in full: its cells are the branch's
+    // series, not a prefix and a continuation.
+    for step in 1..=links.len() {
+        let branch = &run[index + step];
+        if wire_only(branch) {
+            continue;
         }
-        let (rows, more) = lower_grid_rung(run, index + used, lookup, ops, edges);
-        compute |= more;
-        if powered {
+        compute |= lower_cells(branch, lookup, ops, edges);
+        if entries > 0 {
+            // `Or` pops both sides, so it follows the branch it joins.
             ops.push(Op::Or);
         }
-        powered = true;
-        used += rows;
-        cursor = link + 1;
+        entries += 1;
     }
-    let after = &cells[cursor..];
-    if !after
-        .iter()
-        .all(|cell| matches!(cell, crate::grid::Cell::Wire))
-    {
-        compute |= lower_cells(after, lookup, ops, edges);
-        ops.push(Op::And);
+    if entries == 0 {
+        ops.push(Op::PushConst(true));
     }
-    (used, compute)
+    if continuation {
+        // Everything right of the junction is in series with the node, for the
+        // top row only: a branch row's whole row was already an entry above.
+        let after = &cells[junction + 1..];
+        if !wire_only(after) {
+            compute |= lower_cells(after, lookup, ops, edges);
+            ops.push(Op::And);
+        }
+    }
+    (1 + links.len(), compute)
 }
 
 /// A word-valued operand of a compare contact. The type is the profile's, so the

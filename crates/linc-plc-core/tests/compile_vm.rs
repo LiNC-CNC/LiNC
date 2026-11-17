@@ -1915,6 +1915,60 @@ fn a_tree_rung_can_hold_a_block_an_edge_and_a_compare() {
     assert_eq!(vm.outputs(), &[true]);
 }
 
+/// A link is a shared node, not a one-way merge: two rows joined by one, each
+/// with its own coil, are both driven by the OR of the two left paths. The upward
+/// direction worked before; the downward one did not, and the branch row's coil
+/// was dropped from the program entirely.
+#[test]
+fn a_link_feeds_both_coils_from_one_node() {
+    use linc_plc_core::grid::Cell;
+    let contact = |name: &str| Cell::Contact {
+        var: name.to_string(),
+        negated: false,
+    };
+    let wires = |count: usize| std::iter::repeat_n(Cell::Wire, count);
+
+    let mut top = Rung::new(
+        Logic::contact("i0_0", false),
+        Coil::new("q0_0", CoilKind::Normal),
+    );
+    top.cells = vec![contact("i0_0"), Cell::Link]
+        .into_iter()
+        .chain(wires(7))
+        .collect();
+    let mut bottom = Rung::new(
+        Logic::contact("i0_1", false),
+        Coil::new("q0_1", CoilKind::Normal),
+    );
+    bottom.cells = vec![contact("i0_1")].into_iter().chain(wires(8)).collect();
+
+    let project = project_with(
+        vec![
+            IoPoint::new("i0_0", IoDirection::In),
+            IoPoint::new("i0_1", IoDirection::In),
+            IoPoint::new("q0_0", IoDirection::Out),
+            IoPoint::new("q0_1", IoDirection::Out),
+        ],
+        Vec::new(),
+        vec![section("main", vec![top, bottom])],
+    );
+    let compiled = compile(&project).expect("compile");
+    let mut vm = Vm::new(&compiled);
+
+    // Inputs are slots 0 and 1; the coils are slots 2 and 3.
+    vm.scan(&[true, false]);
+    assert_eq!(vm.outputs(), &[true, true], "the top input feeds both rows");
+
+    vm.scan(&[false, true]);
+    assert_eq!(vm.outputs(), &[true, true], "the branch feeds both rows");
+
+    vm.scan(&[false, false]);
+    assert_eq!(vm.outputs(), &[false, false]);
+
+    vm.scan(&[true, true]);
+    assert_eq!(vm.outputs(), &[true, true], "both paths on, both coils on");
+}
+
 /// The pump latch as the grid draws it: a `Link` at position 1 puts the row below
 /// in parallel with position 0 only, so `/estop` stays in series with the whole
 /// branch and must drop the run output.
