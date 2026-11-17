@@ -1016,6 +1016,9 @@ pub struct PlcUi {
     /// The open dialog: the JSON projects beside the current path, read from
     /// disk when it opens. None when the dialog is closed.
     pub open_list: Option<OpenList>,
+    /// The second directory the open dialog lists: the acceptance corpus, beside
+    /// the crate that tests it. Read at run time like the first, never embedded.
+    pub corpus_dir: PathBuf,
     /// The element picker is open on this cell.
     pub picker: Option<(usize, usize, usize)>,
     /// The row the element picker's cursor sits on; arrows move it, Enter takes it.
@@ -1151,6 +1154,7 @@ impl Default for PlcUi {
         Self {
             project: startup_project(),
             open_list: None,
+            corpus_dir: PathBuf::from(CORPUS_PROJECTS),
             path_text: startup_path().display().to_string(),
             socket_text: linc_plc_client::default_socket_path().display().to_string(),
             selection: Some(NodePath::root(0, 0)),
@@ -2479,43 +2483,80 @@ impl PlcUi {
         std::path::PathBuf::from(".")
     }
 
-    /// List the projects on disk. Read here, at run time: the corpus is not
-    /// compiled into the application, so a project added to the folder shows up
-    /// without a rebuild.
+    /// The directories the open dialog lists: the open project's, and the
+    /// acceptance corpus. Two, unless they are the same one.
+    fn open_dirs(&self) -> Vec<PathBuf> {
+        let project = self.open_dir();
+        let corpus = self.corpus_dir.clone();
+        let same = corpus.canonicalize().ok() == project.canonicalize().ok();
+        if corpus.is_dir() && !same {
+            vec![project, corpus]
+        } else {
+            vec![project]
+        }
+    }
+
+    /// List the projects on disk. Read here, at run time: neither the corpus nor
+    /// the project directory is compiled into the application, so a project added
+    /// to either folder shows up without a rebuild.
     pub fn open_picker(&mut self) {
-        let dir = self.open_dir();
-        let mut list = OpenList {
-            dir: dir.display().to_string(),
-            ..Default::default()
-        };
-        match std::fs::read_dir(&dir) {
-            Ok(entries) => {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    let json = path
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
-                    if !json || !path.is_file() {
-                        continue;
+        let mut list = OpenList::default();
+        for dir in self.open_dirs() {
+            let mut group = OpenGroup {
+                // Shown absolute, so both listings name a place on this machine
+                // and the same directory spelled two ways does not read as two.
+                dir: dir
+                    .canonicalize()
+                    .unwrap_or_else(|_| dir.clone())
+                    .display()
+                    .to_string(),
+                ..Default::default()
+            };
+            match std::fs::read_dir(&dir) {
+                Ok(entries) => {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let json = path
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
+                        if !json || !path.is_file() {
+                            continue;
+                        }
+                        if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                            group.entries.push(name.to_string());
+                        }
                     }
-                    if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                        list.entries.push(name.to_string());
-                    }
+                    group.entries.sort();
+                    list.groups.push(group);
                 }
-                list.entries.sort();
+                Err(error) => {
+                    list.error = Some(format!("{dir:?}: {error}"));
+                    list.groups.push(group);
+                }
             }
-            Err(error) => list.error = Some(format!("{dir:?}: {error}")),
         }
         // The cursor starts on the project that is open, when it is one of them.
-        let current = std::path::Path::new(self.path_text.trim())
+        let open = PathBuf::from(self.path_text.trim());
+        let name = open
             .file_name()
             .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let dir = open
+            .parent()
+            .map(|parent| parent.display().to_string())
             .unwrap_or_default();
-        list.cursor = list
-            .entries
-            .iter()
-            .position(|name| name == current)
+        list.cursor = (0..list.len())
+            .find(|cursor| match list.at(*cursor) {
+                Some((listed, entry)) => entry == name && listed == dir,
+                None => false,
+            })
+            .or_else(|| {
+                // The same file reached by a different spelling of the directory.
+                (0..list.len())
+                    .find(|cursor| matches!(list.at(*cursor), Some((_, entry)) if entry == name))
+            })
             .unwrap_or(0);
         self.open_list = Some(list);
     }
@@ -2523,22 +2564,15 @@ impl PlcUi {
     /// Open the row the open dialog's cursor is on. A file that fails to parse
     /// leaves the dialog up with the reason, so the next row is one arrow away.
     pub fn pick_open_list(&mut self) {
-        let Some(name) = self
+        let Some((dir, name)) = self
             .open_list
             .as_ref()
-            .and_then(|list| list.entries.get(list.cursor))
-            .cloned()
+            .and_then(|list| list.at(list.cursor))
+            .map(|(dir, name)| (dir.to_string(), name.to_string()))
         else {
             return;
         };
-        let path = std::path::Path::new(
-            &self
-                .open_list
-                .as_ref()
-                .map(|list| list.dir.clone())
-                .unwrap_or_default(),
-        )
-        .join(name);
+        let path = PathBuf::from(dir).join(name);
         self.path_text = path.display().to_string();
         self.last_error = None;
         self.open();
@@ -2676,10 +2710,46 @@ impl PlcUi {
 /// corpus is ordinary files, and a project written a minute ago must appear.
 #[derive(Clone, Debug, Default)]
 pub struct OpenList {
-    pub dir: String,
-    pub entries: Vec<String>,
+    /// One entry per directory listed, in the order they are drawn.
+    pub groups: Vec<OpenGroup>,
+    /// Flat cursor over every file row, in listing order: headers are skipped by
+    /// arithmetic, so the keys never have to know about groups.
     pub cursor: usize,
     pub error: Option<String>,
+}
+
+/// One directory's worth of the open dialog: what the page lists, grouped under
+/// the directory it came from, so two project sets are one key apart.
+#[derive(Clone, Debug, Default)]
+pub struct OpenGroup {
+    pub dir: String,
+    pub entries: Vec<String>,
+}
+
+impl OpenList {
+    /// The file rows, in listing order, as `(group, entry)`.
+    pub fn rows(&self) -> Vec<(usize, usize)> {
+        self.groups
+            .iter()
+            .enumerate()
+            .flat_map(|(group, list)| (0..list.entries.len()).map(move |entry| (group, entry)))
+            .collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.groups.iter().map(|group| group.entries.len()).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The directory and file name under the cursor.
+    pub fn at(&self, cursor: usize) -> Option<(&str, &str)> {
+        let (group, entry) = *self.rows().get(cursor)?;
+        let list = self.groups.get(group)?;
+        Some((list.dir.as_str(), list.entries.get(entry)?.as_str()))
+    }
 }
 
 /// Where the open dialog looks when the current project has no directory of its
@@ -3579,10 +3649,8 @@ fn open_list_keys(plc: &mut PlcUi, ui: &Ui) {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
             list.cursor = list.cursor.saturating_sub(1);
         }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
-            && !list.entries.is_empty()
-        {
-            list.cursor = (list.cursor + 1).min(list.entries.len() - 1);
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) && !list.is_empty() {
+            list.cursor = (list.cursor + 1).min(list.len() - 1);
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
             open = true;
@@ -3614,13 +3682,7 @@ fn open_list_window(plc: &mut PlcUi, ui: &mut Ui) {
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ui.ctx(), |ui| {
-            ui.set_min_width(420.0);
-            ui.label(
-                RichText::new(&list.dir)
-                    .monospace()
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
+            ui.set_min_width(460.0);
             if let Some(error) = &list.error {
                 ui.label(
                     RichText::new(error)
@@ -3630,30 +3692,46 @@ fn open_list_window(plc: &mut PlcUi, ui: &mut Ui) {
                 );
             }
             ui.add_space(4.0);
-            if list.entries.is_empty() {
-                ui.label(
-                    RichText::new("NO *.json IN THIS DIRECTORY")
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::MUTED),
-                );
-            }
             egui::ScrollArea::vertical()
                 .max_height(320.0)
                 .show(ui, |ui| {
-                    for (index, name) in list.entries.iter().enumerate() {
-                        let row = ui.selectable_label(
-                            index == list.cursor,
-                            RichText::new(name).monospace().size(theme::font_size(10.0)),
+                    // One flat cursor over every directory's files: the headers
+                    // are skipped by counting, not by moving the cursor.
+                    let mut flat = 0usize;
+                    for group in &list.groups {
+                        ui.label(
+                            RichText::new(&group.dir)
+                                .monospace()
+                                .size(theme::font_size(9.0))
+                                .color(theme::MUTED),
                         );
-                        // The cursor starts on the project that is open, which
-                        // can be below the fold: keep the highlighted row in
-                        // view so Enter opens what the operator can see.
-                        if index == list.cursor {
-                            row.scroll_to_me(Some(egui::Align::Center));
+                        if group.entries.is_empty() {
+                            ui.label(
+                                RichText::new("  no *.json")
+                                    .monospace()
+                                    .size(theme::font_size(9.0))
+                                    .color(theme::MUTED),
+                            );
+                            continue;
                         }
-                        if row.clicked() {
-                            click = Some(index);
+                        for name in &group.entries {
+                            let index = flat;
+                            let row = ui.selectable_label(
+                                index == list.cursor,
+                                RichText::new(format!("  {name}"))
+                                    .monospace()
+                                    .size(theme::font_size(10.0)),
+                            );
+                            // The cursor starts on the project that is open, which
+                            // can be below the fold: keep the highlighted row in
+                            // view so Enter opens what the operator can see.
+                            if index == list.cursor {
+                                row.scroll_to_me(Some(egui::Align::Center));
+                            }
+                            if row.clicked() {
+                                click = Some(index);
+                            }
+                            flat += 1;
                         }
                     }
                 });
@@ -9174,9 +9252,96 @@ mod pou_list_n_tests {
     /// of paths compiled in: a project written after the build opens from it,
     /// and Escape closes the dialog without touching the project.
     #[test]
-    fn the_open_dialog_lists_disk_and_opens_the_row_under_the_cursor() {
+    fn the_open_dialog_lists_the_project_directory_and_the_corpus() {
+        let dir = fresh_dir("linc-open");
+        let corpus = fresh_dir("linc-corpus");
+        std::fs::write(dir.join("a-from-disk.json"), project_json("FROM_DISK")).expect("write");
+        std::fs::write(corpus.join("corpus-a.json"), project_json("CORPUS_A")).expect("write");
+        std::fs::write(corpus.join("corpus-b.json"), project_json("CORPUS_B")).expect("write");
+
+        let mut plc = PlcUi::default();
+        plc.path_text = dir.join("a-from-disk.json").display().to_string();
+        plc.corpus_dir = corpus.clone();
+        plc.page = PlcPage::PouList;
+        plc.project = Project::example();
+
+        press(&mut plc, egui::Key::O);
+        let list = plc.open_list.as_ref().expect("dialog open");
+        assert_eq!(list.groups.len(), 2, "both directories are listed");
+        assert_eq!(list.groups[0].entries, vec!["a-from-disk.json".to_string()]);
+        assert_eq!(
+            list.groups[1].entries,
+            vec!["corpus-a.json".to_string(), "corpus-b.json".to_string()]
+        );
+        assert_eq!(list.len(), 3, "the cursor runs over every file row");
+        assert_eq!(list.cursor, 0, "the cursor starts on the file named");
+
+        // Escape closes the dialog and changes nothing.
+        press(&mut plc, egui::Key::Escape);
+        assert!(plc.open_list.is_none());
+        assert_ne!(plc.project.all_pous()[0].name, "FROM_DISK");
+    }
+
+    /// One key away means one file away: the cursor walks out of the project's
+    /// directory into the corpus listing and back, and Enter opens either.
+    #[test]
+    fn both_listings_open_and_the_cursor_walks_across_the_boundary() {
+        let dir = fresh_dir("linc-open2");
+        let corpus = fresh_dir("linc-corpus2");
+        std::fs::write(dir.join("a-from-disk.json"), project_json("FROM_DISK")).expect("write");
+        std::fs::write(corpus.join("corpus-a.json"), project_json("CORPUS_A")).expect("write");
+
+        let mut plc = PlcUi::default();
+        plc.path_text = dir.join("a-from-disk.json").display().to_string();
+        plc.corpus_dir = corpus.clone();
+        plc.page = PlcPage::PouList;
+        plc.project = Project::example();
+
+        press(&mut plc, egui::Key::O);
+        press(&mut plc, egui::Key::Enter);
+        assert!(plc.last_error.is_none(), "{:?}", plc.last_error);
+        assert_eq!(plc.project.all_pous()[0].name, "FROM_DISK");
+
+        // Down past the end of the project listing lands on the corpus.
+        let mut plc2 = PlcUi::default();
+        plc2.path_text = dir.join("a-from-disk.json").display().to_string();
+        plc2.corpus_dir = corpus.clone();
+        plc2.page = PlcPage::PouList;
+        plc2.project = Project::example();
+        press(&mut plc2, egui::Key::O);
+        press(&mut plc2, egui::Key::ArrowDown);
+        let list = plc2.open_list.as_ref().expect("dialog open");
+        assert_eq!(list.cursor, 1, "the next row is the corpus file");
+        assert_eq!(
+            list.at(list.cursor),
+            Some((corpus.display().to_string().as_str(), "corpus-a.json")),
+            "the row belongs to the corpus directory"
+        );
+        press(&mut plc2, egui::Key::Enter);
+        assert_eq!(plc2.project.all_pous()[0].name, "CORPUS_A");
+
+        // Up walks back, and the ends do not run past the list.
+        let mut plc3 = PlcUi::default();
+        plc3.path_text = dir.join("a-from-disk.json").display().to_string();
+        plc3.corpus_dir = corpus.clone();
+        plc3.page = PlcPage::PouList;
+        plc3.project = Project::example();
+        press(&mut plc3, egui::Key::O);
+        press(&mut plc3, egui::Key::ArrowDown);
+        press(&mut plc3, egui::Key::ArrowDown);
+        assert_eq!(plc3.open_list.as_ref().map(|list| list.cursor), Some(1));
+        press(&mut plc3, egui::Key::ArrowUp);
+        assert_eq!(plc3.open_list.as_ref().map(|list| list.cursor), Some(0));
+        press(&mut plc3, egui::Key::ArrowUp);
+        assert_eq!(plc3.open_list.as_ref().map(|list| list.cursor), Some(0));
+
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&corpus).ok();
+    }
+
+    fn fresh_dir(prefix: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "linc-open-{}-{}",
+            "{prefix}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -9184,37 +9349,15 @@ mod pou_list_n_tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).expect("temp dir");
-        let mut on_disk = Project::example();
-        let mut pous = on_disk.all_pous();
-        pous[0].name = "FROM_DISK".to_string();
-        on_disk.set_pous(pous);
-        let text = project_to_json(&on_disk).expect("serialise");
-        std::fs::write(dir.join("a-from-disk.json"), text).expect("write");
+        dir
+    }
 
-        let mut plc = PlcUi::default();
-        plc.path_text = dir.join("a-from-disk.json").display().to_string();
-        plc.page = PlcPage::PouList;
-        plc.project = Project::example();
-
-        press(&mut plc, egui::Key::O);
-        let list = plc.open_list.as_ref().expect("dialog open");
-        assert_eq!(
-            list.entries,
-            vec!["a-from-disk.json".to_string()],
-            "only the JSON in the path's directory is listed"
-        );
-        assert_eq!(list.cursor, 0, "the cursor starts on the file named");
-        // Escape closes the dialog and changes nothing.
-        press(&mut plc, egui::Key::Escape);
-        assert!(plc.open_list.is_none());
-        assert_ne!(plc.project.all_pous()[0].name, "FROM_DISK");
-
-        press(&mut plc, egui::Key::O);
-        press(&mut plc, egui::Key::Enter);
-        assert!(plc.open_list.is_none(), "the dialog closes on success");
-        assert!(plc.last_error.is_none(), "{:?}", plc.last_error);
-        assert_eq!(plc.project.all_pous()[0].name, "FROM_DISK");
-        std::fs::remove_dir_all(&dir).ok();
+    fn project_json(pou_name: &str) -> String {
+        let mut project = Project::example();
+        let mut pous = project.all_pous();
+        pous[0].name = pou_name.to_string();
+        project.set_pous(pous);
+        project_to_json(&project).expect("serialise")
     }
 
     fn plc_with_two_pous() -> PlcUi {
