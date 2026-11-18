@@ -737,6 +737,10 @@ impl LincApp {
         const FOOTER_PAD: f32 = 4.0;
         let list_height = (ui.available_height() - FRAME_CHROME - header - FOOTER_PAD).max(60.0);
         let shortcuts = self.key_hints();
+        // A click runs after the list draws: the command changes the page and
+        // the row state, and rebuilding that mid-loop would paint the rest of
+        // the list against the new page.
+        let mut clicked: Option<ShortcutCommand> = None;
         if !shortcuts.is_empty() {
             Frame::new()
                 .fill(theme::PANEL)
@@ -769,7 +773,7 @@ impl LincApp {
                                 )
                                 .size()
                                 .y;
-                            for group in shortcuts.iter() {
+                            for (group_index, group) in shortcuts.iter().enumerate() {
                                 if !group.title.is_empty() {
                                     // Also before the first title: the pane header is not a
                                     // group, and the first one was sitting right under it.
@@ -782,39 +786,66 @@ impl LincApp {
                                     );
                                     ui.add_space(hint_line * 0.35);
                                 }
-                                for (index, (key, action)) in group.items.iter().enumerate() {
+                                for (item_index, shortcut) in group.items.iter().enumerate() {
                                     // One line per command, exactly; `ui.horizontal`
                                     // inherited the 44 px touch target and left large air
                                     // between two 9 pt rows.
-                                    ui.allocate_ui_with_layout(
+                                    let (row, _) = ui.allocate_exact_size(
                                         egui::vec2(ui.available_width(), hint_line),
-                                        Layout::left_to_right(Align::Center),
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new(key.clone())
-                                                    .monospace()
-                                                    .size(theme::font_size(9.0))
-                                                    .color(theme::C3),
-                                            );
-                                            ui.with_layout(
-                                                Layout::right_to_left(Align::Center),
-                                                |ui| {
-                                                    ui.label(
-                                                        RichText::new(*action)
-                                                            .size(theme::font_size(9.0))
-                                                            .color(theme::MUTED),
-                                                    );
-                                                },
-                                            );
-                                        },
+                                        Sense::hover(),
                                     );
-                                    if index + 1 < group.items.len() {
+                                    // A row that names a single command is a button. It
+                                    // senses the click without asking for keyboard focus:
+                                    // the shell owns the keyboard, and a focus stop here
+                                    // would put the arrow keys into the sidebar.
+                                    if let Some(command) = shortcut.command {
+                                        let target = ui.interact(
+                                            row,
+                                            ui.scope_id().with((
+                                                "shortcut",
+                                                group_index,
+                                                item_index,
+                                            )),
+                                            Sense::CLICK,
+                                        );
+                                        if target.hovered() {
+                                            ui.painter().rect_filled(row, 3, theme::PANEL_RAISED);
+                                            ui.ctx()
+                                                .set_cursor_icon(egui::CursorIcon::PointingHand);
+                                        }
+                                        if target.clicked() {
+                                            // The click leaves whichever text field had
+                                            // the keyboard, the same way a nav row does:
+                                            // the command is the operator's, not the
+                                            // field's.
+                                            ui.memory_mut(|memory| memory.stop_text_input());
+                                            clicked = Some(command);
+                                        }
+                                    }
+                                    ui.painter().text(
+                                        egui::pos2(row.left() + 4.0, row.center().y),
+                                        Align2::LEFT_CENTER,
+                                        shortcut.key.as_str(),
+                                        egui::FontId::monospace(theme::font_size(9.0)),
+                                        theme::C3,
+                                    );
+                                    ui.painter().text(
+                                        egui::pos2(row.right() - 4.0, row.center().y),
+                                        Align2::RIGHT_CENTER,
+                                        shortcut.label,
+                                        egui::FontId::proportional(theme::font_size(9.0)),
+                                        theme::MUTED,
+                                    );
+                                    if item_index + 1 < group.items.len() {
                                         ui.add_space(hint_line * 0.5);
                                     }
                                 }
                             }
                         });
                 });
+        }
+        if let Some(command) = clicked {
+            self.run_shortcut(command);
         }
     }
 }
@@ -863,6 +894,9 @@ pub(crate) struct NavUi {
     pub last_mode: Option<PanelModeValidity>,
     pub homing_return_page: Page,
     pub page_focus_requested: bool,
+    /// The SHORTCUTS row the operator clicked, waiting for the page that owns
+    /// the command to take it in the same frame.
+    pub shortcut_click: Option<ShortcutCommand>,
     /// Navigation entries the profile shows, in display order.
     pub pages: Vec<Page>,
 }

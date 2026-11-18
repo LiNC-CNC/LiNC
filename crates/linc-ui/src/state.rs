@@ -81,6 +81,90 @@ pub enum ProgramView {
     Code,
 }
 
+/// A command a sidebar SHORTCUTS row runs when it is clicked.
+///
+/// The shell owns the first group; the pages own the rest, and their own key
+/// handlers take the parked click so a row and its key share one dispatch. Only
+/// rows that name a single command carry one: a gesture (PAN, ZOOM, the arrow
+/// keys) stays a legend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShortcutCommand {
+    /// `Esc` on a running program: the whole dismissal ladder the key walks.
+    ResetProgram,
+    /// SPLIT / CODE on the Program page.
+    CycleProgramView,
+    /// FEED / F.ERROR on the Machine page.
+    ToggleFollowingError,
+    CycleView,
+    CycleBounds,
+    CycleLatheMirror,
+    CycleLatheDiameter,
+    FitGraph,
+    ClearTrail,
+    CycleRemaining,
+    RunFromLine,
+    GoToLine,
+    SaveProgram,
+    UndoEdit,
+    RedoEdit,
+    UnloadProgram,
+    SaveMdi,
+    GoToLineMdi,
+    ClearMdiInput,
+    OpenBrowser,
+    OpenMessages,
+    RefreshFiles,
+    /// Focus the Help search line.
+    HelpSearch,
+    /// `O`: the limit-switch recovery dialog.
+    LimitRecovery,
+    /// `C` on DIAGNOSTICS / OVERVIEW: the view only, never the machine.
+    ClearLogView,
+    /// The OFFSETS row's `PROBE` hint: table, probe tabs, table again.
+    CycleOffsets,
+
+    // Page-local commands. The click is parked on the shell and the page's own
+    // key handler takes it in the same frame the row was clicked.
+    FilesActivate,
+    FilesCopy,
+    FilesDuplicate,
+    FilesRename,
+    FilesNew,
+    FilesDelete,
+    FilesEject,
+    FilesToggleRecent,
+    ToolsSearch,
+    ToolsEdit,
+    ToolsLoad,
+    ToolsNumber,
+    ToolsPosition,
+    ToolsNew,
+    ToolsDuplicate,
+    ToolsSync,
+    ToolsDelete,
+    HelpRead,
+    HelpPage,
+    DiagSearch,
+    DiagList,
+    DiagPane,
+    DiagFaster,
+    DiagSlower,
+    DiagClearFilters,
+    ManualZeroAll,
+    OffsetsActivate,
+    ProbeRun,
+    ProbeApply,
+    ProbeUpdateParams,
+    ProbeResetAll,
+    ProbePositionMode,
+    /// `R` on EDGE ANGLE: request the work rotation from the run.
+    ProbeApplyRotation,
+    ProbeParameters,
+    ProbeDimensions,
+    /// `Ctrl+R` on CALIBRATE: put the stored calibration numbers back.
+    ProbeResetCalibration,
+}
+
 impl ProgramView {
     pub fn label(self) -> &'static str {
         match self {

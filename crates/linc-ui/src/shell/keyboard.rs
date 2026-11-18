@@ -21,6 +21,10 @@ pub(super) const CUT_SHORTCUT: Binding = Binding::new(egui::Key::X, egui::Modifi
 
 impl LincApp {
     pub fn handle_keyboard(&mut self, ui: &mut egui::Ui) {
+        // A page-local row click is taken by the page's own handler in the
+        // frame it was clicked. One still here was clicked while no handler
+        // ran: drop it rather than let it fire on a later page.
+        self.nav.shortcut_click = None;
         // The safety notice is the only thing on screen until it is answered.
         // Enter accepts, Esc quits, everything else is swallowed.
         if self.safety_gate {
@@ -632,38 +636,31 @@ impl LincApp {
             self.request_quit();
         }
         if request_files {
-            if self.snapshot.task.running {
-                self.toast("cannot open files while running", theme::ERROR);
-            } else {
-                self.request_files();
-            }
+            self.run_shortcut(ShortcutCommand::OpenBrowser);
         }
         if cycle_toolpath_view {
-            self.cycle_toolpath_view();
+            self.run_shortcut(ShortcutCommand::CycleView);
         }
         if toggle_bounds {
-            self.cycle_bounds();
+            self.run_shortcut(ShortcutCommand::CycleBounds);
         }
         if toggle_lathe_mirror {
-            self.cycle_lathe_mirror();
+            self.run_shortcut(ShortcutCommand::CycleLatheMirror);
         }
         if toggle_lathe_diameter {
-            self.cycle_lathe_diameter();
+            self.run_shortcut(ShortcutCommand::CycleLatheDiameter);
         }
         if goto_line && matches!(self.nav.page, Page::Program | Page::Machine) {
-            self.overlay.modal = Some(crate::state::Modal::GoToLine {
-                buffer: String::new(),
-                mdi: false,
-            });
+            self.run_shortcut(ShortcutCommand::GoToLine);
         }
         if line_step != 0 && self.nav.page == Page::Program {
             self.step_selected_line(line_step);
         }
         if save && self.nav.page == Page::Program {
-            self.save_program();
+            self.run_shortcut(ShortcutCommand::SaveProgram);
         }
         if refresh && self.nav.page == Page::Files {
-            self.files.refresh();
+            self.run_shortcut(ShortcutCommand::RefreshFiles);
         }
         if self.nav.page == Page::Program {
             let selected = self.program.selected_line;
@@ -696,42 +693,32 @@ impl LincApp {
                 }
             }
         }
-        if undo
-            && self.nav.page == Page::Program
-            && self.program.focus_editor
-            && self.program.editor.undo()
-        {
-            self.mark_editor_changed();
+        if undo && self.nav.page == Page::Program && self.program.focus_editor {
+            self.run_shortcut(ShortcutCommand::UndoEdit);
         }
-        if redo
-            && self.nav.page == Page::Program
-            && self.program.focus_editor
-            && self.program.editor.redo()
-        {
-            self.mark_editor_changed();
+        if redo && self.nav.page == Page::Program && self.program.focus_editor {
+            self.run_shortcut(ShortcutCommand::RedoEdit);
         }
         if run_from_line {
-            self.request_run_from_line();
+            self.run_shortcut(ShortcutCommand::RunFromLine);
         }
         if graph_fit {
-            self.fit_graph();
+            self.run_shortcut(ShortcutCommand::FitGraph);
         }
         if view_pan != egui::Vec2::ZERO || view_zoom != 1.0 {
             self.pan_view(view_pan, view_zoom);
         }
         if graph_clear {
-            self.clear_trail();
+            self.run_shortcut(ShortcutCommand::ClearTrail);
         }
         if remaining {
-            self.cycle_remaining();
+            self.run_shortcut(ShortcutCommand::CycleRemaining);
         }
         if machine_following {
-            self.following.active = !self.following.active;
+            self.run_shortcut(ShortcutCommand::ToggleFollowingError);
         }
         if cycle_view {
-            self.cycle_program_view();
-            let view = self.program.view;
-            self.remember_program_view(view);
+            self.run_shortcut(ShortcutCommand::CycleProgramView);
         }
         if mode_nav {
             self.request_mode_page();
@@ -739,8 +726,8 @@ impl LincApp {
         if let Some(page) = nav_page {
             self.request_nav_page(page);
         }
-        if (help_search || find) && self.nav.page == Page::Help && !self.overlay_open() {
-            self.help.focus_search = true;
+        if help_search || find {
+            self.run_shortcut(ShortcutCommand::HelpSearch);
         }
         if page_up {
             self.page_up();
@@ -762,7 +749,7 @@ impl LincApp {
             self.nav.page_focus_requested = true;
         }
         if open_messages {
-            self.overlay.messages_dialog = true;
+            self.run_shortcut(ShortcutCommand::OpenMessages);
         }
         if escape {
             self.escape();
@@ -786,19 +773,16 @@ impl LincApp {
             self.remember_mdi_history();
         }
         if mdi_clear {
-            self.mdi.clear_input();
+            self.run_shortcut(ShortcutCommand::ClearMdiInput);
         }
         if mdi_run {
             screens::mdi::run_selected(self);
         }
         if mdi_goto {
-            self.overlay.modal = Some(crate::state::Modal::GoToLine {
-                buffer: String::new(),
-                mdi: true,
-            });
+            self.run_shortcut(ShortcutCommand::GoToLineMdi);
         }
         if mdi_save {
-            self.request_mdi_save();
+            self.run_shortcut(ShortcutCommand::SaveMdi);
         }
 
         if self.nav.focus_region == FocusRegion::Nav {
@@ -826,6 +810,140 @@ impl LincApp {
                     .copied()
                     .unwrap_or(Page::Machine);
                 self.request_nav_page(page);
+            }
+        }
+    }
+
+    /// Run a sidebar SHORTCUTS command.
+    ///
+    /// The keyboard handler funnels every command it shares with the mouse
+    /// through here, so a click and a keypress cannot drift apart. Each arm
+    /// carries the page guard the action needs; the key path adds its own
+    /// context checks (which text field holds the keyboard, which page is in
+    /// front) before it calls in, so a permissive arm does not widen a key
+    /// binding.
+    pub(crate) fn run_shortcut(&mut self, command: ShortcutCommand) {
+        match command {
+            // The row prints RESET over `Esc`, so a click gets the same ladder
+            // the key walks: a dialog first, then the running program.
+            ShortcutCommand::ResetProgram => self.escape(),
+            ShortcutCommand::CycleProgramView => {
+                self.cycle_program_view();
+                let view = self.program.view;
+                self.remember_program_view(view);
+            }
+            ShortcutCommand::ToggleFollowingError => {
+                self.following.active = !self.following.active;
+            }
+            ShortcutCommand::CycleView => self.cycle_toolpath_view(),
+            ShortcutCommand::CycleBounds => self.cycle_bounds(),
+            ShortcutCommand::CycleLatheMirror => self.cycle_lathe_mirror(),
+            ShortcutCommand::CycleLatheDiameter => self.cycle_lathe_diameter(),
+            ShortcutCommand::FitGraph => self.fit_graph(),
+            ShortcutCommand::ClearTrail => self.clear_trail(),
+            ShortcutCommand::CycleRemaining => self.cycle_remaining(),
+            ShortcutCommand::RunFromLine => self.request_run_from_line(),
+            ShortcutCommand::GoToLine => {
+                if matches!(self.nav.page, Page::Program | Page::Machine) {
+                    self.overlay.modal = Some(crate::state::Modal::GoToLine {
+                        buffer: String::new(),
+                        mdi: false,
+                    });
+                }
+            }
+            ShortcutCommand::GoToLineMdi => {
+                self.overlay.modal = Some(crate::state::Modal::GoToLine {
+                    buffer: String::new(),
+                    mdi: true,
+                });
+            }
+            ShortcutCommand::SaveProgram => {
+                if self.nav.page == Page::Program {
+                    self.save_program();
+                }
+            }
+            // The editor's undo is the buffer's: a click is the operator
+            // asking for it even when the caret sits elsewhere.
+            ShortcutCommand::UndoEdit => {
+                if self.nav.page == Page::Program
+                    && self.editing_allowed()
+                    && self.program.editor.undo()
+                {
+                    self.mark_editor_changed();
+                }
+            }
+            ShortcutCommand::RedoEdit => {
+                if self.nav.page == Page::Program
+                    && self.editing_allowed()
+                    && self.program.editor.redo()
+                {
+                    self.mark_editor_changed();
+                }
+            }
+            ShortcutCommand::UnloadProgram => self.unload_program(),
+            ShortcutCommand::SaveMdi => self.request_mdi_save(),
+            ShortcutCommand::ClearMdiInput => self.mdi.clear_input(),
+            ShortcutCommand::OpenBrowser => {
+                if self.snapshot.task.running {
+                    self.toast("cannot open files while running", theme::ERROR);
+                } else {
+                    self.request_files();
+                }
+            }
+            ShortcutCommand::OpenMessages => self.overlay.messages_dialog = true,
+            ShortcutCommand::RefreshFiles => {
+                if self.nav.page == Page::Files {
+                    self.files.refresh();
+                }
+            }
+            ShortcutCommand::HelpSearch => {
+                if self.nav.page == Page::Help && !self.overlay_open() {
+                    self.help.focus_search = true;
+                }
+            }
+            ShortcutCommand::LimitRecovery => self.open_limit_recovery(),
+            ShortcutCommand::ClearLogView => self.clear_log_view(),
+            ShortcutCommand::CycleOffsets => self.request_offsets(),
+            // Page-local commands: park the click for the page that owns it.
+            // It draws after the sidebar, so its handler takes the command in
+            // this same frame.
+            command @ (ShortcutCommand::FilesActivate
+            | ShortcutCommand::FilesCopy
+            | ShortcutCommand::FilesDuplicate
+            | ShortcutCommand::FilesRename
+            | ShortcutCommand::FilesNew
+            | ShortcutCommand::FilesDelete
+            | ShortcutCommand::FilesEject
+            | ShortcutCommand::FilesToggleRecent
+            | ShortcutCommand::ToolsSearch
+            | ShortcutCommand::ToolsEdit
+            | ShortcutCommand::ToolsLoad
+            | ShortcutCommand::ToolsNumber
+            | ShortcutCommand::ToolsPosition
+            | ShortcutCommand::ToolsNew
+            | ShortcutCommand::ToolsDuplicate
+            | ShortcutCommand::ToolsSync
+            | ShortcutCommand::ToolsDelete
+            | ShortcutCommand::HelpRead
+            | ShortcutCommand::HelpPage
+            | ShortcutCommand::DiagSearch
+            | ShortcutCommand::DiagList
+            | ShortcutCommand::DiagPane
+            | ShortcutCommand::DiagFaster
+            | ShortcutCommand::DiagSlower
+            | ShortcutCommand::DiagClearFilters
+            | ShortcutCommand::ManualZeroAll
+            | ShortcutCommand::OffsetsActivate
+            | ShortcutCommand::ProbeRun
+            | ShortcutCommand::ProbeApply
+            | ShortcutCommand::ProbeUpdateParams
+            | ShortcutCommand::ProbeResetAll
+            | ShortcutCommand::ProbePositionMode
+            | ShortcutCommand::ProbeApplyRotation
+            | ShortcutCommand::ProbeParameters
+            | ShortcutCommand::ProbeDimensions
+            | ShortcutCommand::ProbeResetCalibration) => {
+                self.nav.shortcut_click = Some(command);
             }
         }
     }

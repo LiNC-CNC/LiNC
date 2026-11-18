@@ -6,6 +6,7 @@ use linc_hal::browser::{HalBrowser, HalPin, HalSignal, HalSnapshot};
 
 use crate::screens::common;
 use crate::shell::LincApp;
+use crate::state::ShortcutCommand;
 use crate::state::{severity_index, source_index, DiagnosticsTab, HalPane};
 use crate::theme;
 
@@ -71,6 +72,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         app.diagnostics.list_focused = searchable;
         app.diagnostics.focus_list = searchable;
         app.diagnostics.last_tab = app.diagnostics.tab;
+    }
+    // A click on a SHORTCUTS row runs the command its key would send. A
+    // dialog in front owns the page.
+    if !app.overlay_open() {
+        apply_shortcut_click(app);
     }
     egui::ScrollArea::vertical()
         .id_salt("diagnostics-body")
@@ -771,6 +777,64 @@ fn page_step(height: f32) -> f32 {
     (height - 40.0).max(browser_row_height() * 3.0)
 }
 
+/// Run the DIAGNOSTICS row the operator clicked.
+///
+/// Each key already calls a small helper, so the click calls the same one
+/// rather than re-deriving the action. A row that names a shell command
+/// (CLEAR on OVERVIEW) is dispatched by the shell and never reaches here.
+fn apply_shortcut_click(app: &mut LincApp) {
+    let Some(command) = app.take_shortcut_click() else {
+        return;
+    };
+    match command {
+        ShortcutCommand::DiagSearch => {
+            app.diagnostics.list_focused = false;
+            app.diagnostics.focus_search = true;
+        }
+        ShortcutCommand::DiagList => {
+            app.diagnostics.focus_search = false;
+            app.diagnostics.list_focused = true;
+            app.diagnostics.focus_list = true;
+        }
+        ShortcutCommand::DiagPane => {
+            app.diagnostics.hal_pane = match app.diagnostics.hal_pane {
+                HalPane::Pins => HalPane::Signals,
+                HalPane::Signals => HalPane::Pins,
+            };
+        }
+        ShortcutCommand::DiagFaster => step_hal_poll(app, true),
+        ShortcutCommand::DiagSlower => step_hal_poll(app, false),
+        ShortcutCommand::DiagClearFilters => {
+            app.diagnostics.filter.clear();
+            app.diagnostics.logs_scroll = Some(0.0);
+            app.toast("FILTERS CLEARED", theme::MUTED);
+        }
+        _ => {}
+    }
+}
+
+/// Halve or double the HAL browser's poll interval, clamped to what the
+/// browser accepts.
+fn step_hal_poll(app: &mut LincApp, faster: bool) {
+    let current = app
+        .diagnostics
+        .hal
+        .as_ref()
+        .map(|browser| browser.interval())
+        .unwrap_or(linc_hal::browser::MIN_INTERVAL);
+    let next = if faster { current / 2 } else { current * 2 };
+    let next = next
+        .max(linc_hal::browser::MIN_INTERVAL)
+        .min(linc_hal::browser::MAX_INTERVAL);
+    if let Some(browser) = &app.diagnostics.hal {
+        browser.set_interval(next);
+    }
+    app.toast(
+        format!("HAL POLL {:.1} s", next.as_secs_f32()),
+        theme::SUCCESS,
+    );
+}
+
 /// The keys that walk the HAL browser: Enter leaves the filter for the list,
 /// the cursors choose the pane, the page keys scroll it, and Esc goes back to
 /// the filter.
@@ -822,23 +886,7 @@ fn hal_list_keys(app: &mut LincApp, ui: &mut Ui, height: f32) {
     }
     if faster || slower {
         // The poll rate is live: halcmd is asked again on the next turn.
-        let current = app
-            .diagnostics
-            .hal
-            .as_ref()
-            .map(|browser| browser.interval())
-            .unwrap_or(linc_hal::browser::MIN_INTERVAL);
-        let doubled = if faster { current / 2 } else { current * 2 };
-        let next = doubled
-            .max(linc_hal::browser::MIN_INTERVAL)
-            .min(linc_hal::browser::MAX_INTERVAL);
-        if let Some(browser) = &app.diagnostics.hal {
-            browser.set_interval(next);
-        }
-        app.toast(
-            format!("HAL POLL {:.1} s", next.as_secs_f32()),
-            theme::SUCCESS,
-        );
+        step_hal_poll(app, faster);
     }
     if left || right {
         app.diagnostics.hal_pane = if left {

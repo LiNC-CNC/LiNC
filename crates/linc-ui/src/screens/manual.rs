@@ -13,6 +13,7 @@ use linc_core::model::{MachineVariant, PanelMode};
 
 use crate::screens::common::{self, LiveAxisRow};
 use crate::shell::LincApp;
+use crate::state::ShortcutCommand;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
     handle_zero_keys(app, ui);
@@ -199,6 +200,9 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
     let axes = app.axes();
     let mut zero: Option<Vec<String>> = None;
     let mut open_recovery = false;
+    // A SHORTCUTS row click runs the same zeroing code its key does. The
+    // gates above still win: a dialog, a text field or an inactive mode.
+    let clicked = app.take_shortcut_click();
     ui.input_mut(|input| {
         for (key, axis) in [
             (egui::Key::X, "X"),
@@ -219,6 +223,9 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
     });
     if open_recovery {
         app.open_limit_recovery();
+    }
+    if clicked == Some(ShortcutCommand::ManualZeroAll) && zero.is_none() {
+        zero = Some(axes);
     }
     if let Some(axes) = zero {
         common::zero_axes(app, axes);

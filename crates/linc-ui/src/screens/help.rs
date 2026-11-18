@@ -20,6 +20,7 @@ use linc_core::help::{
 
 use crate::screens::common;
 use crate::shell::LincApp;
+use crate::state::ShortcutCommand;
 use crate::theme;
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,9 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     });
 
     let mut open_anchor: Option<String> = None;
+    // A SHORTCUTS row click runs the same code its key does. The search bar
+    // still owns the keyboard while it has focus, as it does for the keys.
+    let clicked = app.take_shortcut_click();
     if !search_active && !app.overlay_open() {
         let mut delta: i32 = 0;
         let mut read = false;
@@ -157,6 +161,12 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                 read = true;
             }
         });
+        if clicked == Some(ShortcutCommand::HelpRead) {
+            read = true;
+        }
+        if clicked == Some(ShortcutCommand::HelpPage) {
+            delta = HELP_PAGE;
+        }
         if delta != 0 && !anchors.is_empty() {
             let current = app.help.selected_row.min(anchors.len() - 1) as i32;
             let next = (current + delta).clamp(0, anchors.len() as i32 - 1) as usize;

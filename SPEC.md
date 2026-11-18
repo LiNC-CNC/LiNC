@@ -139,6 +139,22 @@ other legend names just the key. The bindings never change: the panel's keys
 already send those function keys. The bottom bar carries only live machine
 state.
 
+A row that names a single command is also a button. Clicking it runs the
+command the key prints, through the same dispatch the key handler uses, so the
+mouse and the panel cannot disagree: `VIEW`, `FIT`, `CLEAR TRAIL`, `BOUNDS`,
+`REMAINING`, `F.ERROR`, the lathe toggles, `SAVE`, `UNDO`, `REDO`, `UNLOAD`,
+`BROWSER`, `MESSAGES`, `LIMIT RECOVERY`, and the page-local commands
+(`COPY`, `RENAME`, `LOAD + G43`, `RUN PROBE`, `APPLY RESULT`, `SEARCH`,
+`FASTER`, `ACTIVATE`, `ZERO ALL` and the rest). A clickable row fills with
+`PANEL_RAISED` under the pointer and shows the pointing-hand cursor. Rows that
+name a gesture stay legends with no mouse target: `PAN` and `ZOOM` (a drag and
+a wheel), `SELECT` and `BUFFER` (the arrow keys), `PAGE` and `EDIT DRO` where a
+direction or an axis is part of the command, and the multi-key filter groups
+on the LOGS tab. A click leaves whichever text field held the keyboard, the
+same as a navigation row, so a click on `SAVE` is the operator's command and
+not the field's; the command itself never widens the key's gates — PROTECT,
+RUNNING and PANEL OFFLINE still refuse the write.
+
 While a dialog or the manual tool-change prompt is open it owns the keyboard:
 its focused buttons and fields handle Enter, arrows and typing, the shell keeps
 only Escape for a dismissible dialog, and navigation or page shortcuts do not
