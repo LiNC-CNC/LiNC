@@ -1762,7 +1762,7 @@ dependencies = [
 
 [[package]]
 name = "linc-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1781,7 +1781,7 @@ dependencies = [
 
 [[package]]
 name = "linc-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -1796,7 +1796,7 @@ dependencies = [
 
 [[package]]
 name = "linc-diag"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "linc-core",
  "log",
@@ -1806,7 +1806,7 @@ dependencies = [
 
 [[package]]
 name = "linc-hal"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "libloading",
  "linc-core",
@@ -1816,7 +1816,7 @@ dependencies = [
 
 [[package]]
 name = "linc-linuxcnc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "linc-core",
  "linc-hal",
@@ -1828,7 +1828,7 @@ dependencies = [
 
 [[package]]
 name = "linc-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1842,7 +1842,7 @@ dependencies = [
 
 [[package]]
 name = "linc-panel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1861,7 +1861,7 @@ dependencies = [
 
 [[package]]
 name = "linc-sim3d"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1881,7 +1881,7 @@ dependencies = [
 
 [[package]]
 name = "linc-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -1899,7 +1899,7 @@ dependencies = [
 
 [[package]]
 name = "linc-view"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "egui",
  "linc-core",

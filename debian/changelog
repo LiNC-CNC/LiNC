@@ -1,3 +1,18 @@
+linc (0.2.0-1) unstable; urgency=medium
+
+  * Sidebar SHORTCUTS rows that name a single command are clickable: the mouse
+    runs the same dispatch as the key, with hover feedback and a pointer
+    cursor. Gesture rows (PAN, ZOOM, the arrow keys, multi-key filters) stay
+    legends. All page-local commands route through the page that owns them.
+  * Tool table search, per-axis servo load, spindle inhibit for the whole tool
+    change, hard-limit recovery, and the tool in the spindle restored after a
+    reboot.
+  * Probe category tabs are clickable; probing still runs the vendored Probe
+    Basic routines.
+  * First release with the operator manual, warranty and safety notice.
+
+ -- Hans Baier <foss@hans-baier.de>  Wed, 18 Nov 2026 10:20:00 +0700
+
 linc (0.1.0-1) unstable; urgency=medium
 
   * Ship the machine-facing half only: the three binaries, the shared
