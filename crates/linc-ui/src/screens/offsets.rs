@@ -241,6 +241,8 @@ fn handle_axis_keys(app: &mut LincApp, ui: &mut Ui) {
 
 /// `A` makes the selected table row the active work system (`G54`..`G59.3`).
 ///
+/// A SHORTCUTS row click takes the same route.
+///
 /// Page-local by construction: only `offsets::show` calls this, so the key is
 /// neither consumed nor acted on while another page is in front. An in-place
 /// edit or a dialog owns the keyboard first, and a plain text field keeps `A`
@@ -253,7 +255,9 @@ fn handle_activate_key(app: &mut LincApp, ui: &mut Ui) {
     {
         return;
     }
-    let activate = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::A));
+    // The SHORTCUTS row that names ACTIVATE runs the same code the key does.
+    let activate = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::A))
+        || app.take_shortcut_click() == Some(crate::state::ShortcutCommand::OffsetsActivate);
     if !activate {
         return;
     }

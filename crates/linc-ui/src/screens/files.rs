@@ -9,6 +9,7 @@ use linc_core::model::InterpState;
 use crate::files::{self, format_modified, format_size};
 use crate::screens::common;
 use crate::shell::LincApp;
+use crate::state::ShortcutCommand;
 use crate::state::{CopyJob, CopyProgress, FileEntry, MountState};
 use crate::theme;
 
@@ -112,6 +113,9 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     if app.overlay_open() {
         return;
     }
+    // A click on a SHORTCUTS row arrives as the command its key would send.
+    // The guards above still win: a rename field in front owns the keyboard.
+    let clicked = app.take_shortcut_click();
     let usb = app.files.usb_focused;
     // The right pane has three views; the left one never does.
     let plc = !usb && app.files.plc_mode;
@@ -178,6 +182,8 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     let mut scroll_selection = false;
     let mut toggle_recent = false;
     let mut toggle_plc = false;
+    let mut enter = false;
+    let mut delete_pressed = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::C) {
             copy_side = true;
@@ -246,33 +252,13 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
             scroll_selection = true;
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
-            if on_parent {
-                open_dir = parent.clone();
-            } else if let Some(entry) = entries.get(selected) {
-                if entry.is_dir {
-                    open_dir = Some(entry.path.clone());
-                } else if usb {
-                    // Enter on a USB file copies it into NC_FILES.
-                    copy_enter = true;
-                } else {
-                    load = Some(entry.path.clone());
-                }
-            }
+            enter = true;
         }
         // Backspace is the delete key the QMK keyboard carries; Delete stays for
         // a desktop keyboard. Ctrl+X is a clipboard chord and belongs to text
         // editing, so it is not a Files action.
-        let delete_pressed = input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+        delete_pressed = input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
             || input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace);
-        // No delete from the recent list: it is a list of paths, not of files
-        // the operator is looking at in their directory.
-        if delete_pressed && !on_parent && !recent {
-            if let Some(entry) = entries.get(selected) {
-                if !entry.is_dir {
-                    delete = Some(entry.path.clone());
-                }
-            }
-        }
         if input.consume_key(
             app.prefs.keymap.program_cycle_view.modifiers,
             app.prefs.keymap.program_cycle_view.key,
@@ -280,6 +266,49 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
             toggle_recent = true;
         }
     });
+    // The row that names the command runs the same code its key does. Both
+    // land here so the two paths cannot spell the action differently.
+    if enter || clicked == Some(ShortcutCommand::FilesActivate) {
+        if on_parent {
+            open_dir = parent.clone();
+        } else if let Some(entry) = entries.get(selected) {
+            if entry.is_dir {
+                open_dir = Some(entry.path.clone());
+            } else if usb {
+                // Enter on a USB file copies it into NC_FILES.
+                copy_enter = true;
+            } else {
+                load = Some(entry.path.clone());
+            }
+        }
+    }
+    // No delete from the recent list: it is a list of paths, not of files
+    // the operator is looking at in their directory.
+    if (delete_pressed || clicked == Some(ShortcutCommand::FilesDelete)) && !on_parent && !recent {
+        if let Some(entry) = entries.get(selected) {
+            if !entry.is_dir {
+                delete = Some(entry.path.clone());
+            }
+        }
+    }
+    if clicked == Some(ShortcutCommand::FilesCopy) {
+        copy_side = true;
+    }
+    if clicked == Some(ShortcutCommand::FilesDuplicate) {
+        duplicate = true;
+    }
+    if clicked == Some(ShortcutCommand::FilesRename) {
+        rename = true;
+    }
+    if clicked == Some(ShortcutCommand::FilesNew) {
+        new_file = true;
+    }
+    if clicked == Some(ShortcutCommand::FilesEject) {
+        eject_media = true;
+    }
+    if clicked == Some(ShortcutCommand::FilesToggleRecent) {
+        toggle_recent = true;
+    }
     if usb {
         app.files.usb_selected = selected;
         app.files.usb_parent_selected = on_parent;

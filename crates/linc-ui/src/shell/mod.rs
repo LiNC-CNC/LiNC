@@ -77,6 +77,9 @@ use sync::*;
 #[allow(unused_imports)]
 use view::*;
 
+/// The sidebar SHORTCUTS commands, shared by the shell and the pages that own
+/// the page-local ones.
+pub(crate) use crate::state::ShortcutCommand;
 pub use commands::MoveProgress;
 pub use gates::{probe_trip_banner_text, PROBE_TRIP_ACTION};
 pub use keyboard::FocusRegion;
@@ -309,6 +312,7 @@ impl LincApp {
                 last_mode: Some(mode),
                 homing_return_page: start_page,
                 page_focus_requested: true,
+                shortcut_click: None,
                 pages: nav_pages(&profile.config.ui.pages),
             },
             diagnostics: DiagnosticsUi {

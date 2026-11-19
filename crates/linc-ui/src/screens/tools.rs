@@ -6,6 +6,7 @@ use linc_core::model::{InterpState, MachineVariant, ToolRow};
 
 use crate::screens::common;
 use crate::shell::LincApp;
+use crate::state::ShortcutCommand;
 use crate::state::ToolDraft;
 use crate::theme;
 use egui_extras::{Column as ExtraColumn, TableBuilder};
@@ -505,6 +506,10 @@ fn handle_keys(
         }
         return;
     }
+    // A SHORTCUTS row click arrives as the command its key would send. Every
+    // guard above still wins: a dialog, a cell editor or a focused search
+    // field owns the table.
+    let clicked = app.take_shortcut_click();
     let rows = visible.len();
     let mut move_row = 0isize;
     let mut move_column = 0isize;
@@ -585,6 +590,35 @@ fn handle_keys(
             delete_tool = true;
         }
     });
+    // The row that names the command runs the same code its key does: both
+    // paths set these flags, so they cannot spell an action differently.
+    if clicked == Some(ShortcutCommand::ToolsSearch) {
+        focus_search = true;
+    }
+    if clicked == Some(ShortcutCommand::ToolsEdit) {
+        edit = true;
+    }
+    if clicked == Some(ShortcutCommand::ToolsLoad) {
+        load = true;
+    }
+    if clicked == Some(ShortcutCommand::ToolsNumber) {
+        number = true;
+    }
+    if clicked == Some(ShortcutCommand::ToolsPosition) {
+        position = true;
+    }
+    if clicked == Some(ShortcutCommand::ToolsNew) {
+        new_tool = true;
+    }
+    if clicked == Some(ShortcutCommand::ToolsDuplicate) {
+        duplicate = true;
+    }
+    if clicked == Some(ShortcutCommand::ToolsSync) && app.snapshot.loobric.is_some() {
+        sync_loobric = true;
+    }
+    if clicked == Some(ShortcutCommand::ToolsDelete) {
+        delete_tool = true;
+    }
     if move_row != 0 && rows > 0 {
         app.tools.selected_row = visible_step(visible, app.tools.selected_row, move_row);
         app.tools.scroll_to_selected = true;

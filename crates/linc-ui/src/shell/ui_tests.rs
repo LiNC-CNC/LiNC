@@ -1451,7 +1451,7 @@ fn pc_keyboard_legends_name_f_keys_and_panel_legends_stay_default() {
         .app
         .key_hints()
         .iter()
-        .flat_map(|group| group.items.iter().map(|(key, _)| key.clone()))
+        .flat_map(|group| group.items.iter().map(|shortcut| shortcut.key.clone()))
         .collect();
     assert!(keys.iter().any(|key| key == "F6"), "{keys:?}");
     assert!(!keys.iter().any(|key| key == "FILE"), "{keys:?}");
@@ -3092,7 +3092,7 @@ fn the_sidebar_offers_reset_while_a_program_is_active() {
             group
                 .items
                 .iter()
-                .any(|(key, label)| key == "Esc" && *label == "RESET")
+                .any(|shortcut| shortcut.key == "Esc" && shortcut.label == "RESET")
         })
     };
     assert!(shows_reset(&app));
@@ -4911,6 +4911,19 @@ fn nav_row_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
         .unwrap_or_else(|| panic!("{label} is painted in the navigation"))
 }
 
+/// A point inside a sidebar SHORTCUTS row, from the action name it paints.
+fn shortcut_row_point(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+    let (_, rect) = painted_text(output)
+        .into_iter()
+        .find(|(text, rect)| {
+            text == label
+                && rect.right() <= theme::NAV_WIDTH
+                && rect.left() > theme::NAV_WIDTH - 220.0
+        })
+        .unwrap_or_else(|| panic!("{label} is painted in the shortcut pane"));
+    egui::pos2(theme::NAV_WIDTH - 40.0, rect.center().y)
+}
+
 /// The centre of a probe category tab, from the topmost painted copy of its
 /// label: the strip sits above the card headings that repeat the active name.
 fn probe_category_point(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
@@ -5319,6 +5332,91 @@ fn the_program_navigation_row_toggles_the_files_browser() {
         harness.app.nav.page,
         Page::Program,
         "and the same row brings the program back"
+    );
+}
+
+/// A SHORTCUTS row that names one command is a button: a click runs the same
+/// action as the key it prints.
+#[test]
+fn a_shortcut_row_runs_its_command_on_a_click() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Machine);
+    let before = harness.app.graph_style.bounds_mode;
+    let output = harness.frame_full(Vec::new());
+    let row = shortcut_row_point(&output, "BOUNDS");
+    harness.frame_events(vec![egui::Event::PointerMoved(row)]);
+    harness.frame_events(vec![press_at(row, true)]);
+    harness.frame_events(vec![press_at(row, false)]);
+    assert_eq!(
+        harness.app.graph_style.bounds_mode,
+        (before + 1) % 4,
+        "the click cycles what the toolpath draws, like Ctrl+B"
+    );
+}
+
+/// A row that names a gesture stays a legend: there is no one command to run
+/// for PAN, and the row must not advertise itself as a button.
+#[test]
+fn a_gesture_shortcut_row_is_not_a_button() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Machine);
+    let hints: Vec<Shortcut> = harness
+        .app
+        .key_hints()
+        .into_iter()
+        .flat_map(|group| group.items)
+        .collect();
+    let pan = hints
+        .iter()
+        .find(|shortcut| shortcut.label == "PAN")
+        .expect("PAN is offered on MAIN");
+    assert!(
+        pan.command.is_none(),
+        "PAN is a drag gesture, not a command"
+    );
+    let bounds = hints
+        .iter()
+        .find(|shortcut| shortcut.label == "BOUNDS")
+        .expect("BOUNDS is offered on MAIN");
+    assert_eq!(bounds.command, Some(ShortcutCommand::CycleBounds));
+}
+
+/// A page-local row is a button too: clicking LOAD + G43 on TOOLS issues the
+/// same command the `T` key issues for the row under the cursor.
+#[test]
+fn clicking_the_load_tool_shortcut_loads_the_selected_tool() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    harness.frame(&[]);
+    let tool = harness.app.snapshot.tool_table.rows[0].tool;
+    let output = harness.frame_full(Vec::new());
+    let row = shortcut_row_point(&output, "LOAD + G43");
+    harness.frame_events(vec![egui::Event::PointerMoved(row)]);
+    harness.frame_events(vec![press_at(row, true)]);
+    harness.frame_events(vec![press_at(row, false)]);
+    assert_eq!(
+        harness.sent.borrow().last(),
+        Some(&MachineCommand::LoadTool { tool }),
+        "the click loads the tool under the cursor, like T"
+    );
+}
+
+/// RENAME on FILES opens the same field its `R` key does, so the page-local
+/// click path reaches the page's own handler in the frame it was clicked.
+#[test]
+fn clicking_the_files_rename_shortcut_opens_the_field() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.files_page_with_one_file("part.ngc");
+    harness.frame(&[]);
+    assert!(harness.app.files.rename.is_none());
+    let output = harness.frame_full(Vec::new());
+    let row = shortcut_row_point(&output, "RENAME");
+    harness.frame_events(vec![egui::Event::PointerMoved(row)]);
+    harness.frame_events(vec![press_at(row, true)]);
+    harness.frame_events(vec![press_at(row, false)]);
+    assert!(
+        harness.app.files.rename.is_some(),
+        "the click opens the rename field, like R"
     );
 }
 
@@ -7095,7 +7193,7 @@ fn ctrl_r_issues_the_selected_block_with_no_dialog() {
 fn program_shortcuts_name_the_editor_moves_not_the_toolpath_pan() {
     let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
     harness.app.set_page(Page::Program);
-    let hints: Vec<(String, &'static str)> = harness
+    let hints: Vec<Shortcut> = harness
         .app
         .key_hints()
         .into_iter()
@@ -7104,12 +7202,12 @@ fn program_shortcuts_name_the_editor_moves_not_the_toolpath_pan() {
     let has = |key: &str, label: &str| {
         hints
             .iter()
-            .any(|(hint_key, hint_label)| hint_key == key && *hint_label == label)
+            .any(|shortcut| shortcut.key == key && shortcut.label == label)
     };
     assert!(has("Ctrl+↑/↓", "MOVE LINE"), "{hints:?}");
     assert!(has("Ctrl+←/→", "WORD"), "{hints:?}");
     assert!(
-        !hints.iter().any(|(_, label)| *label == "PAN"),
+        !hints.iter().any(|shortcut| shortcut.label == "PAN"),
         "the editor owns the Ctrl+arrow chords: {hints:?}"
     );
 }
@@ -7118,7 +7216,7 @@ fn program_shortcuts_name_the_editor_moves_not_the_toolpath_pan() {
 fn mdi_shortcuts_name_the_buffer_and_word_moves_not_the_toolpath_pan() {
     let mut harness = mdi_harness();
     harness.frame(&[]);
-    let hints: Vec<(String, &'static str)> = harness
+    let hints: Vec<Shortcut> = harness
         .app
         .key_hints()
         .into_iter()
@@ -7127,13 +7225,13 @@ fn mdi_shortcuts_name_the_buffer_and_word_moves_not_the_toolpath_pan() {
     let has = |key: &str, label: &str| {
         hints
             .iter()
-            .any(|(hint_key, hint_label)| hint_key == key && *hint_label == label)
+            .any(|shortcut| shortcut.key == key && shortcut.label == label)
     };
     assert!(has("↑/↓", "BUFFER"), "{hints:?}");
     assert!(has("Ctrl+↑/↓", "MOVE"), "{hints:?}");
     assert!(has("Ctrl+←/→", "WORD"), "{hints:?}");
     assert!(
-        !hints.iter().any(|(_, label)| *label == "PAN"),
+        !hints.iter().any(|shortcut| shortcut.label == "PAN"),
         "the MDI input owns the Ctrl+arrow chords: {hints:?}"
     );
 }

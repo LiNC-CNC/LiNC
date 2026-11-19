@@ -11,6 +11,7 @@ use linc_core::probe::{ApplySource, ProbeCategory, ProbeMode, ProbeOperation, Pr
 
 use crate::screens::common;
 use crate::shell::LincApp;
+use crate::state::ShortcutCommand;
 use crate::theme;
 
 const MAT: Color32 = Color32::from_rgb(0x4b, 0x55, 0x63);
@@ -3283,6 +3284,47 @@ fn handle_help_keys(app: &mut LincApp, ui: &mut Ui) {
     }
 }
 
+/// `W`: POSITION (measure, then `A` applies) or DIRECT (Run writes the work
+/// offset). The key and the SHORTCUTS row share this body.
+fn toggle_probe_mode(app: &mut LincApp) {
+    app.probe.params.probe_mode = match app.probe.params.probe_mode {
+        ProbeMode::ApplyWcs => ProbeMode::MeasureOnly,
+        ProbeMode::MeasureOnly => ProbeMode::ApplyWcs,
+    };
+    app.probe.error = None;
+    app.remember_probe_params();
+    app.toast(
+        if app.probe.params.probe_mode == ProbeMode::ApplyWcs {
+            "DIRECT WCO — Run writes the active work offset"
+        } else {
+            "POSITION — measure, then A applies the result"
+        },
+        if app.probe.params.probe_mode == ProbeMode::ApplyWcs {
+            theme::WARNING
+        } else {
+            theme::ACCENT
+        },
+    );
+}
+
+/// `R` on EDGE ANGLE: ask the run to set the work rotation as well.
+fn toggle_wcs_rotation(app: &mut LincApp) {
+    app.probe.params.wcs_rotation = !app.probe.params.wcs_rotation;
+    app.probe.error = None;
+    app.remember_probe_params();
+    app.toast(
+        format!(
+            "Edge-angle requested rotation {} — every angle Run still clears old rotation (R0)",
+            if app.probe.params.wcs_rotation {
+                "ON"
+            } else {
+                "OFF"
+            }
+        ),
+        theme::WARNING,
+    );
+}
+
 fn handle_probe_mode_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
     let category = app.probe.category;
     let mut toggle_mode = false;
@@ -3310,40 +3352,10 @@ fn handle_probe_mode_keys(app: &mut LincApp, ui: &mut Ui) -> bool {
         }
     });
     if toggle_mode {
-        app.probe.params.probe_mode = match app.probe.params.probe_mode {
-            ProbeMode::ApplyWcs => ProbeMode::MeasureOnly,
-            ProbeMode::MeasureOnly => ProbeMode::ApplyWcs,
-        };
-        app.probe.error = None;
-        app.remember_probe_params();
-        app.toast(
-            if app.probe.params.probe_mode == ProbeMode::ApplyWcs {
-                "DIRECT WCO — Run writes the active work offset"
-            } else {
-                "POSITION — measure, then A applies the result"
-            },
-            if app.probe.params.probe_mode == ProbeMode::ApplyWcs {
-                theme::WARNING
-            } else {
-                theme::ACCENT
-            },
-        );
+        toggle_probe_mode(app);
     }
     if toggle_rotation {
-        app.probe.params.wcs_rotation = !app.probe.params.wcs_rotation;
-        app.probe.error = None;
-        app.remember_probe_params();
-        app.toast(
-            format!(
-                "Edge-angle requested rotation {} — every angle Run still clears old rotation (R0)",
-                if app.probe.params.wcs_rotation {
-                    "ON"
-                } else {
-                    "OFF"
-                }
-            ),
-            theme::WARNING,
-        );
+        toggle_wcs_rotation(app);
     }
     if cycle_calibration {
         let next = next_calibration_axis(app.probe.params.square_cal_axis);
@@ -3417,7 +3429,15 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         handle_help_keys(app, ui);
         return;
     }
-    let focus_first = ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::P));
+    // A SHORTCUTS row click arrives as the command its key would send. The
+    // guards above still win: a DRO edit, a parameter edit or a focused field
+    // owns the keyboard.
+    let clicked = app.take_shortcut_click();
+    let focus_first = ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::P))
+        || matches!(
+            clicked,
+            Some(ShortcutCommand::ProbeParameters | ShortcutCommand::ProbeDimensions)
+        );
     if focus_first && parameter_editable(app.probe.category) {
         if let Some(index) = default_parameter(app.probe.category, app.probe.operation()) {
             app.probe.param_selected = index;
@@ -3428,6 +3448,46 @@ pub fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
             app.probe.error = None;
         }
         return;
+    }
+    // The rows that name a discrete command call the same helper its key
+    // calls, so the two paths cannot drift.
+    match clicked {
+        Some(ShortcutCommand::ProbeRun) => {
+            if app.probe.category == ProbeCategory::Calibrate {
+                // The first calibration row's button does the same, and the
+                // ring follows it while the cycle runs.
+                app.probe.calibrate_action = Some(0);
+                run_calibration(app, 0);
+            } else if !cards_for(app.probe.category).is_empty() {
+                super::probe::run(app);
+            }
+            return;
+        }
+        Some(ShortcutCommand::ProbeApply) => {
+            super::probe::apply(app);
+            return;
+        }
+        Some(ShortcutCommand::ProbeUpdateParams) => {
+            update_probe_params(app);
+            return;
+        }
+        Some(ShortcutCommand::ProbeResetAll) => {
+            reset_probe_data(app, ProbeDataReset::All);
+            return;
+        }
+        Some(ShortcutCommand::ProbePositionMode) => {
+            toggle_probe_mode(app);
+            return;
+        }
+        Some(ShortcutCommand::ProbeApplyRotation) => {
+            toggle_wcs_rotation(app);
+            return;
+        }
+        Some(ShortcutCommand::ProbeResetCalibration) => {
+            reset_calibration(app);
+            return;
+        }
+        _ => {}
     }
     if handle_calibrate_action_keys(app, ui) {
         return;
