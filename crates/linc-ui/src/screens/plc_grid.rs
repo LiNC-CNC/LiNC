@@ -398,6 +398,16 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         return;
     }
     if cursor.2 >= POSITIONS {
+        // Backspace on the coil slot removes the coil: this branch returns before
+        // the general delete below, so the coil's own key lives here.
+        if delete {
+            actions.push(Action::DeleteCell {
+                section: cursor.0,
+                rung: cursor.1,
+                position: cursor.2,
+            });
+            return;
+        }
         // Space cycles the coil's kind: Normal, Set, Reset, Negated, Jump,
         // Call. The coil letters and their rail group are gone; one cell key
         // does the job.
@@ -795,8 +805,10 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
             }
         }
     }
-    if delete && cursor.2 < POSITIONS {
+    if delete {
         // Delete closes the row up to the left; a wire in place would leave a gap.
+        // On the coil slot it removes the coil instead, and the rung keeps its
+        // cells: the slot becomes a plain conductor again.
         actions.push(Action::DeleteCell {
             section: cursor.0,
             rung: cursor.1,

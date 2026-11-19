@@ -2232,13 +2232,18 @@ impl PlcUi {
                         } else {
                             Some(row.cells.clone())
                         };
-                        if let Some(mut cells) = migrated {
-                            cells.resize(POSITIONS, Cell::Wire);
-                            if position < POSITIONS {
-                                cells.remove(position);
-                                cells.push(Cell::Wire);
-                                row.cells = cells;
+                        if position >= POSITIONS {
+                            // Backspace on the coil slot removes the coil and leaves
+                            // the rung's cells alone: the slot is a conductor again,
+                            // which is what an empty row tail looks like.
+                            if row.has_coil() {
+                                row.coil = None;
                             }
+                        } else if let Some(mut cells) = migrated {
+                            cells.resize(POSITIONS, Cell::Wire);
+                            cells.remove(position);
+                            cells.push(Cell::Wire);
+                            row.cells = cells;
                         }
                     }
                 }

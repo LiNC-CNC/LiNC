@@ -7700,3 +7700,78 @@ fn the_run_page_keeps_its_io_panel_above_the_status_line() {
         state.2
     );
 }
+
+/// The LD editor, driven the way the panel drives it: one frame per keystroke,
+/// with the workbench drawn for real.
+mod ld_editor_keys {
+    use super::*;
+    use linc_plc_core::grid::{Cell, POSITIONS};
+    use linc_plc_core::model::{Coil, CoilKind, Logic, Project, Rung};
+
+    /// A rung `start --( )-- run` in a project that has the symbols to name.
+    fn harness_with(rung: Rung) -> ProbeHarness {
+        let mut harness = ProbeHarness::ready(PanelMode::Auto, false, false, MachinePower::On);
+        let mut project = Project::example();
+        project.sections[0].rungs = vec![rung];
+        harness.app.plc.project = project;
+        harness.app.plc.page = crate::screens::plc::PlcPage::Edit;
+        harness.app.plc.pou = 0;
+        harness.app.overlay.plc_editor = true;
+        harness
+    }
+
+    fn named_rung(var: &str) -> Rung {
+        let mut rung = Rung::new(
+            Logic::Const { value: true },
+            Coil::new(var, CoilKind::Normal),
+        );
+        rung.cells = vec![Cell::Wire; POSITIONS];
+        rung.cells[0] = Cell::Contact {
+            var: "start".into(),
+            negated: false,
+        };
+        rung
+    }
+
+    /// One frame of the workbench with these keys pressed.
+    fn keys(harness: &mut ProbeHarness, events: Vec<egui::Event>) -> egui::FullOutput {
+        let ctx = harness.ctx.clone();
+        let mut output = ctx.run_ui(probe_raw_input(events), |ui| {
+            crate::screens::plc::editor(&mut harness.app, ui);
+        });
+        output.textures_delta.clear();
+        output
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn rung(harness: &ProbeHarness) -> &Rung {
+        &harness.app.plc.project.sections[0].rungs[0]
+    }
+
+    /// Backspace on the coil slot removes the coil and nothing else: the slot reads
+    /// as a conductor again, which is what an empty row tail looks like.
+    #[test]
+    fn backspace_on_the_coil_slot_deletes_the_coil() {
+        let mut harness = harness_with(named_rung("run"));
+        harness.app.plc.cell_cursor = Some((0, 0, POSITIONS));
+        keys(&mut harness, vec![key(egui::Key::Backspace)]);
+        assert!(!rung(&harness).has_coil(), "the coil is gone");
+        assert_eq!(rung(&harness).cells.len(), POSITIONS);
+        assert!(matches!(rung(&harness).cells[0], Cell::Contact { .. }));
+        assert!(
+            rung(&harness).cells[1..]
+                .iter()
+                .all(|cell| matches!(cell, Cell::Wire)),
+            "the rest of the row is still wire"
+        );
+    }
+}
