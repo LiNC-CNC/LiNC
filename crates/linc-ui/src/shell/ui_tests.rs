@@ -7926,6 +7926,91 @@ mod ld_editor_keys {
         assert_eq!(rung(&harness).coil().var, "", "the rung is untouched");
         assert_eq!(rung(&harness).coil().kind, CoilKind::Normal);
     }
+
+    /// The same harness with several rungs, so a test can walk right from one row's
+    /// coil into that row's comment.
+    fn harness_with_rungs(rungs: Vec<Rung>) -> ProbeHarness {
+        let mut harness = ProbeHarness::ready(PanelMode::Auto, false, false, MachinePower::On);
+        let mut project = Project::example();
+        project.sections[0].rungs = rungs;
+        harness.app.plc.project = project;
+        harness.app.plc.page = crate::screens::plc::PlcPage::Edit;
+        harness.app.plc.pou = 0;
+        harness.app.overlay.plc_editor = true;
+        harness
+    }
+
+    /// Right on the rung's last cell steps out into the comment in the right margin:
+    /// the comment belongs to the rung, and the keyboard should reach it by moving
+    /// right, not only by remembering Shift+C.
+    #[test]
+    fn right_on_the_coil_slot_opens_the_rung_comment() {
+        let mut harness = harness_with_rungs(vec![named_rung("run"), named_rung("fan")]);
+        harness.app.plc.cell_cursor = Some((0, 0, POSITIONS));
+        keys(&mut harness, vec![key(egui::Key::ArrowRight)]);
+        assert_eq!(harness.app.plc.rung_comment_edit, Some((0, 0)));
+        assert!(
+            harness.app.plc.text_editing,
+            "the comment owns the keyboard"
+        );
+        assert_eq!(
+            harness.app.plc.cell_cursor,
+            Some((0, 0, POSITIONS)),
+            "the cell cursor stays on the coil, so Left comes back to it"
+        );
+        keys(&mut harness, vec![typed("seal broken")]);
+        keys(&mut harness, vec![key(egui::Key::Enter)]);
+        assert_eq!(rung(&harness).comment, "seal broken");
+        assert_eq!(harness.app.plc.rung_comment_edit, None);
+        assert!(!harness.app.plc.text_editing);
+    }
+
+    /// Up and down walk the comment column: the field stores what it holds and opens
+    /// the comment of the row above or below, so a commented ladder is edited without
+    /// leaving the margin.
+    #[test]
+    fn up_and_down_walk_the_comment_column() {
+        let mut harness = harness_with_rungs(vec![named_rung("run"), named_rung("fan")]);
+        {
+            let rungs = &mut harness.app.plc.project.sections[0].rungs;
+            rungs[0].comment = "first".to_string();
+            rungs[1].comment = "second".to_string();
+        }
+        harness.app.plc.cell_cursor = Some((0, 0, POSITIONS));
+        keys(&mut harness, vec![key(egui::Key::ArrowRight)]);
+        assert_eq!(harness.app.plc.rung_comment_edit, Some((0, 0)));
+        assert_eq!(harness.app.plc.rung_comment_buffer, "first");
+        keys(&mut harness, vec![key(egui::Key::ArrowDown)]);
+        assert_eq!(harness.app.plc.rung_comment_edit, Some((0, 1)), "down");
+        assert_eq!(harness.app.plc.rung_comment_buffer, "second");
+        assert_eq!(harness.app.plc.cell_cursor, Some((0, 1, POSITIONS)));
+        // Typing and stepping up stores what was typed on the row it was typed on.
+        keys(&mut harness, vec![typed("!")]);
+        keys(&mut harness, vec![key(egui::Key::ArrowUp)]);
+        assert_eq!(harness.app.plc.rung_comment_edit, Some((0, 0)), "up");
+        assert_eq!(harness.app.plc.rung_comment_buffer, "first");
+        assert_eq!(
+            harness.app.plc.project.sections[0].rungs[1].comment,
+            "second!"
+        );
+        // The first row has nothing above it: the field stays where it is.
+        keys(&mut harness, vec![key(egui::Key::ArrowUp)]);
+        assert_eq!(harness.app.plc.rung_comment_edit, Some((0, 0)));
+    }
+
+    /// Left leaves the comment and keeps what was typed: moving out of the field is not
+    /// a way to lose the work. Escape is the cancel.
+    #[test]
+    fn left_leaves_the_comment_and_keeps_the_typing() {
+        let mut harness = harness_with_rungs(vec![named_rung("run")]);
+        harness.app.plc.cell_cursor = Some((0, 0, POSITIONS));
+        keys(&mut harness, vec![key(egui::Key::ArrowRight)]);
+        keys(&mut harness, vec![typed("lamp test")]);
+        keys(&mut harness, vec![key(egui::Key::ArrowLeft)]);
+        assert_eq!(rung(&harness).comment, "lamp test");
+        assert_eq!(harness.app.plc.rung_comment_edit, None);
+        assert_eq!(harness.app.plc.cell_cursor, Some((0, 0, POSITIONS)));
+    }
 }
 
 /// The run strip: inputs and outputs share one line and take two rows only when the

@@ -27,23 +27,32 @@ use crate::theme;
 pub fn rung_text_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) -> bool {
     // The label and the comment are typed the same way in the same frame, so they
     // share one handler: two copies drifted apart the moment one of them changed.
-    let PlcUi {
-        rung_label_edit,
-        rung_label_buffer,
-        rung_comment_edit,
-        rung_comment_buffer,
-        text_editing,
-        ..
-    } = plc;
-    // `*` on each: the pair is `Copy`, so the two borrows end before the buffers
-    // are taken mutably below.
-    let (active, buffer_slot, field) = match (*rung_label_edit, *rung_comment_edit) {
-        (Some(range), _) => (Some(range), rung_label_buffer, RungField::Label),
-        (None, Some(range)) => (Some(range), rung_comment_buffer, RungField::Comment),
-        (None, None) => (None, rung_comment_buffer, RungField::Comment),
+    // The pairs are `Copy`, so reading them here does not hold a borrow of `plc`.
+    let active = match (plc.rung_label_edit, plc.rung_comment_edit) {
+        (Some(range), _) => Some((RungField::Label, range)),
+        (None, Some(range)) => Some((RungField::Comment, range)),
+        (None, None) => None,
     };
-    if let Some((section, rung)) = active {
-        let mut buffer = std::mem::take(buffer_slot);
+    if let Some((field, (section, rung))) = active {
+        let mut buffer = match field {
+            RungField::Label => std::mem::take(&mut plc.rung_label_buffer),
+            RungField::Comment => std::mem::take(&mut plc.rung_comment_buffer),
+        };
+        let store = |actions: &mut Vec<Action>, text: &str| match field {
+            RungField::Label => actions.push(Action::SetRungLabel {
+                section,
+                rung,
+                label: text.trim().to_string(),
+            }),
+            RungField::Comment => actions.push(Action::SetRungComment {
+                section,
+                rung,
+                comment: text.trim().to_string(),
+            }),
+        };
+        let mut entered = false;
+        let mut leave = false;
+        let mut step: Option<isize> = None;
         for event in ui.input(|input| input.events.clone()) {
             match event {
                 egui::Event::Text(text) => buffer.push_str(&text),
@@ -54,41 +63,66 @@ pub fn rung_text_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) -> bo
                         buffer.pop();
                     }
                     egui::Key::Escape => {
-                        match field {
-                            RungField::Label => *rung_label_edit = None,
-                            RungField::Comment => *rung_comment_edit = None,
-                        }
+                        // The one key that throws the typing away.
                         buffer.clear();
-                        *text_editing = false;
-                        return true;
+                        leave = true;
                     }
                     egui::Key::Enter => {
-                        actions.push(match field {
-                            RungField::Label => Action::SetRungLabel {
-                                section,
-                                rung,
-                                label: buffer.trim().to_string(),
-                            },
-                            RungField::Comment => Action::SetRungComment {
-                                section,
-                                rung,
-                                comment: buffer.trim().to_string(),
-                            },
-                        });
-                        match field {
-                            RungField::Label => *rung_label_edit = None,
-                            RungField::Comment => *rung_comment_edit = None,
-                        }
-                        buffer.clear();
-                        *text_editing = false;
-                        return true;
+                        entered = true;
+                        leave = true;
+                    }
+                    egui::Key::ArrowLeft => {
+                        // Out of the field and back onto the rung's last cell.
+                        entered = true;
+                        leave = true;
+                    }
+                    // Up and down walk the comment column: the field stores what it
+                    // holds and opens the comment of the row above or below.
+                    egui::Key::ArrowUp if field == RungField::Comment => {
+                        entered = true;
+                        step = Some(-1);
+                    }
+                    egui::Key::ArrowDown if field == RungField::Comment => {
+                        entered = true;
+                        step = Some(1);
                     }
                     _ => {}
                 },
                 _ => {}
             }
         }
-        *buffer_slot = buffer;
+        if entered {
+            store(actions, &buffer);
+        }
+        if leave {
+            if field == RungField::Label {
+                plc.rung_label_edit = None;
+            } else {
+                plc.rung_comment_edit = None;
+                // The cell cursor is where the field was entered from and where it
+                // goes back to: the rung's last cell, never the comment itself.
+                plc.cell_cursor = Some((section, rung, POSITIONS));
+            }
+            plc.text_editing = false;
+            return true;
+        }
+        if let Some(step) = step {
+            if let Some(target) = neighbour_rung(plc, section, rung, step) {
+                let row = plc
+                    .current_pou_sections()
+                    .get(section)
+                    .and_then(|section| section.rungs.get(target))
+                    .cloned();
+                open_rung_comment_into(plc, section, target, row.as_ref());
+                plc.cell_cursor = Some((section, target, POSITIONS));
+                plc.text_editing = true;
+                return true;
+            }
+        }
+        match field {
+            RungField::Label => plc.rung_label_buffer = buffer,
+            RungField::Comment => plc.rung_comment_buffer = buffer,
+        }
         return true;
     }
     let (label, comment) = ui.input_mut(|input| {
@@ -112,19 +146,53 @@ pub fn rung_text_keys(plc: &mut PlcUi, ui: &Ui, actions: &mut Vec<Action>) -> bo
             .map(|rung| rung.label.trim().to_string())
             .unwrap_or_default();
     } else {
-        plc.rung_comment_edit = Some((cursor.0, cursor.1));
-        plc.rung_comment_buffer = rung
-            .map(|rung| {
-                rung.comment
-                    .trim()
-                    .trim_start_matches("//")
-                    .trim()
-                    .to_string()
-            })
-            .unwrap_or_default();
+        open_rung_comment_into(plc, cursor.0, cursor.1, rung.as_ref());
     }
     plc.text_editing = true;
     true
+}
+
+/// The next row in the comment column, in the same section. A comment row is the
+/// comment itself and has no field of its own, so it is stepped over.
+fn neighbour_rung(plc: &PlcUi, section: usize, rung: usize, step: isize) -> Option<usize> {
+    let sections = plc.current_pou_sections();
+    let rungs = &sections.get(section)?.rungs;
+    let mut index = rung as isize;
+    loop {
+        index += step;
+        if index < 0 || index as usize >= rungs.len() {
+            return None;
+        }
+        if !rungs[index as usize].is_comment_row() {
+            return Some(index as usize);
+        }
+    }
+}
+
+/// Open the comment of the rung at `(section, rung)` for typing, filled from the rung.
+fn open_rung_comment(app: &mut LincApp, section: usize, rung: usize) {
+    let row = app
+        .plc
+        .current_pou_sections()
+        .get(section)
+        .and_then(|section| section.rungs.get(rung))
+        .cloned();
+    open_rung_comment_into(&mut app.plc, section, rung, row.as_ref());
+    app.plc.text_editing = true;
+}
+
+/// The same, on the state alone: Shift+C already holds the rung it read.
+fn open_rung_comment_into(plc: &mut PlcUi, section: usize, rung: usize, row: Option<&Rung>) {
+    plc.rung_comment_edit = Some((section, rung));
+    plc.rung_comment_buffer = row
+        .map(|rung| {
+            rung.comment
+                .trim()
+                .trim_start_matches("//")
+                .trim()
+                .to_string()
+        })
+        .unwrap_or_default();
 }
 
 /// Which of a rung's two inline texts a keystroke is going into.
@@ -417,6 +485,14 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         .cloned();
     // Movement comes first: the coil branch below returns, and while it did so
     // before the arrow handling the cursor could never leave the coil at all.
+    // Right on the coil slot steps out of the cells and into the rung's comment: the
+    // comment is drawn in the right margin, and that is where the cursor goes. The
+    // cell cursor stays on the coil, so Left (or Escape) comes back to it.
+    if right && cursor.2 >= POSITIONS {
+        open_rung_comment(app, cursor.0, cursor.1);
+        app.plc.cell_cursor = Some(cursor);
+        return;
+    }
     if left || right || up || down || page_up || page_down {
         // A page key moves by a screenful, as in every other list. The scroll
         // to the cursor happens after the draw, once the cell's rect is known.

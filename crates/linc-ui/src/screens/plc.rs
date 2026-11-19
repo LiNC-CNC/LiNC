@@ -3049,7 +3049,7 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(Heading("RUNG"));
             entries.push(row("New row", "Ctrl+N", false));
             entries.push(row("Delete row", "Ctrl+Bksp", false));
-            entries.push(row("Rung comment", "Shift+C", false));
+            entries.push(row("Rung comment", "Shift+C · →", false));
             entries.push(row("Rung label", "Shift+L", false));
             entries.push(Heading("PREVIEW"));
             entries.push(row("Hold contact · cycle coil", "Space", false));
