@@ -2280,6 +2280,16 @@ fn coil_choices(plc: &PlcUi, section: usize, rung: usize) -> Vec<(String, String
     }
 }
 
+/// What a coil list with nothing to offer says: what is missing for this kind, and
+/// the chord that makes one. A bare empty list reads as a broken window.
+fn no_targets_hint(kind: CoilKind) -> (&'static str, &'static str) {
+    match kind {
+        CoilKind::Jump => ("no labels in this section", "Shift+L on a rung types one"),
+        CoilKind::Call => ("no other POUs in this project", "Ctrl+N adds one"),
+        _ => ("no writable symbols", "Ctrl+I, Ctrl+O and Ctrl+B add one"),
+    }
+}
+
 /// Every kind a coil may have, in the order the window lists them: the plain coil,
 /// the negated one, and the latching pair. Jump and Call are offered because their
 /// targets are things the operand list already holds (a rung label, another POU);
@@ -2383,7 +2393,12 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         .and_then(|section| section.rungs.get(rung))
         .map(|rung| rung.coil().var.clone())
         .unwrap_or_default();
-    let mut names = coil_choices(plc, section, rung);
+    // The stale value the rung still holds is listed so the window shows what is
+    // stored, but it is not a target: the empty-state hint asks the real list, or a
+    // jump with no labels would look like a jump with one.
+    let candidates = coil_choices(plc, section, rung);
+    let no_candidates = candidates.is_empty();
+    let mut names = candidates;
     if !current.is_empty() && !names.iter().any(|(name, _)| *name == current) {
         names.insert(0, (current.clone(), "IN".to_string()));
     }
@@ -2445,6 +2460,21 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
                     theme::FG
                 }),
             );
+            if matches.is_empty() && !no_candidates {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("no target matches")
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new("backspace clears the filter")
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::C3),
+                );
+            }
             ui.add_space(4.0);
             let first = plc
                 .operand_cursor
@@ -2461,6 +2491,31 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
                 if let Some((name, _)) = matches.get(plc.operand_cursor) {
                     chosen = Some((*name).clone());
                 }
+            }
+            // Nothing this kind can name: say what is missing and how to make one. The
+            // stored value is still listed above, so the window says what the rung
+            // holds *and* why it cannot be re-pointed yet.
+            if no_candidates {
+                let kind = plc
+                    .current_pou_sections()
+                    .get(section)
+                    .and_then(|section| section.rungs.get(rung))
+                    .map(|rung| rung.coil().kind)
+                    .unwrap_or(CoilKind::Normal);
+                let (what, how) = no_targets_hint(kind);
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(what)
+                        .monospace()
+                        .size(theme::font_size(10.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new(how)
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::C3),
+                );
             }
             ui.add_space(6.0);
             ui.label(
@@ -5368,6 +5423,21 @@ mod compare_window_tests {
     /// A jump's operand is a label in its own section and a call's is a POU;
     /// offering bit symbols for either would hand the operator a target the
     /// validator refuses.
+    /// A list with nothing to offer says what is missing and how to make one: a jump
+    /// needs a rung label (`Shift+L`), a call needs another POU (`Ctrl+N`).
+    #[test]
+    fn an_empty_coil_list_says_what_to_add() {
+        assert_eq!(
+            no_targets_hint(CoilKind::Jump),
+            ("no labels in this section", "Shift+L on a rung types one")
+        );
+        assert_eq!(
+            no_targets_hint(CoilKind::Call),
+            ("no other POUs in this project", "Ctrl+N adds one")
+        );
+        assert_eq!(no_targets_hint(CoilKind::Normal).0, "no writable symbols");
+    }
+
     #[test]
     fn a_jump_or_call_coil_offers_its_own_targets() {
         let mut plc = PlcUi::default();

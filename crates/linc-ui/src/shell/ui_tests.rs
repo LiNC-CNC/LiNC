@@ -7790,6 +7790,35 @@ mod ld_editor_keys {
         assert!(!harness.app.plc.text_editing);
     }
 
+    /// A jump with no labels offers nothing, and the window says so instead of
+    /// standing there empty: the list is the only place the operator learns what a
+    /// jump even needs.
+    #[test]
+    fn an_empty_jump_list_says_what_to_add() {
+        let mut harness = harness_with(named_rung(""));
+        {
+            let row = &mut harness.app.plc.project.sections[0].rungs[0];
+            row.set_coil(Coil::new("", CoilKind::Jump));
+        }
+        harness.app.plc.cell_cursor = Some((0, 0, POSITIONS));
+        harness.app.plc.coil_pick = Some((0, 0));
+        // A window lays itself out on the frame it appears; the paint follows.
+        let _ = keys(&mut harness, Vec::new());
+        let output = keys(&mut harness, Vec::new());
+        let texts: Vec<String> = painted_text(&output)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
+        assert!(
+            texts.iter().any(|text| text == "no labels in this section"),
+            "the window says what is missing: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|text| text.contains("Shift+L")),
+            "and the chord that adds one"
+        );
+    }
+
     /// Escape leaves the stored label alone, and the band closes.
     #[test]
     fn escape_cancels_the_label_edit() {
