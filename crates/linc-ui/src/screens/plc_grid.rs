@@ -3659,6 +3659,19 @@ pub fn comment_plain(comment: &str) -> String {
     comment.trim().trim_start_matches("//").trim().to_string()
 }
 
+/// True when this rung's inline text (its label or its comment) owns the keyboard. A
+/// focused field and a selected cell are two different things: while the comment is
+/// being typed, no cell of that rung is selected.
+pub(crate) fn rung_text_focused(plc: &PlcUi, section: usize, rung: usize) -> bool {
+    plc.rung_comment_edit == Some((section, rung)) || plc.rung_label_edit == Some((section, rung))
+}
+
+/// True when this cell is the one the keyboard is on. The coil slot stops counting as
+/// selected once the rung's comment takes the focus.
+fn cell_selected(plc: &PlcUi, section: usize, rung: usize, position: usize) -> bool {
+    plc.cell_cursor == Some((section, rung, position)) && !rung_text_focused(plc, section, rung)
+}
+
 /// One row's series power, for the link join. Links inside the segment read as
 /// closed (they are the join points, not conditions).
 fn series_power(plc: &PlcUi, cells: &[Cell]) -> bool {
@@ -3805,8 +3818,8 @@ pub fn grid_rung(
                 Vec2::new(if wide { SPAN } else { CELL_WIDTH }, strip_height),
                 live,
             );
-            if plc.cell_cursor == Some((section, rung_index, position))
-                || (wide && plc.cell_cursor == Some((section, rung_index, position + 1)))
+            if cell_selected(plc, section, rung_index, position)
+                || (wide && cell_selected(plc, section, rung_index, position + 1))
             {
                 *cursor_rect = Some(rect);
             }
@@ -3843,7 +3856,7 @@ pub fn grid_rung(
                 coil_live(plc, &rung.coil().var, delivered)
             },
         );
-        if plc.cell_cursor == Some((section, rung_index, POSITIONS)) {
+        if cell_selected(plc, section, rung_index, POSITIONS) {
             *cursor_rect = Some(coil_rect);
         }
         // The right margin: reserved like a cell so the strip is as wide as what
@@ -3882,9 +3895,16 @@ pub fn grid_rung(
             );
         }
     });
-    if plc.cell_cursor == Some((section, rung_index, POSITIONS)) {
+    // The focused comment is what the view has to keep in sight while the arrows walk
+    // the column: no cell of the row is selected then, the row still is.
+    if rung_text_focused(plc, section, rung_index) {
+        *cursor_rect = Some(strip.response.rect);
+    }
+    if cell_selected(plc, section, rung_index, POSITIONS) {
         // A faint edge says the whole rung is the unit being addressed while the
-        // coil is the cell with the cursor.
+        // coil is the cell with the cursor. It is not drawn while the comment has the
+        // keyboard: the comment is the focused thing then, and a marked coil beside it
+        // read as two selections at once.
         let rect = strip.response.rect;
         ui.painter().rect_filled(
             egui::Rect::from_min_size(rect.min, egui::vec2(3.0, rect.height())),
@@ -4789,7 +4809,7 @@ fn cell_box(
     live: Option<bool>,
 ) -> egui::Rect {
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    let selected = plc.cell_cursor == Some((section, rung, position));
+    let selected = cell_selected(plc, section, rung, position);
     let painter = ui.painter();
     // No per-cell background or border: the strip is bare and the conductor is
     // what the eye follows. Selection tints the element and marks the cell with
@@ -5506,6 +5526,37 @@ mod compare_window_tests {
     /// One size for every name over a cell. Fitting each label to its own cell put
     /// `reset_count` and `five_cycles` at a smaller size than `enable` beside them, so
     /// a row of the ladder read as two different typographies.
+    /// A focused comment and a selected cell are two different things: while the
+    /// comment is typed, none of that rung's cells draws as selected.
+    #[test]
+    fn a_focused_comment_leaves_no_cell_selected() {
+        let mut plc = PlcUi::default();
+        plc.cell_cursor = Some((0, 1, POSITIONS));
+        assert!(cell_selected(&plc, 0, 1, POSITIONS), "the coil is selected");
+        assert!(!cell_selected(&plc, 0, 1, 0));
+
+        plc.rung_comment_edit = Some((0, 1));
+        assert!(
+            !cell_selected(&plc, 0, 1, POSITIONS),
+            "the comment has the focus"
+        );
+        assert!(!cell_selected(&plc, 0, 1, 0));
+        // Another rung's cells are untouched by this rung's focus: only the row whose
+        // text is focused loses its selection.
+        plc.cell_cursor = Some((0, 0, 2));
+        assert!(
+            cell_selected(&plc, 0, 0, 2),
+            "the cursor really is on row 0"
+        );
+
+        plc.rung_comment_edit = None;
+        plc.rung_label_edit = Some((0, 1));
+        assert!(
+            !cell_selected(&plc, 0, 1, POSITIONS),
+            "the label counts too"
+        );
+    }
+
     #[test]
     fn every_cell_name_draws_at_one_size() {
         let plc = PlcUi::default();
