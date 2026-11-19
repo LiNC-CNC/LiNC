@@ -116,20 +116,6 @@ impl NodePath {
             path,
         })
     }
-
-    fn label(&self) -> String {
-        if self.path.is_empty() {
-            format!("RUNG S{} R{}", self.section + 1, self.rung + 1)
-        } else {
-            let steps = self
-                .path
-                .iter()
-                .map(|index| format!("[{}]", index + 1))
-                .collect::<Vec<_>>()
-                .join("");
-            format!("S{} R{} {steps}", self.section + 1, self.rung + 1)
-        }
-    }
 }
 
 /// What a click on the page asked for. Nothing mutates the project while a
@@ -164,7 +150,11 @@ pub enum Action {
     SetCoilKind(CoilKind),
     SetComment(String),
     /// The label a jump coil in this section can name.
-    SetRungLabel(String),
+    SetRungLabel {
+        section: usize,
+        rung: usize,
+        label: String,
+    },
     WrapSeries,
     WrapParallel,
     Delete,
@@ -1129,6 +1119,10 @@ pub struct PlcUi {
     /// `comment_row`: that one is a row of its own, this is the comment band
     /// above an ordinary rung.
     pub rung_comment_edit: Option<(usize, usize)>,
+    /// The rung's label is being typed in its band. A label is what a jump names,
+    /// so it has to be typeable from the grid.
+    pub rung_label_edit: Option<(usize, usize)>,
+    pub rung_label_buffer: String,
     pub rung_comment_buffer: String,
     /// Boolean traces for the trend page.
     pub trend: TrendBuffer,
@@ -1248,6 +1242,8 @@ impl Default for PlcUi {
             comment_row: None,
             comment_buffer: String::new(),
             rung_comment_edit: None,
+            rung_label_edit: None,
+            rung_label_buffer: String::new(),
             rung_comment_buffer: String::new(),
             trend: TrendBuffer::default(),
             trend_remote: TrendData::default(),
@@ -1813,12 +1809,20 @@ impl PlcUi {
                     }
                 }
             }
-            Action::SetRungLabel(text) => {
-                if let Some(node) = self.selection.clone() {
-                    if let Some(rung) = rung_at_mut(&mut self.project, &node) {
-                        rung.label = text;
-                    }
+            Action::SetRungLabel {
+                section,
+                rung,
+                label,
+            } => {
+                let mut pous = self.project.all_pous();
+                if let Some(row) = pous
+                    .get_mut(self.pou)
+                    .and_then(|pou| pou.sections.get_mut(section))
+                    .and_then(|section| section.rungs.get_mut(rung))
+                {
+                    row.label = label;
                 }
+                self.project.set_pous(pous);
             }
             Action::WrapSeries => {
                 if let Some(node) = self.selection.clone() {
@@ -2953,6 +2957,10 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
         && plc.operand_pick.is_none()
         && plc.coil_pick.is_none()
         && plc.coil_kind_pick.is_none()
+        // An inline text edit owns Escape: closing the workbench behind it left the
+        // buffer and its `text_editing` flag alive with no window to clear them.
+        && plc.rung_comment_edit.is_none()
+        && plc.rung_label_edit.is_none()
         && plc.block_edit.is_none()
         && plc.compare_edit.is_none()
         && plc.compute_edit.is_none()
@@ -3042,6 +3050,7 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(row("New row", "Ctrl+N", false));
             entries.push(row("Delete row", "Ctrl+Bksp", false));
             entries.push(row("Rung comment", "Shift+C", false));
+            entries.push(row("Rung label", "Shift+L", false));
             entries.push(Heading("PREVIEW"));
             entries.push(row("Hold contact · cycle coil", "Space", false));
             entries.push(row("Coil kind on the coil", "C X S R", false));
@@ -7258,248 +7267,6 @@ fn ladder_box(label: &str, live: bool, selected: bool, forced: bool) -> egui::Bu
     .stroke(stroke)
     .corner_radius(egui::CornerRadius::same(4))
     .min_size(BOX)
-}
-
-#[allow(dead_code)]
-fn property_card(plc: &mut PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
-    common::card_title(ui, "SELECTED RUNG / NODE");
-    let Some(node) = plc.selection.clone() else {
-        ui.label(
-            RichText::new("Nothing selected. Click a rung to edit it.")
-                .size(theme::font_size(10.0))
-                .color(theme::MUTED),
-        );
-        return;
-    };
-    // The buffers follow the selection, never the other way round: a frame that
-    // re-synced on every draw would fight the operator's typing.
-    if plc.buffer_key.as_ref() != Some(&node) {
-        plc.sync_buffers();
-    }
-    let logic = logic_at(&plc.project, &node).cloned();
-    let coil = rung_at(&plc.project, &node).map(|rung| rung.coil().clone());
-    let kind = match &logic {
-        Some(Logic::Contact { negated, .. }) => {
-            if *negated {
-                "CONTACT NC"
-            } else {
-                "CONTACT NO"
-            }
-        }
-        Some(Logic::Const { .. }) => "CONSTANT",
-        Some(Logic::Series { .. }) => "SERIES",
-        Some(Logic::Parallel { .. }) => "PARALLEL",
-        Some(Logic::Block { .. }) => "BLOCK",
-        Some(Logic::Edge { .. }) => "EDGE",
-        Some(Logic::Compare { .. }) => "COMPARE",
-        Some(Logic::Expr { .. }) => "EXPRESSION",
-        None => "RUNG",
-    };
-    let rung_label = rung_at(&plc.project, &node)
-        .map(|rung| rung.label.trim().to_string())
-        .unwrap_or_default();
-    let header = if rung_label.is_empty() {
-        node.label()
-    } else {
-        format!("{} · {rung_label}", node.label())
-    };
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(header)
-                .monospace()
-                .size(theme::font_size(10.0))
-                .color(theme::FG),
-        );
-        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            ui.label(
-                RichText::new(kind)
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-        });
-    });
-
-    if matches!(logic, Some(Logic::Contact { .. })) {
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("VAR")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-            let width = (ui.available_width() - 110.0).max(60.0);
-            let response = ui.add_sized(
-                [width, theme::MIN_TARGET],
-                egui::TextEdit::singleline(&mut plc.var_text)
-                    .id(egui::Id::unique("linc-plc-var"))
-                    .font(egui::FontId::monospace(theme::font_size(10.0))),
-            );
-            theme::focus_ring(ui, &response);
-            if response.clicked() {
-                plc.text_editing = true;
-            }
-            if response.lost_focus() {
-                plc.text_editing = false;
-            }
-            if response.changed() {
-                actions.push(Action::SetVariable(plc.var_text.clone()));
-            }
-            let negated = matches!(&logic, Some(Logic::Contact { negated: true, .. }));
-            if theme::action_button(ui, if negated { "NO" } else { "NC" }, true).clicked() {
-                actions.push(Action::ToggleContact(node.clone()));
-            }
-        });
-    } else if let Some(Logic::Const { value }) = &logic {
-        if theme::action_button(ui, if *value { "VALUE 1" } else { "VALUE 0" }, true).clicked() {
-            actions.push(Action::ToggleConstant(node.clone()));
-        }
-    }
-
-    if let Some(coil) = coil {
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("COIL")
-                    .size(theme::font_size(9.0))
-                    .color(theme::MUTED),
-            );
-            let width = ui.available_width().max(60.0);
-            let response = ui.add_sized(
-                [width, theme::MIN_TARGET],
-                egui::TextEdit::singleline(&mut plc.coil_text)
-                    .id(egui::Id::unique("linc-plc-coil"))
-                    .font(egui::FontId::monospace(theme::font_size(10.0))),
-            );
-            theme::focus_ring(ui, &response);
-            if response.clicked() {
-                plc.text_editing = true;
-            }
-            if response.lost_focus() {
-                plc.text_editing = false;
-            }
-            if response.changed() {
-                actions.push(Action::SetCoilVariable(plc.coil_text.clone()));
-            }
-        });
-
-        // The kind picker gets its own row: five glyphs do not fit beside the
-        // operand field in a 320 px panel. The comparison is by kind, so the
-        // button that highlights is the coil's actual kind.
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for candidate in [
-                CoilKind::Normal,
-                CoilKind::Set,
-                CoilKind::Reset,
-                CoilKind::Jump,
-                CoilKind::Call,
-            ] {
-                let is_active = coil.kind == candidate;
-                let response = ui.add_sized(
-                    [theme::MIN_TARGET, theme::MIN_TARGET],
-                    egui::Button::new(
-                        RichText::new(coil_label(candidate))
-                            .monospace()
-                            .size(theme::font_size(10.0))
-                            .color(if is_active { theme::FG } else { theme::MUTED }),
-                    )
-                    .fill(if is_active {
-                        theme::tint(theme::ACCENT, 60)
-                    } else {
-                        theme::PANEL_RAISED
-                    })
-                    .stroke(Stroke::new(
-                        1.0,
-                        if is_active {
-                            theme::ACCENT
-                        } else {
-                            theme::BORDER
-                        },
-                    )),
-                );
-                theme::focus_ring(ui, &response);
-                if response.clicked() && !is_active {
-                    actions.push(Action::SetCoilKind(candidate));
-                }
-            }
-        });
-
-        if coil.kind == CoilKind::Call {
-            // A call names a POU; offer the project's list instead of a guess.
-            // The calling POU is left out: calling itself is a cycle.
-            let current = plc.current_pou().map(|pou| pou.name).unwrap_or_default();
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                for pou in plc.project.all_pous() {
-                    if pou.name.eq_ignore_ascii_case(&current) {
-                        continue;
-                    }
-                    if theme::action_button(ui, &pou.name, true).clicked() {
-                        actions.push(Action::SetCoilVariable(pou.name.clone()));
-                    }
-                }
-            });
-        }
-    }
-
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("LABEL")
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-        );
-        let response = ui.add_sized(
-            [ui.available_width(), theme::MIN_TARGET],
-            egui::TextEdit::singleline(&mut plc.label_text)
-                .id(egui::Id::unique("linc-plc-label"))
-                .font(egui::FontId::monospace(theme::font_size(10.0))),
-        );
-        theme::focus_ring(ui, &response);
-        if response.changed() {
-            actions.push(Action::SetRungLabel(plc.label_text.clone()));
-        }
-    });
-
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("NOTE")
-                .size(theme::font_size(9.0))
-                .color(theme::MUTED),
-        );
-        let response = ui.add_sized(
-            [ui.available_width(), theme::MIN_TARGET],
-            egui::TextEdit::singleline(&mut plc.comment_text)
-                .id(egui::Id::unique("linc-plc-comment"))
-                .font(egui::FontId::monospace(theme::font_size(10.0))),
-        );
-        theme::focus_ring(ui, &response);
-        if response.changed() {
-            actions.push(Action::SetComment(plc.comment_text.clone()));
-        }
-    });
-
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        if theme::action_button(ui, "SERIES", true).clicked() {
-            actions.push(Action::WrapSeries);
-        }
-        if theme::action_button(ui, "PARALLEL", true).clicked() {
-            actions.push(Action::WrapParallel);
-        }
-        if theme::danger_button(ui, "DELETE", true).clicked() {
-            actions.push(Action::Delete);
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        if theme::action_button(ui, "ADD RUNG", true).clicked() {
-            actions.push(Action::AddRung);
-        }
-        if theme::action_button(ui, "MOVE UP", true).clicked() {
-            actions.push(Action::MoveUp);
-        }
-        if theme::action_button(ui, "MOVE DOWN", true).clicked() {
-            actions.push(Action::MoveDown);
-        }
-    });
 }
 
 struct VariableRow {

@@ -7753,8 +7753,61 @@ mod ld_editor_keys {
         }
     }
 
+    fn chord(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    fn typed(text: &str) -> egui::Event {
+        egui::Event::Text(text.to_string())
+    }
+
     fn rung(harness: &ProbeHarness) -> &Rung {
         &harness.app.plc.project.sections[0].rungs[0]
+    }
+
+    /// Shift+L types the rung's label in its band: the label is what a jump names,
+    /// and the grid had no way to write one after the property card went away.
+    #[test]
+    fn shift_l_types_a_rung_label() {
+        let mut harness = harness_with(named_rung("run"));
+        harness.app.plc.cell_cursor = Some((0, 0, 0));
+        keys(
+            &mut harness,
+            vec![chord(egui::Key::L, egui::Modifiers::SHIFT)],
+        );
+        assert_eq!(harness.app.plc.rung_label_edit, Some((0, 0)));
+        assert!(harness.app.plc.text_editing, "the band owns the keyboard");
+        keys(&mut harness, vec![typed("LOOP")]);
+        keys(&mut harness, vec![key(egui::Key::Enter)]);
+        assert_eq!(rung(&harness).label, "LOOP");
+        assert_eq!(harness.app.plc.rung_label_edit, None);
+        assert!(!harness.app.plc.text_editing);
+    }
+
+    /// Escape leaves the stored label alone, and the band closes.
+    #[test]
+    fn escape_cancels_the_label_edit() {
+        let mut harness = harness_with(named_rung("run"));
+        harness.app.plc.project.sections[0].rungs[0].label = "KEEP".to_string();
+        harness.app.plc.cell_cursor = Some((0, 0, 0));
+        keys(
+            &mut harness,
+            vec![chord(egui::Key::L, egui::Modifiers::SHIFT)],
+        );
+        assert_eq!(
+            harness.app.plc.rung_label_buffer, "KEEP",
+            "the field starts filled"
+        );
+        keys(&mut harness, vec![typed("X")]);
+        keys(&mut harness, vec![key(egui::Key::Escape)]);
+        assert_eq!(rung(&harness).label, "KEEP");
+        assert_eq!(harness.app.plc.rung_label_edit, None);
     }
 
     /// Backspace on the coil slot removes the coil and nothing else: the slot reads
