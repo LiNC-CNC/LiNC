@@ -894,6 +894,100 @@ fn the_square_key_shows_the_following_error_traces_on_main() {
     assert!(!harness.app.following.active, "and back to the cards");
 }
 
+/// A machine whose drives publish no load feedback has nothing to meter, so the
+/// second card carries the cut's own numbers instead - in the same slot, so the
+/// row does not move when a profile has no `[ui] servo_load` list.
+#[test]
+fn the_cut_card_takes_the_servo_cards_slot_without_load_feedback() {
+    fn card_of(output: &egui::FullOutput, label: &str) -> egui::Rect {
+        let texts = painted_text(output);
+        let (_, text) = texts
+            .iter()
+            .find(|(text, _)| text == label)
+            .unwrap_or_else(|| panic!("{label} is painted"));
+        painted_cards(output)
+            .into_iter()
+            .find(|card| card.contains(text.center()))
+            .unwrap_or_else(|| panic!("{label} sits in a card"))
+    }
+    fn texts_of(output: &egui::FullOutput) -> Vec<String> {
+        painted_text(output)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect()
+    }
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Machine);
+    harness.frame(&[]);
+    let servo = card_of(&harness.frame_full(Vec::new()), "SERVO LOAD");
+
+    // The fixture's sim backend publishes demo load, so the meters are up. A
+    // profile that names no bars has no load source at all.
+    harness.app.profile.config.ui.servo_load.clear();
+    harness.frame(&[]);
+    let output = harness.frame_full(Vec::new());
+    let texts = texts_of(&output);
+    let cut = card_of(&output, "CUT");
+    assert!(
+        !texts.iter().any(|text| text == "SERVO LOAD"),
+        "the dead meters are gone: {texts:?}"
+    );
+    for label in ["FEED", "CHIP", "RAPID", "mm/min"] {
+        assert!(
+            texts.iter().any(|text| text == label),
+            "{label} is on the card: {texts:?}"
+        );
+    }
+    assert!(
+        (cut.left() - servo.left()).abs() <= 1.0
+            && (cut.right() - servo.right()).abs() <= 1.0
+            && (cut.top() - servo.top()).abs() <= 1.0
+            && (cut.bottom() - servo.bottom()).abs() <= 1.0,
+        "the cut card takes the meters' slot exactly: {cut:?} vs {servo:?}"
+    );
+
+    // `[ui] second_card = "load"` keeps the meters where the machine has none:
+    // the card says so instead of standing empty.
+    harness.app.profile.config.ui.second_card = "load".into();
+    harness.frame(&[]);
+    let texts = texts_of(&harness.frame_full(Vec::new()));
+    assert!(
+        texts.iter().any(|text| text == "SERVO LOAD")
+            && texts.iter().any(|text| text == "NO LOAD FEEDBACK")
+            && !texts.iter().any(|text| text == "CUT"),
+        "a forced meter card names the missing feedback: {texts:?}"
+    );
+
+    // `"none"` gives the row back to the feed card, which then spans the
+    // column the pair used to share.
+    harness.app.profile.config.ui.second_card = "none".into();
+    harness.frame(&[]);
+    let output = harness.frame_full(Vec::new());
+    let texts = texts_of(&output);
+    assert!(
+        !texts
+            .iter()
+            .any(|text| text == "CUT" || text == "SERVO LOAD"),
+        "no second card at all: {texts:?}"
+    );
+    let feed = card_of(&output, "FEED / SPINDLE");
+    assert!(
+        (feed.right() - servo.right()).abs() <= 1.0 && feed.left() < servo.left(),
+        "the feed card takes the whole row: {feed:?} vs {servo:?}"
+    );
+
+    // The default policy is the machine's own answer, and F10 still gives the
+    // full-width traces on such a machine.
+    harness.app.profile.config.ui.second_card = "auto".into();
+    harness.frame_with(&[(egui::Key::F10, egui::Modifiers::NONE)]);
+    let texts = texts_of(&harness.frame_full(Vec::new()));
+    assert!(
+        texts.iter().any(|text| text == "FOLLOWING ERROR")
+            && !texts.iter().any(|text| text == "CUT"),
+        "the traces replace the pair: {texts:?}"
+    );
+}
+
 /// REMAINING changes what the card means - no trail, and the path eaten behind
 /// the tool - so the card says so in its own header, not only in the
 /// shortcut list.

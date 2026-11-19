@@ -1,4 +1,5 @@
 pub mod common;
+pub mod cut;
 pub mod diagnostics;
 pub mod files;
 pub mod help;

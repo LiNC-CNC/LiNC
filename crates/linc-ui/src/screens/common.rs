@@ -709,6 +709,18 @@ pub fn servo_load_card(rows: &[(String, f64)], ui: &mut Ui, height: f32) {
         ui.spacing_mut().interact_size.y = SERVO_METER_HEIGHT;
         ui.spacing_mut().item_spacing.y = 0.0;
         theme::section_header(ui, "SERVO LOAD");
+        // A profile can force the meters on with `[ui] second_card = "load"`
+        // even where the machine publishes none; say so, rather than leaving an
+        // empty frame that reads as a card that failed to load.
+        if rows.is_empty() {
+            ui.label(
+                RichText::new("NO LOAD FEEDBACK")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            return;
+        }
         // Centre the block between the title and the card's bottom edge. The
         // card is as tall as the feed block beside it, so on a three-axis
         // machine the difference used to collect as one gap under the meters.

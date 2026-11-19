@@ -57,8 +57,16 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                         |app, ui, _h| common::following_error_card(app, ui, bottom_height),
                     );
                 } else {
-                    let servo = !app.servo_load_rows().is_empty();
-                    let cards = if servo { 2.0 } else { 1.0 };
+                    // The second card is the load meters when the machine
+                    // publishes load, the cut's own numbers when it does not,
+                    // or whatever `[ui] second_card` forces: a position-only
+                    // controller has no load to meter, and three bars at 0 %
+                    // stand for a light cut that was never measured.
+                    let second = second_card(
+                        &app.profile.config.ui.second_card,
+                        !app.servo_load_rows().is_empty(),
+                    );
+                    let cards = if second.is_some() { 2.0 } else { 1.0 };
                     let card_width = bottom_row_card_width(graph_width, cards, 180.0);
                     ui.horizontal_top(|ui| {
                         // The explicit gap below is the whole gap: the default
@@ -68,23 +76,18 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                         bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
                             common::feed_speed_card(app, ui, bottom_height);
                         });
-                        if servo {
-                            ui.add_space(8.0);
-                            bottom_card(
-                                app,
-                                ui,
-                                card_width,
-                                bottom_height,
-                                "servo",
-                                |app, ui, _h| {
-                                    common::servo_load_card(
-                                        &app.servo_load_rows(),
-                                        ui,
-                                        bottom_height,
-                                    )
-                                },
-                            );
-                        }
+                        let Some(second) = second else {
+                            return;
+                        };
+                        ui.add_space(8.0);
+                        bottom_card(
+                            app,
+                            ui,
+                            card_width,
+                            bottom_height,
+                            second.id(),
+                            |app, ui, _h| second.draw(app, ui, bottom_height),
+                        );
                     });
                 }
             },
@@ -112,9 +115,48 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
     });
 }
 
+/// Which card sits beside FEED / SPINDLE on the Machine page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Second {
+    Load,
+    Cut,
+}
+
+impl Second {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Load => "servo",
+            Self::Cut => "cut",
+        }
+    }
+
+    fn draw(self, app: &mut LincApp, ui: &mut Ui, height: f32) {
+        match self {
+            Self::Load => common::servo_load_card(&app.servo_load_rows(), ui, height),
+            Self::Cut => crate::screens::cut::cut_card(app, ui, height),
+        }
+    }
+}
+
+/// Resolve `[ui] second_card`. `auto` follows what the machine publishes: the
+/// meters when there are rows to draw, the cut's numbers when there are none.
+/// `load` keeps the meters even with nothing to show, and the card then says
+/// that the machine publishes no load rather than drawing an empty frame.
+fn second_card(policy: &str, has_load: bool) -> Option<Second> {
+    match policy {
+        "load" => Some(Second::Load),
+        "cut" => Some(Second::Cut),
+        "none" => None,
+        // The profile is validated at load, so an unknown value here is an
+        // "auto" spelled another way.
+        _ => Some(if has_load { Second::Load } else { Second::Cut }),
+    }
+}
+
 /// Height that just holds the bottom row: the feed/spindle block needs a fixed
 /// body, and every servo row adds its meter height above the card's title and
-/// margins.
+/// margins. A machine with no load rows falls back to the CUT card, which fits
+/// the feed block's own height, so the strip does not grow for it.
 fn bottom_cards_height(app: &LincApp) -> f32 {
     const FEED: f32 = 100.0;
     // Three rows and room to read them; the rows divide whatever is left after
@@ -290,10 +332,13 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
     let main_height = (page_height - bottom_height - 10.0).max(200.0);
     let graph_width = (available * 0.62).max(460.0);
     let right_width = (available - graph_width - 8.0).max(280.0);
-    let servo = !app.servo_load_rows().is_empty();
-    // The lathe dashboard keeps feed/spindle and servo load; the turret pane
-    // belongs to the mill layout.
-    let cards = if servo { 2.0 } else { 1.0 };
+    let second = second_card(
+        &app.profile.config.ui.second_card,
+        !app.servo_load_rows().is_empty(),
+    );
+    // The lathe dashboard keeps feed/spindle and a second card, which is the
+    // load meters or the cut's own numbers per `[ui] second_card`; the turret
+    // pane belongs to the mill layout.
     let full_height = (page_height - 10.0).max(main_height);
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
@@ -365,25 +410,25 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                 // The bottom cards share the TOOLPATH column's width, so the
                 // servo card's right edge lines up with the graph's. Measure
                 // the column itself, not the pre-layout estimate.
+                let cards = if second.is_some() { 2.0 } else { 1.0 };
                 let card_width = bottom_row_card_width(ui.available_width(), cards, 180.0);
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
                         common::feed_speed_card(app, ui, bottom_height);
                     });
-                    if servo {
-                        ui.add_space(8.0);
-                        bottom_card(
-                            app,
-                            ui,
-                            card_width,
-                            bottom_height,
-                            "servo",
-                            |app, ui, _h| {
-                                common::servo_load_card(&app.servo_load_rows(), ui, bottom_height)
-                            },
-                        );
-                    }
+                    let Some(second) = second else {
+                        return;
+                    };
+                    ui.add_space(8.0);
+                    bottom_card(
+                        app,
+                        ui,
+                        card_width,
+                        bottom_height,
+                        second.id(),
+                        |app, ui, _h| second.draw(app, ui, bottom_height),
+                    );
                 });
             },
         );
@@ -408,7 +453,24 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
 
 #[cfg(test)]
 mod tests {
-    use super::bottom_row_card_width;
+    use super::{bottom_row_card_width, second_card, Second};
+
+    #[test]
+    fn second_card_follows_the_policy_then_the_machine() {
+        // `auto` is the only policy that reads the machine, and it follows what
+        // the machine publishes in both directions.
+        assert_eq!(second_card("auto", true), Some(Second::Load));
+        assert_eq!(second_card("auto", false), Some(Second::Cut));
+        // The forced policies ignore what the machine publishes: `load` on a
+        // machine with nothing to meter draws the card that says so.
+        assert_eq!(second_card("load", false), Some(Second::Load));
+        assert_eq!(second_card("cut", true), Some(Second::Cut));
+        assert_eq!(second_card("none", true), None);
+        assert_eq!(second_card("none", false), None);
+        // A value the profile validator would have rejected behaves as auto
+        // rather than silently dropping the card.
+        assert_eq!(second_card("", true), Some(Second::Load));
+    }
 
     #[test]
     fn the_bottom_row_ends_at_the_column_edge() {

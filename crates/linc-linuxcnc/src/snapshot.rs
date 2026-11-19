@@ -553,7 +553,6 @@ impl SnapshotBuilder {
                 axis.name.clone(),
                 joint.map(|joint| joint.ferror_current).unwrap_or(0.0),
             );
-            snapshot.machine.servo_load.insert(axis.name.clone(), 0.0);
             snapshot.machine.commanded.insert(
                 axis.name.clone(),
                 pose_component(&status.positions.commanded, pose_index),
@@ -1273,7 +1272,6 @@ pub fn initial_snapshot(profile: &Profile) -> MachineSnapshot {
             .machine
             .following_error
             .insert(axis.name.clone(), 0.0);
-        snapshot.machine.servo_load.insert(axis.name.clone(), 0.0);
         snapshot.machine.commanded.insert(axis.name.clone(), 0.0);
         snapshot.machine.actual.insert(axis.name.clone(), 0.0);
         snapshot.offsets.g92.insert(axis.name.clone(), 0.0);

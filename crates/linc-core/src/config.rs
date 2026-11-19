@@ -129,7 +129,9 @@ pub struct UiConfig {
     pub axis_order: Vec<String>,
     pub pages: Vec<String>,
     /// Load bars on the Machine page: any of the machine's axes, plus `"S"`
-    /// for the spindle. An empty list removes the SERVO LOAD pane.
+    /// for the spindle. A bar is drawn only when the machine publishes that
+    /// load, so a machine with no load pins shows the CUT card in the slot
+    /// instead, whether the list is empty or not.
     #[serde(default)]
     pub servo_load: Vec<String>,
     /// Startup window state: `"auto"` takes the whole screen on a real machine
@@ -137,6 +139,12 @@ pub struct UiConfig {
     /// borderless panel window sets `"maximized"` and `decorations = false`.
     #[serde(default = "default_window_mode")]
     pub window_mode: String,
+    /// Which card follows FEED / SPINDLE on the Machine page: `"auto"` (the
+    /// default) is the load meters when the machine publishes load and the CUT
+    /// card when it does not, `"load"` and `"cut"` force one, and `"none"`
+    /// lets the feed card take the row.
+    #[serde(default = "default_second_card")]
+    pub second_card: String,
     /// Window-manager decorations (title bar, resize border).
     #[serde(default = "default_true")]
     pub decorations: bool,
@@ -154,6 +162,10 @@ pub struct UiConfig {
 }
 
 fn default_window_mode() -> String {
+    "auto".to_string()
+}
+
+fn default_second_card() -> String {
     "auto".to_string()
 }
 
@@ -630,8 +642,9 @@ pub struct HalPinsConfig {
     pub spindle_load: String,
     pub spindle_speed: String,
     /// Per-axis load pins for the Machine page's SERVO LOAD bars, keyed by axis
-    /// letter. LinuxCNC's status carries no per-axis servo load, so a bar
-    /// without a pin here reads 0%.
+    /// letter. LinuxCNC's status carries no per-axis servo load, so an axis
+    /// with no pin here publishes no bar: the card is a meter over a value
+    /// nothing reads, and MAIN shows the CUT card instead.
     #[serde(default)]
     pub axis_load: std::collections::BTreeMap<String, String>,
 }
@@ -1113,6 +1126,15 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
         return Err(ConfigError::Invalid(format!(
             "ui.dro_position must be commanded or actual (got {:?})",
             config.ui.dro_position
+        )));
+    }
+    if !matches!(
+        config.ui.second_card.as_str(),
+        "auto" | "load" | "cut" | "none"
+    ) {
+        return Err(ConfigError::Invalid(format!(
+            "ui.second_card must be auto, load, cut or none (got {:?})",
+            config.ui.second_card
         )));
     }
     if !matches!(config.ui.keyboard.as_str(), "panel" | "pc") {
@@ -2079,6 +2101,51 @@ enabled = true
         write(&profile, &profile_text("feedback"));
         let error = Profile::load(&profile, None).unwrap_err();
         assert!(error.to_string().contains("ui.dro_position"), "{error}");
+    }
+
+    #[test]
+    fn second_card_accepts_auto_load_cut_or_none() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let profile = dir.path().join("sim.toml");
+        let profile_text = |card: &str| {
+            format!(
+                r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[ui]
+second_card = "{card}"
+[panel]
+kind = "simulated"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+[simulation]
+enabled = true
+"#
+            )
+        };
+        for card in ["auto", "load", "cut", "none"] {
+            write(&profile, &profile_text(card));
+            let loaded = Profile::load(&profile, None).unwrap();
+            assert_eq!(loaded.config.ui.second_card, card);
+        }
+        // The base profile sets no key, so the card follows the machine.
+        write(
+            &profile,
+            &profile_text("auto").replace("second_card = \"auto\"\n", ""),
+        );
+        let loaded = Profile::load(&profile, None).unwrap();
+        assert_eq!(loaded.config.ui.second_card, "auto");
+        write(&profile, &profile_text("meters"));
+        let error = Profile::load(&profile, None).unwrap_err();
+        assert!(error.to_string().contains("ui.second_card"), "{error}");
     }
 
     #[test]

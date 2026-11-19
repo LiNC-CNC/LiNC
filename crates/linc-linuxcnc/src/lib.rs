@@ -283,9 +283,9 @@ impl NmlBackend {
             .and_then(|value| value.as_bool());
         // Per-axis load. LinuxCNC's status carries no servo load, so the only
         // source is a HAL pin, and SnapshotBuilder owns no HAL reader: the pins
-        // are read here and replace the zeros the builder seeded. An axis with
-        // no configured pin keeps its 0%, which is what the machine really
-        // publishes for it.
+        // are read here. An axis with no configured pin publishes no row at all,
+        // so the Machine page can tell "no load feedback" from a real 0 % and
+        // draw the CUT card instead of a dead meter.
         for (axis, pin) in &self.profile.config.hal.pins.axis_load {
             if let Some(load) = self.hal.as_ref().and_then(|hal| hal.float(pin)) {
                 snapshot

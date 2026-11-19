@@ -537,7 +537,21 @@ Default page. The layout is selected by `machine.gui`.
   The servo card draws one bar per entry in `[ui] servo_load` (machine axes plus
   `S` for the spindle): a green (0-80 %), yellow (80-100 %) and red (100-120 %)
   ruler behind an accent progress fill, with the percentage to its right. An
-  empty list hides the servo card. Controller messages are not a pane: `M`
+  entry is drawn only when the machine publishes that load: an axis needs its
+  `[hal.pins] axis_load` pin, and `S` needs a spindle load reading. Nothing is
+  seeded with a zero, so a machine without the feedback shows no bar at all
+  rather than a meter that reads 0 % through every cut. When no bar is left,
+  the slot carries the `CUT` card instead — the rate in force and the rate the
+  trajectory is running (`F 425 → 425 mm/min`), the chip load that divides them
+  by the true spindle speed (`mm/rev`), and the rapid override. All three come
+  from what a position-only controller publishes: the CUT card needs no
+  encoder on any axis. It is not a gauge — nothing on it claims a percentage of
+  a force it cannot measure. `[ui] second_card` overrides the choice: `"auto"`
+  is the rule above, `"load"` keeps the meters and makes the card read
+  `NO LOAD FEEDBACK` where there is none, `"cut"` always draws the cut's
+  numbers (what a machine with only a spindle load reading wants), and
+  `"none"` gives the whole row to `FEED / SPINDLE`. Controller messages are
+  not a pane: `M`
   opens them full screen, so the log is readable without crowding the MAIN
   layout.
 - The square (`F10`) replaces those two cards with a `FOLLOWING ERROR` pane:

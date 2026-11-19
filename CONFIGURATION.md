@@ -590,6 +590,43 @@ the INI has no spindle, and any duplicate. A profile that names an axis the
 machine does not have therefore fails at startup instead of silently dropping a
 bar.
 
+A bar is drawn only for an entry the machine actually publishes. An axis needs
+a pin under `[hal.pins] axis_load`; `S` needs a spindle load reading from
+`[hal.pins] spindle_load`. LinuxCNC's own status carries neither, so a profile
+with no load pins shows no bars — MAIN draws the `CUT` card in that slot
+instead. Listing an entry the machine cannot publish does not invent a zero: it
+leaves the slot to the CUT card, which shows the rate in force, the rate the
+trajectory is running, and the chip load (`mm/rev`) that follows from the
+spindle speed:
+
+```toml
+[hal.pins]
+# A machine without this section has no load feedback at all, and MAIN
+# shows the CUT card where the SERVO LOAD meters would be.
+[hal.pins.axis_load]
+Z = "rio.spindle-modbus.z_load-abs"
+```
+
+### Second card on the Machine page
+
+`[ui] second_card` decides what follows `FEED / SPINDLE` under the toolpath:
+
+| value | the row |
+| --- | --- |
+| `"auto"` (default) | `SERVO LOAD` when the machine publishes any load, `CUT` when it publishes none |
+| `"load"` | `SERVO LOAD` always; with nothing to meter the card reads `NO LOAD FEEDBACK` |
+| `"cut"` | `CUT` always, even on a machine with load pins |
+| `"none"` | no second card; `FEED / SPINDLE` takes the row |
+
+A machine with a VFD load link but no per-axis load pins publishes one reading
+(the spindle), so `"auto"` keeps the meters. Set `"cut"` there if the single
+bar is not worth the slot:
+
+```toml
+[ui]
+second_card = "cut"
+```
+
 ### Window state
 
 `[ui] window_mode` decides how the window appears: `"auto"` (the default) takes
@@ -651,7 +688,7 @@ The bindings do not change: the panel's navigation keys already send `F5` to
 | `[machine]` | `name`, `kind`, `gui`, `linuxcnc_ini` |
 | `[mill]` | optional `max_axes` |
 | `[lathe]` | optional `turret_stations`, `power_turret`, `live_tooling`, `live_tool_max_rpm`, `c_axis`, `y_axis`, `sub_spindle` |
-| `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages`, `servo_load`, `window_mode`, `decorations`, `dro_position`, `keyboard` |
+| `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages`, `servo_load`, `second_card`, `window_mode`, `decorations`, `dro_position`, `keyboard` |
 | `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running`, `show_parent_above_root` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter` |

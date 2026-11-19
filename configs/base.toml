@@ -21,9 +21,14 @@ axis_order = ["X", "Y", "Z"]
 # through the [keys] chords below (Ctrl+D, Ctrl+H), and this list never unbinds
 # a key. Drop an entry to hide its row; the page and its key stay.
 pages = ["machine", "program", "tools", "offsets", "diagnostics", "help"]
-# Load bars on the Machine page: machine axes plus "S" for the spindle. An
-# empty list removes the SERVO LOAD pane.
+# Load bars on the Machine page: machine axes plus "S" for the spindle. A bar
+# is drawn only when the machine publishes that load, so an empty list and a
+# machine with no load pins both leave the second card to `second_card`.
 servo_load = ["X", "Y", "Z"]
+# What follows FEED / SPINDLE under the toolpath: "auto" (the default) is the
+# load meters when the machine publishes load and the CUT card when it does
+# not, "load" and "cut" force one, and "none" gives the row to the feed card.
+second_card = "auto"
 # How the window appears at startup: "auto" takes the whole screen on a real
 # machine and opens a normal window in simulation.
 window_mode = "auto"
@@ -314,9 +319,10 @@ spindle_override = "cnc_panel.spindle_override"
 spindle_load = "rio.spindle-modbus.spindle_load-abs"
 spindle_speed = "spindle.0.speed-in"
 # Per-axis load pins for the Machine page's SERVO LOAD bars, axis letter -> HAL
-# pin. LinuxCNC's status carries no per-axis servo load, so an axis without an
-# entry reads 0%. Machines that publish one (the BaierMill takes Z thrust load
-# from the spindle VFD's Modbus link) name it here.
+# pin. LinuxCNC's status carries no per-axis servo load, so a machine that
+# names no pin here publishes none: MAIN then shows the CUT card in that slot
+# instead of a bar stuck at 0%. Machines that publish one (the BaierMill takes
+# Z thrust load from the spindle VFD's Modbus link) name it here.
 # [hal.pins.axis_load]
 # Z = "rio.spindle-modbus.z_load-abs"
 
