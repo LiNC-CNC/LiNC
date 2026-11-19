@@ -133,18 +133,52 @@ pub fn font_size(base: f32) -> f32 {
     nearest * FONT_SCALE
 }
 
+/// The design baseline the shell is laid out at, in physical pixels.
+pub const DESIGN: [f32; 2] = [1280.0, 720.0];
+
+/// The zoom factor for a viewport of `physical` pixels.
+///
+/// The shell is laid out at [`DESIGN`] and scales with the window, but it never
+/// scales *below* that design on a monitor that can hold it: a window smaller than
+/// 1280x720 keeps 1:1 text and lets the viewport clip, because shrinking the whole
+/// shell into it is what turned the interface into a stamp. A monitor that cannot
+/// hold the design (a small touch panel) still gets the down-scaling, which is what
+/// that path exists for. `multiplier` is the profile's UI scale preference.
+///
+/// `native` is the display's own scale: egui multiplies the zoom factor by it, so
+/// the design at 1:1 physical pixels is `1.0 / native`.
+pub fn design_zoom(
+    physical: [f32; 2],
+    native: f32,
+    multiplier: f32,
+    monitor: Option<[f32; 2]>,
+) -> f32 {
+    let native = native.max(0.1);
+    let base = (physical[0] / DESIGN[0]).min(physical[1] / DESIGN[1]);
+    let scaled = (base / native * multiplier).clamp(0.5, 4.0);
+    let monitor_holds_design = monitor
+        .map(|screen| screen[0] >= DESIGN[0] && screen[1] >= DESIGN[1])
+        .unwrap_or(true);
+    if monitor_holds_design {
+        scaled.max(1.0 / native)
+    } else {
+        scaled
+    }
+}
+
 /// Scale the whole shell from the 1280x720 baseline to the actual physical
 /// viewport. `multiplier` is the profile/runtime UI scale preference.
 pub fn apply_design_zoom(ctx: &egui::Context, multiplier: f32) {
     let rect = ctx.input(|input| input.viewport_rect());
+    let monitor = ctx.input(|input| input.viewport().monitor_size);
     let ppp = ctx.pixels_per_point();
-    let physical = rect.size() * ppp;
-    if physical.x < 100.0 || physical.y < 100.0 {
+    let native = ctx.native_pixels_per_point().unwrap_or(1.0);
+    let physical = [rect.width() * ppp, rect.height() * ppp];
+    if physical[0] < 100.0 || physical[1] < 100.0 {
         return;
     }
-    let native = ctx.native_pixels_per_point().unwrap_or(1.0).max(0.1);
-    let base = (physical.x / 1280.0).min(physical.y / 720.0);
-    let target = (base / native * multiplier).clamp(0.5, 4.0);
+    let monitor = monitor.map(|size| [size.x * ppp, size.y * ppp]);
+    let target = design_zoom(physical, native, multiplier, monitor);
     if (ctx.zoom_factor() - target).abs() > 0.005 {
         ctx.set_zoom_factor(target);
     }
@@ -572,5 +606,48 @@ mod font_tests {
             .families
             .get(&egui::FontFamily::Proportional)
             .is_some_and(|family| family.iter().any(|name| name == "Hack")));
+    }
+}
+
+#[cfg(test)]
+mod design_zoom_tests {
+    use super::{design_zoom, DESIGN};
+
+    /// The window may be made smaller, but the shell inside it must not shrink below
+    /// the design: at 700x400 the text keeps its size and the viewport clips. Before
+    /// this the whole interface scaled down with the window — which is what a
+    /// window the window manager refuses to clamp turned into a stamp.
+    #[test]
+    fn the_shell_does_not_scale_below_the_design() {
+        let small = design_zoom([700.0, 400.0], 1.0, 1.0, Some([1920.0, 1080.0]));
+        assert_eq!(small, 1.0, "1:1 at native scale, not 0.55");
+        // The layout is `DESIGN` points, and points x pixels-per-point is the
+        // physical size, so a zoom of 1 at native 1 lays out 1280x720 physical.
+        assert_eq!([DESIGN[0] * small, DESIGN[1] * small], DESIGN);
+
+        // A HIDPI display reaches the same physical design at a zoom below 1.
+        let hidpi = design_zoom([700.0, 400.0], 1.448, 1.0, Some([1920.0, 1080.0]));
+        assert!((hidpi * 1.448 - 1.0).abs() < 1e-5, "{hidpi}");
+    }
+
+    /// A bigger window still scales the shell up: that is the whole point of the
+    /// baseline, and a 4K panel wants the larger type.
+    #[test]
+    fn a_larger_window_still_scales_the_shell_up() {
+        let big = design_zoom([2560.0, 1440.0], 1.0, 1.0, Some([2560.0, 1440.0]));
+        assert!((big - 2.0).abs() < 1e-5, "{big}");
+        // ...and the profile's scale preference still multiplies it.
+        let bigger = design_zoom([2560.0, 1440.0], 1.0, 1.25, Some([2560.0, 1440.0]));
+        assert!((bigger - 2.5).abs() < 1e-5, "{bigger}");
+    }
+
+    /// A panel that cannot hold the design keeps the down-scaling: clipping a
+    /// 1280x720 layout into a 1024x600 touch panel would hide controls.
+    #[test]
+    fn a_small_monitor_still_scales_down() {
+        let panel = design_zoom([1024.0, 600.0], 1.0, 1.0, Some([1024.0, 600.0]));
+        assert!((panel - 0.8).abs() < 1e-5, "{panel}, the 600/720 that fits");
+        // With no monitor reported, the design holds: the safe default.
+        assert_eq!(design_zoom([700.0, 400.0], 1.0, 1.0, None), 1.0);
     }
 }
