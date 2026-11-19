@@ -3824,7 +3824,7 @@ pub fn grid_rung(
             egui::pos2(rect.left() + 2.0, rect.top() + LABEL_Y),
             Align2::LEFT_CENTER,
             format!("{label}:"),
-            FontId::monospace(theme::font_size(8.0)),
+            FontId::monospace(theme::font_size(NAME_PX)),
             theme::COMMENT,
         );
     }
@@ -4038,6 +4038,10 @@ pub const LABEL_BAND: f32 = 12.0;
 /// Where a cell's operand name sits. The conductor is centred, so this band
 /// shares the space above the bars with it.
 pub const LABEL_Y: f32 = 8.0;
+
+/// The size every operand name over a cell draws at. One size, not one per cell: a
+/// name that needs more room is clipped, never shrunk.
+pub const NAME_PX: f32 = 8.5;
 /// A rung with a label grows by this much: the label takes a line of its own
 /// above the operand names, because both shared `LABEL_Y` and a label printed
 /// over the first cell's name. It is the label band plus the 2 px a 13 px line
@@ -4754,27 +4758,25 @@ fn cell_box(
     );
     draw_face(painter, symbol_rect, face, style, below_height);
     if !label.is_empty() {
-        // Fit the operand inside the cell: expressions such as `MW2:=MW1+5` and
-        // long coil names were clipped at the strip edges. The font shrinks to fit
-        // rather than the name being cut, and a very long name keeps a floor so it
-        // stays legible.
-        let available = rect.width() - 4.0;
-        let mut size = theme::font_size(8.5);
-        loop {
-            let galley = painter.layout_no_wrap(label.to_string(), FontId::monospace(size), color);
-            if galley.size().x <= available || size <= 5.5 {
-                painter.galley(
-                    egui::pos2(
-                        rect.center().x - galley.size().x / 2.0,
-                        rect.top() + name_y - galley.size().y / 2.0,
-                    ),
-                    galley,
-                    color,
-                );
-                break;
-            }
-            size -= 0.5;
-        }
+        // Every name over a cell draws at `NAME_PX`, whatever the cell or the length
+        // of the name. Fitting each name to its own cell made `reset_count` and
+        // `five_cycles` smaller than `enable` beside them, so a row read as two
+        // different typographies. A name too long for its cell is clipped to the cell
+        // instead of shrunk, which keeps one size across the whole ladder.
+        let galley = painter.layout_no_wrap(
+            label.to_string(),
+            FontId::monospace(theme::font_size(NAME_PX)),
+            color,
+        );
+        // Centred over its cell, and not clipped to it: a name wider than one cell
+        // draws whole and reaches into the empty space above its neighbours, which is
+        // where `five_cycles` and `reset_count` live. Clipping to the cell turned them
+        // into `five_cy` and `reset_c`.
+        let at = egui::pos2(
+            rect.center().x - galley.size().x / 2.0,
+            rect.top() + name_y - galley.size().y / 2.0,
+        );
+        painter.galley(at, galley, color);
     }
     rect
 }
@@ -5425,6 +5427,79 @@ mod compare_window_tests {
     /// validator refuses.
     /// A list with nothing to offer says what is missing and how to make one: a jump
     /// needs a rung label (`Shift+L`), a call needs another POU (`Ctrl+N`).
+    /// One size for every name over a cell. Fitting each label to its own cell put
+    /// `reset_count` and `five_cycles` at a smaller size than `enable` beside them, so
+    /// a row of the ladder read as two different typographies.
+    #[test]
+    fn every_cell_name_draws_at_one_size() {
+        let plc = PlcUi::default();
+        let ctx = egui::Context::default();
+        // An area paints the frame after it is placed.
+        let mut warm = ctx.run_pass(egui::RawInput::default(), |ctx| {
+            egui::Area::new(egui::Id::unique("cell-names"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |_ui| {});
+        });
+        warm.textures_delta.clear();
+        let mut output = ctx.run_pass(egui::RawInput::default(), |ctx| {
+            egui::Area::new(egui::Id::unique("cell-names"))
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    for (index, label) in ["enable", "reset_count", "five_cycles", "MW2:=MW1+5"]
+                        .iter()
+                        .enumerate()
+                    {
+                        cell_box(
+                            &plc,
+                            ui,
+                            0,
+                            0,
+                            index,
+                            label,
+                            &Face::default(),
+                            LABEL_Y,
+                            CELL_HEIGHT,
+                            egui::vec2(CELL_WIDTH, CELL_HEIGHT),
+                            None,
+                        );
+                    }
+                });
+        });
+        output.textures_delta.clear();
+        fn walk(shape: &egui::Shape, out: &mut Vec<(String, f32)>) {
+            match shape {
+                egui::Shape::Text(text) => {
+                    out.push((text.galley.text().to_string(), text.galley.size().y))
+                }
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut sizes = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut sizes);
+        }
+        let height = |label: &str| {
+            sizes
+                .iter()
+                .find(|(text, _)| text == label)
+                .unwrap_or_else(|| panic!("`{label}` is painted: {sizes:?}"))
+                .1
+        };
+        let expected = height("enable");
+        for label in ["reset_count", "five_cycles", "MW2:=MW1+5"] {
+            assert_eq!(
+                height(label),
+                expected,
+                "`{label}` draws at the same size as `enable`"
+            );
+        }
+    }
+
     #[test]
     fn an_empty_coil_list_says_what_to_add() {
         assert_eq!(

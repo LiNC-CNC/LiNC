@@ -7934,12 +7934,13 @@ mod ld_editor_keys {
 #[test]
 fn the_run_strip_puts_inputs_and_outputs_on_one_line() {
     // The decision is arithmetic on the tile widths, so it is checked directly...
-    assert!(crate::screens::plc::strip_fits_one_line(1200.0, 6, 6));
-    assert!(!crate::screens::plc::strip_fits_one_line(300.0, 6, 6));
-    assert!(!crate::screens::plc::strip_fits_one_line(60.0, 1, 1));
+    // ...with a 56 px tile, the widest name in the strip.
+    assert!(crate::screens::plc::strip_fits_one_line(1200.0, 56.0, 6, 6));
+    assert!(!crate::screens::plc::strip_fits_one_line(300.0, 56.0, 6, 6));
+    assert!(!crate::screens::plc::strip_fits_one_line(60.0, 56.0, 1, 1));
     // ...and a direction with no points costs no row and no gap.
-    assert!(crate::screens::plc::strip_fits_one_line(80.0, 0, 1));
-    assert!(crate::screens::plc::strip_fits_one_line(80.0, 1, 0));
+    assert!(crate::screens::plc::strip_fits_one_line(90.0, 56.0, 0, 1));
+    assert!(crate::screens::plc::strip_fits_one_line(90.0, 56.0, 1, 0));
 
     // On screen: both direction labels on one line when there is room, stacked when
     // there is not.

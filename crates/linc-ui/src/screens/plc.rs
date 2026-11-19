@@ -6458,15 +6458,37 @@ const BIT_TILE: [f32; 2] = [38.0, 36.0];
 const DIR_CELL: [f32; 2] = [28.0, 36.0];
 const BIT_GAP: f32 = 2.0;
 
+/// The width one lamp needs for its name: the tile is at least `BIT_TILE`, and never
+/// narrower than the longest name at the one name size, so two names cannot print
+/// over each other.
+fn bit_tile_width(ui: &Ui, plc: &PlcUi) -> f32 {
+    let widest = plc
+        .project
+        .io
+        .iter()
+        .map(|point| {
+            ui.painter()
+                .layout_no_wrap(
+                    point.name.clone(),
+                    FontId::monospace(theme::font_size(crate::screens::plc_grid::NAME_PX)),
+                    theme::MUTED,
+                )
+                .size()
+                .x
+        })
+        .fold(BIT_TILE[0] - 8.0, f32::max);
+    (widest + 8.0).max(BIT_TILE[0])
+}
+
 /// Whether both directions fit on one line: `IN` tiles then `OUT` tiles, with the
 /// direction's own cell in front of each run. Two rows otherwise — a run split across
 /// the fold reads worse than two rows, so the choice is per direction, not per tile.
-pub(crate) fn strip_fits_one_line(width: f32, ins: usize, outs: usize) -> bool {
+pub(crate) fn strip_fits_one_line(width: f32, tile: f32, ins: usize, outs: usize) -> bool {
     let run = |count: usize| {
         if count == 0 {
             0.0
         } else {
-            DIR_CELL[0] + count as f32 * BIT_TILE[0]
+            DIR_CELL[0] + count as f32 * tile
         }
     };
     let both = ins > 0 && outs > 0;
@@ -6490,7 +6512,8 @@ pub(crate) fn sim_bit_panel(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>)
     // Inputs and outputs share one line and only take two when the width runs out:
     // two fixed rows halved the strip for no reason and pushed the out row towards
     // the window edge.
-    let one_line = strip_fits_one_line(ui.available_width(), ins.len(), outs.len());
+    let tile = bit_tile_width(ui, plc);
+    let one_line = strip_fits_one_line(ui.available_width(), tile, ins.len(), outs.len());
     ui.spacing_mut().item_spacing = egui::vec2(BIT_GAP, BIT_GAP);
     if one_line {
         ui.horizontal(|ui| {
@@ -6499,7 +6522,7 @@ pub(crate) fn sim_bit_panel(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>)
                 ("IN", IoDirection::In, &ins),
                 ("OUT", IoDirection::Out, &outs),
             ] {
-                strip_direction(ui, plc, title, direction, group, actions);
+                strip_direction(ui, plc, title, direction, group, tile, actions);
             }
         });
     } else {
@@ -6512,7 +6535,7 @@ pub(crate) fn sim_bit_panel(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>)
             }
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(BIT_GAP, BIT_GAP);
-                strip_direction(ui, plc, title, direction, group, actions);
+                strip_direction(ui, plc, title, direction, group, tile, actions);
             });
         }
     }
@@ -6526,6 +6549,7 @@ fn strip_direction(
     title: &str,
     direction: IoDirection,
     points: &[&linc_plc_core::IoPoint],
+    tile: f32,
     actions: &mut Vec<Action>,
 ) {
     if points.is_empty() {
@@ -6538,14 +6562,14 @@ fn strip_direction(
             ui.label(
                 RichText::new(title)
                     .monospace()
-                    .size(theme::font_size(8.0))
+                    .size(theme::font_size(crate::screens::plc_grid::NAME_PX))
                     .color(theme::MUTED),
             );
         },
     );
     for (index, point) in points.iter().enumerate() {
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(BIT_TILE[0], BIT_TILE[1]), egui::Sense::click());
+            ui.allocate_exact_size(egui::vec2(tile, BIT_TILE[1]), egui::Sense::click());
         ui.painter().rect_filled(rect, 2.0, theme::PANEL);
         let value = plc
             .vars
@@ -6583,7 +6607,7 @@ fn paint_bit_tile(
         egui::pos2(rect.center().x, rect.top() + 7.0),
         Align2::CENTER_CENTER,
         format!("{index}"),
-        FontId::monospace(7.0),
+        FontId::monospace(theme::font_size(crate::screens::plc_grid::NAME_PX)),
         theme::MUTED,
     );
     painter.circle_filled(egui::pos2(rect.center().x, rect.top() + 17.0), 3.5, colour);
@@ -6595,7 +6619,7 @@ fn paint_bit_tile(
         } else {
             point.name.clone()
         },
-        FontId::monospace(6.5),
+        FontId::monospace(theme::font_size(crate::screens::plc_grid::NAME_PX)),
         colour,
     );
 }
