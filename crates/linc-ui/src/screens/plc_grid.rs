@@ -121,6 +121,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         || app.plc.picker.is_some()
         || app.plc.operand_pick.is_some()
         || app.plc.coil_pick.is_some()
+        || app.plc.coil_kind_pick.is_some()
         || app.plc.compare_edit.is_some()
         || app.plc.compute_edit.is_some()
         || app.plc.block_edit.is_some()
@@ -402,16 +403,6 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
         return;
     }
     if cursor.2 >= POSITIONS {
-        // Backspace on the coil slot removes the coil: this branch returns before
-        // the general delete below, so the coil's own key lives here.
-        if delete {
-            actions.push(Action::DeleteCell {
-                section: cursor.0,
-                rung: cursor.1,
-                position: cursor.2,
-            });
-            return;
-        }
         // Space cycles the coil's kind: Normal, Set, Reset, Negated, Jump,
         // Call. The coil letters and their rail group are gone; one cell key
         // does the job.
@@ -438,17 +429,21 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 });
             }
         }
+        // Backspace on the coil slot removes the coil: the branch returns before the
+        // general delete below, so the coil's own key lives here.
+        if delete {
+            actions.push(Action::DeleteCell {
+                section: cursor.0,
+                rung: cursor.1,
+                position: cursor.2,
+            });
+            return;
+        }
         // Enter on the coil edits its operand. This branch returns before the
-        // general Enter handling, so the coil's Enter lives here.
+        // general Enter handling, so the coil's Enter lives here. An empty tail has
+        // no coil to name yet, so Enter asks for the kind first.
         if enter {
-            let var = sections
-                .get(cursor.0)
-                .and_then(|section| section.rungs.get(cursor.1))
-                .map(|rung| rung.coil().var.clone())
-                .unwrap_or_default();
-            app.plc.operand_cursor = coil_position(&app.plc, cursor.0, cursor.1, &var);
-            app.plc.operand_filter.clear();
-            app.plc.coil_pick = Some((cursor.0, cursor.1));
+            open_coil_enter(app, cursor.0, cursor.1);
         }
         let kind = if contact {
             Some(CoilKind::Normal)
@@ -793,16 +788,7 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
                 app.plc.operand_filter.clear();
                 app.plc.operand_pick = Some((section, rung, position, cell));
             }
-            EnterTarget::Coil((section, rung, _)) => {
-                let var = sections
-                    .get(section)
-                    .and_then(|section| section.rungs.get(rung))
-                    .map(|rung| rung.coil().var.clone())
-                    .unwrap_or_default();
-                app.plc.operand_cursor = coil_position(&app.plc, section, rung, &var);
-                app.plc.operand_filter.clear();
-                app.plc.coil_pick = Some((section, rung));
-            }
+            EnterTarget::Coil((section, rung, _)) => open_coil_enter(app, section, rung),
             EnterTarget::Picker => {
                 app.plc.picker = Some(cursor);
                 app.plc.picker_cursor = 0;
@@ -843,6 +829,12 @@ pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     if element.handled {
         return true;
     }
+    let kind_drawn = coil_kind_picker(plc, ctx, actions);
+    // The kind window opens the operand list on the same frame it is answered, so
+    // the operand list owns the next one.
+    if kind_drawn {
+        return true;
+    }
     let operand_drawn = operand_picker(plc, ctx, actions);
     let coil_drawn = coil_picker(plc, ctx, actions);
     // A state flag without a window this frame is a stuck picker: nothing can
@@ -853,6 +845,9 @@ pub fn pickers(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
     if picker_is_stale(plc.operand_pick.is_some(), operand_drawn) {
         plc.operand_pick = None;
         plc.operand_filter.clear();
+    }
+    if picker_is_stale(plc.coil_kind_pick.is_some(), kind_drawn) {
+        plc.coil_kind_pick = None;
     }
     if picker_is_stale(plc.coil_pick.is_some(), coil_drawn) {
         plc.coil_pick = None;
@@ -871,6 +866,7 @@ fn modal_open(plc: &PlcUi) -> bool {
     plc.picker.is_some()
         || plc.operand_pick.is_some()
         || plc.coil_pick.is_some()
+        || plc.coil_kind_pick.is_some()
         || plc.compare_edit.is_some()
         || plc.compute_edit.is_some()
         || plc.block_edit.is_some()
@@ -1466,6 +1462,7 @@ fn clear_pickers(plc: &mut PlcUi) {
     plc.picker = None;
     plc.operand_pick = None;
     plc.coil_pick = None;
+    plc.coil_kind_pick = None;
     plc.operand_filter.clear();
     // The block window is a picker too. Leaving it out of the sweep kept its
     // state alive, so Escape skipped its draw for one frame and the window came
@@ -2233,6 +2230,94 @@ fn coil_choices(plc: &PlcUi, section: usize, rung: usize) -> Vec<(String, String
     }
 }
 
+/// Every kind a coil may have, in the order the window lists them: the plain coil,
+/// the negated one, and the latching pair. Jump and Call are offered because their
+/// targets are things the operand list already holds (a rung label, another POU);
+/// Compute keeps its own window, because what it writes is an expression rather
+/// than one symbol.
+const COIL_KINDS: [(CoilKind, &str, &str); 6] = [
+    (CoilKind::Normal, "-[ ]-", "COIL"),
+    (CoilKind::Negated, "-[/]-", "NEGATED COIL"),
+    (CoilKind::Set, "-[S]-", "SET, LATCHING"),
+    (CoilKind::Reset, "-[R]-", "RESET, UNLATCHING"),
+    (CoilKind::Jump, "-[J]-", "JUMP"),
+    (CoilKind::Call, "-[C]-", "CALL"),
+];
+
+/// The first step of putting a coil on an empty tail: which kind it is. Enter takes
+/// the highlighted kind and immediately opens the operand list, which is the second
+/// step; Escape leaves the rung untouched.
+fn coil_kind_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
+    let Some((section, rung)) = plc.coil_kind_pick else {
+        return false;
+    };
+    let keys = modal_keys(ctx);
+    if keys.escape {
+        plc.coil_kind_pick = None;
+        return false;
+    }
+    plc.coil_kind_cursor = plc.coil_kind_cursor.min(COIL_KINDS.len() - 1);
+    if keys.up {
+        plc.coil_kind_cursor = plc.coil_kind_cursor.saturating_sub(1);
+    }
+    if keys.down {
+        plc.coil_kind_cursor = (plc.coil_kind_cursor + 1).min(COIL_KINDS.len() - 1);
+    }
+    let mut chosen: Option<CoilKind> = None;
+    let mut visible = true;
+    let shown = egui::Window::new("COIL TYPE")
+        .open(&mut visible)
+        // Above the workbench overlay, like the element and operand lists.
+        .order(egui::Order::Tooltip)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_min_width(340.0);
+            ui.set_max_width(340.0);
+            ui.label(
+                RichText::new("what the coil does with the rung's power")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            ui.add_space(4.0);
+            for (index, (kind, glyph, label)) in COIL_KINDS.iter().enumerate() {
+                let selected = index == plc.coil_kind_cursor;
+                if window_row(ui, glyph, label, selected, true, index % 2 == 1).clicked() {
+                    chosen = Some(*kind);
+                }
+            }
+            if keys.enter {
+                chosen = COIL_KINDS.get(plc.coil_kind_cursor).map(|row| row.0);
+            }
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("↑ ↓ KIND · ENTER TAKES IT, THEN THE OPERAND · ESC")
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+        });
+    if let Some(kind) = chosen {
+        actions.push(Action::SetCoil {
+            section,
+            rung,
+            coil: Coil::new(String::new(), kind),
+        });
+        // Second step: the operand of the coil just chosen.
+        plc.operand_cursor = 0;
+        plc.operand_filter.clear();
+        plc.coil_pick = Some((section, rung));
+        plc.coil_kind_pick = None;
+    }
+    if !visible {
+        plc.coil_kind_pick = None;
+    }
+    shown.is_some()
+}
+
 fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) -> bool {
     let Some((section, rung)) = plc.coil_pick else {
         return false;
@@ -2348,6 +2433,28 @@ fn coil_picker(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Action>) 
         plc.operand_filter.clear();
     }
     shown.is_some()
+}
+
+/// Enter on a coil slot. A coil that is already named edits its operand; an empty
+/// tail has no coil yet, so the kind comes first and the operand list follows it —
+/// the type is what decides which targets the list may offer.
+fn open_coil_enter(app: &mut LincApp, section: usize, rung: usize) {
+    let sections = app.plc.current_pou_sections();
+    let row = sections
+        .get(section)
+        .and_then(|section| section.rungs.get(rung));
+    let named = row
+        .map(|rung| rung.has_coil() && rung.names_a_target())
+        .unwrap_or(false);
+    if named {
+        let var = row.map(|rung| rung.coil().var.clone()).unwrap_or_default();
+        app.plc.operand_cursor = coil_position(&app.plc, section, rung, &var);
+        app.plc.operand_filter.clear();
+        app.plc.coil_pick = Some((section, rung));
+    } else {
+        app.plc.coil_kind_pick = Some((section, rung));
+        app.plc.coil_kind_cursor = 0;
+    }
 }
 
 /// The row a symbol holds in the picker list, so the picker opens on the value

@@ -7789,8 +7789,7 @@ mod ld_editor_keys {
     }
 
     /// S and R name the latching kinds straight away, without cycling through the
-    /// other five: the coil keeps the operand it had. Choosing a kind opens the
-    /// operand list, which is where the keyboard goes next.
+    /// other five: the coil keeps the operand it had.
     #[test]
     fn the_latching_letters_set_the_kind_in_place() {
         let mut harness = harness_with(named_rung("run"));
@@ -7798,9 +7797,51 @@ mod ld_editor_keys {
         keys(&mut harness, vec![key(egui::Key::S)]);
         assert_eq!(rung(&harness).coil().kind, CoilKind::Set);
         assert_eq!(rung(&harness).coil().var, "run");
+        // S sets the kind and opens the operand list, so the keyboard belongs to
+        // the list until it is closed.
         assert_eq!(harness.app.plc.coil_pick, Some((0, 0)));
         keys(&mut harness, vec![key(egui::Key::Escape)]);
         keys(&mut harness, vec![key(egui::Key::R)]);
         assert_eq!(rung(&harness).coil().kind, CoilKind::Reset);
+    }
+
+    /// Enter on an empty tail asks for the kind, then for the operand: a coil that
+    /// is not there yet cannot be named before its kind is known.
+    #[test]
+    fn enter_on_an_empty_tail_picks_a_kind_and_then_an_operand() {
+        let mut harness = harness_with(named_rung(""));
+        harness.app.plc.cell_cursor = Some((0, 0, POSITIONS));
+        keys(&mut harness, vec![key(egui::Key::Enter)]);
+        assert_eq!(harness.app.plc.coil_kind_pick, Some((0, 0)));
+        assert!(harness.app.plc.coil_pick.is_none(), "operand comes second");
+        // Down past NEGATED to SET, Enter takes it and opens the operand list.
+        keys(&mut harness, vec![key(egui::Key::ArrowDown)]);
+        keys(&mut harness, vec![key(egui::Key::ArrowDown)]);
+        keys(&mut harness, vec![key(egui::Key::Enter)]);
+        assert!(harness.app.plc.coil_kind_pick.is_none(), "kind is chosen");
+        assert_eq!(rung(&harness).coil().kind, CoilKind::Set);
+        assert_eq!(
+            harness.app.plc.coil_pick,
+            Some((0, 0)),
+            "operand list opens"
+        );
+        // Enter takes the highlighted operand and it lands in the model.
+        keys(&mut harness, vec![key(egui::Key::Enter)]);
+        assert!(harness.app.plc.coil_pick.is_none(), "operand list closed");
+        assert_eq!(rung(&harness).coil().var, "run");
+        assert_eq!(rung(&harness).coil().kind, CoilKind::Set);
+    }
+
+    /// Escape leaves the tail as it was, with no coil and no window behind it.
+    #[test]
+    fn escape_leaves_the_empty_tail_empty() {
+        let mut harness = harness_with(named_rung(""));
+        harness.app.plc.cell_cursor = Some((0, 0, POSITIONS));
+        keys(&mut harness, vec![key(egui::Key::Enter)]);
+        assert!(harness.app.plc.coil_kind_pick.is_some());
+        keys(&mut harness, vec![key(egui::Key::Escape)]);
+        assert!(harness.app.plc.coil_kind_pick.is_none(), "window closed");
+        assert_eq!(rung(&harness).coil().var, "", "the rung is untouched");
+        assert_eq!(rung(&harness).coil().kind, CoilKind::Normal);
     }
 }

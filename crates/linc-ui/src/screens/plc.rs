@@ -1031,6 +1031,11 @@ pub struct PlcUi {
     pub operand_cursor: usize,
     /// The coil operand is being picked for this row.
     pub coil_pick: Option<(usize, usize)>,
+    /// The coil's kind is being picked for this row: the first step of naming a
+    /// coil that is not there yet. Choosing a kind opens the operand list.
+    pub coil_kind_pick: Option<(usize, usize)>,
+    /// The type list's cursor.
+    pub coil_kind_cursor: usize,
     /// A compare cell's condition and operands are being edited in one window.
     pub compare_edit: Option<CompareEdit>,
     /// A compute cell's operation, destination and operands are being edited.
@@ -1193,6 +1198,8 @@ impl Default for PlcUi {
             operand_filter: String::new(),
             operand_cursor: 0,
             coil_pick: None,
+            coil_kind_pick: None,
+            coil_kind_cursor: 0,
             compare_edit: None,
             compute_edit: None,
             scroll_to_pou: false,
@@ -2232,6 +2239,13 @@ impl PlcUi {
                         } else {
                             Some(row.cells.clone())
                         };
+                        if std::env::var_os("LINC_GRID_DEBUG").is_some() {
+                            eprintln!(
+                                "DBG delete: has_coil={} var={:?} pos={position}",
+                                row.has_coil(),
+                                row.coil().var
+                            );
+                        }
                         if position >= POSITIONS {
                             // Backspace on the coil slot removes the coil and leaves
                             // the rung's cells alone: the slot is a conductor again,
@@ -2938,6 +2952,7 @@ pub fn escape_closes_editor(plc: &PlcUi) -> bool {
     plc.picker.is_none()
         && plc.operand_pick.is_none()
         && plc.coil_pick.is_none()
+        && plc.coil_kind_pick.is_none()
         && plc.block_edit.is_none()
         && plc.compare_edit.is_none()
         && plc.compute_edit.is_none()
