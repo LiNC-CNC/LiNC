@@ -314,8 +314,12 @@ pub fn editor_keys(app: &mut LincApp, ui: &Ui, actions: &mut Vec<Action>) {
     }
     // Space holds a contact's bit for the preview: the key lives on the cell, so
     // no bank select or bit number is needed.
-    let space = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space));
-    if space && cursor.2 < POSITIONS {
+    // Space is the contact's hold key and the coil's kind key. Reading it here for
+    // the whole row consumed it before the coil branch could cycle the kind, so a
+    // coil had no way to change type at all.
+    let space = cursor.2 < POSITIONS
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+    if space {
         let operand = sections
             .get(cursor.0)
             .and_then(|section| section.rungs.get(cursor.1))

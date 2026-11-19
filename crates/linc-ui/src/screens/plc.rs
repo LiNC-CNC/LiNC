@@ -3029,6 +3029,7 @@ fn rail_entries(plc: &PlcUi) -> Vec<RailEntry> {
             entries.push(row("Rung comment", "Shift+C", false));
             entries.push(Heading("PREVIEW"));
             entries.push(row("Hold contact · cycle coil", "Space", false));
+            entries.push(row("Coil kind on the coil", "C X S R", false));
             entries.push(row("Drawing only", "no HAL", false));
             // The ladder page does not answer the start chord — `Ctrl+Enter` is
             // "new row" here — so the live values have to be reached through the

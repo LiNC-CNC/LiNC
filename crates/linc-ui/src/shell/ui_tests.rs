@@ -7774,4 +7774,33 @@ mod ld_editor_keys {
             "the rest of the row is still wire"
         );
     }
+
+    /// Space on the coil cycles its kind. It used to be dead: the contact's hold
+    /// key consumed Space for every cell, so the coil branch never saw it.
+    #[test]
+    fn space_on_the_coil_cycles_its_kind() {
+        let mut harness = harness_with(named_rung("run"));
+        harness.app.plc.cell_cursor = Some((0, 0, POSITIONS));
+        keys(&mut harness, vec![key(egui::Key::Space)]);
+        assert_eq!(rung(&harness).coil().kind, CoilKind::Set, "normal -> set");
+        keys(&mut harness, vec![key(egui::Key::Space)]);
+        assert_eq!(rung(&harness).coil().kind, CoilKind::Reset, "set -> reset");
+        assert_eq!(rung(&harness).coil().var, "run", "the operand is kept");
+    }
+
+    /// S and R name the latching kinds straight away, without cycling through the
+    /// other five: the coil keeps the operand it had. Choosing a kind opens the
+    /// operand list, which is where the keyboard goes next.
+    #[test]
+    fn the_latching_letters_set_the_kind_in_place() {
+        let mut harness = harness_with(named_rung("run"));
+        harness.app.plc.cell_cursor = Some((0, 0, POSITIONS));
+        keys(&mut harness, vec![key(egui::Key::S)]);
+        assert_eq!(rung(&harness).coil().kind, CoilKind::Set);
+        assert_eq!(rung(&harness).coil().var, "run");
+        assert_eq!(harness.app.plc.coil_pick, Some((0, 0)));
+        keys(&mut harness, vec![key(egui::Key::Escape)]);
+        keys(&mut harness, vec![key(egui::Key::R)]);
+        assert_eq!(rung(&harness).coil().kind, CoilKind::Reset);
+    }
 }
