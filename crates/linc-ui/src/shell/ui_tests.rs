@@ -6557,6 +6557,49 @@ fn painted_text(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
     texts
 }
 
+/// Every text the frame painted, with the rect it landed in and the clip it was
+/// painted under. A line outside its clip is on the canvas but not on the screen,
+/// which is exactly how a status line below the fold stays invisible.
+fn painted_text_clipped(output: &egui::FullOutput) -> Vec<(String, egui::Rect, egui::Rect)> {
+    fn walk(
+        shape: &egui::Shape,
+        clip: egui::Rect,
+        out: &mut Vec<(String, egui::Rect, egui::Rect)>,
+    ) {
+        match shape {
+            egui::Shape::Text(text) => out.push((
+                text.galley.text().to_string(),
+                egui::Rect::from_min_size(text.pos, text.galley.size()),
+                clip,
+            )),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, clip, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, clipped.clip_rect, &mut texts);
+    }
+    texts
+}
+
+/// The lowest line painted with this text. The shell's top strip and the
+/// workbench's status line both say `IDLE`; the workbench's is the lower one.
+fn lowest_text<'a>(
+    texts: &'a [(String, egui::Rect, egui::Rect)],
+    label: &str,
+    below: f32,
+) -> Option<&'a (String, egui::Rect, egui::Rect)> {
+    texts
+        .iter()
+        .filter(|(text, rect, _)| text == label && rect.min.y > below)
+        .max_by(|a, b| a.1.min.y.total_cmp(&b.1.min.y))
+}
+
 /// Type one character per frame, the way the panel delivers them.
 fn type_text(harness: &mut ProbeHarness, text: &str) {
     for character in text.chars() {
@@ -7568,4 +7611,92 @@ fn recovery_names_the_gate_that_blocks_it() {
     // A different axis is not the tripped one.
     let reason = app.limit_recovery_block("Y").expect("Y is not on a limit");
     assert!(reason.contains("Y IS NOT ON A LIMIT"), "{reason}");
+}
+
+/// The workbench is one window inside another: its status line belongs above the
+/// bottom edge and must not be carried away by the page's scroll. It used to be
+/// drawn at the end of the page content, so a content a few pixels taller than
+/// the clip put it below the fold at every window size.
+#[test]
+fn the_workbench_keeps_its_status_line_inside_the_window() {
+    let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+    harness.app.set_page(Page::Plc);
+    harness.app.plc.project = linc_plc_core::model::Project::example();
+    // A failed scan fills the status line's second row: that is the tallest it gets.
+    harness.app.plc.last_error = Some("io error: No such file or directory (os error 2)".into());
+    harness.app.plc.page = crate::screens::plc::PlcPage::Edit;
+    harness.app.overlay.plc_editor = true;
+    // A shorter window: the status line followed the content below the fold at every
+    // size, and this is the size a 1280x720 screen leaves for the workbench.
+    let input = || egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 660.0),
+        )),
+        ..Default::default()
+    };
+    // The overlay draws the frame after it opens, and a bottom panel remembers the
+    // height it laid out last frame.
+    let mut output = harness.frame_input(input());
+    for _ in 0..6 {
+        output = harness.frame_input(input());
+    }
+    let texts = painted_text_clipped(&output);
+    let visible = |prefix: &str| {
+        let (text, rect, clip) = texts
+            .iter()
+            .find(|(text, _, _)| text.starts_with(prefix))
+            .unwrap_or_else(|| panic!("`{prefix}` is painted"));
+        assert!(
+            inside(*clip, *rect),
+            "`{text}` is on screen, not below the fold: {rect:?} in {clip:?}"
+        );
+        *rect
+    };
+    let state = lowest_text(&texts, "IDLE", 300.0).expect("the status line is painted");
+    assert!(
+        inside(state.2, state.1),
+        "the status line is on screen, not below the fold: {:?} in {:?}",
+        state.1,
+        state.2
+    );
+    visible("ERROR");
+}
+
+/// The run page: the I/O panel is measured against the bottom edge, so both of
+/// its rows are on screen above the status line. With a fixed reserve for the
+/// panel the out row and the status line fell under the window edge.
+#[test]
+fn the_run_page_keeps_its_io_panel_above_the_status_line() {
+    let mut harness = ProbeHarness::ready(PanelMode::Auto, false, true, MachinePower::On);
+    harness.app.set_page(Page::Plc);
+    harness.app.plc.project = linc_plc_core::model::Project::example();
+    harness.app.plc.last_error = Some("io error: No such file or directory (os error 2)".into());
+    harness.app.plc.page = crate::screens::plc::PlcPage::Sim;
+    harness.app.overlay.plc_editor = true;
+    let mut output = harness.frame_full(Vec::new());
+    for _ in 0..6 {
+        output = harness.frame_full(Vec::new());
+    }
+    let texts = painted_text_clipped(&output);
+    let visible = |label: &str| {
+        let (text, rect, clip) = texts
+            .iter()
+            .find(|(text, _, _)| text == label)
+            .unwrap_or_else(|| panic!("`{label}` is painted"));
+        assert!(
+            inside(*clip, *rect),
+            "`{text}` is on screen, not below the fold: {rect:?} in {clip:?}"
+        );
+        *rect
+    };
+    visible("IN");
+    visible("OUT");
+    let state = lowest_text(&texts, "IDLE", 300.0).expect("the status line is painted");
+    assert!(
+        inside(state.2, state.1),
+        "the status line is on screen: {:?} in {:?}",
+        state.1,
+        state.2
+    );
 }

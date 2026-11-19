@@ -2769,9 +2769,6 @@ pub enum PlcPage {
     Service,
 }
 
-/// The page's status bar height, below the content.
-const STATUS_BAR_HEIGHT: f32 = 22.0;
-
 /// The PLC page is the launcher. The application is keyboard-driven, so the
 /// workbench itself is a popped-out overlay that owns every key; the page keeps
 /// the project, the service and the way in.
@@ -3435,27 +3432,30 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
     {
         let plc = &mut app.plc;
 
-        let height = (ui.available_height() - STATUS_BAR_HEIGHT - 4.0).max(160.0);
+        // The page and the rail share what the window has left over: the status
+        // line is drawn below the scrolling content by `draw_plc_editor`, so no page
+        // can scroll it out of sight and this never needs a reserve of its own.
+        let band = ui.available_height().max(160.0);
         // A fixed column for the shortcuts and the rest for the page: without
         // allocating both sizes the page took the whole width and drew over the
         // strip.
         ui.horizontal_top(|ui| {
             // Two columns need room for the longest label beside its chord
             // ("Negated contact" with "X"), so the pane widens with them.
-            let nav_width = if rail_total_height(plc) > height {
+            let nav_width = if rail_total_height(plc) > band {
                 408.0
             } else {
                 196.0
             };
             ui.allocate_ui_with_layout(
-                egui::vec2(nav_width, height),
+                egui::vec2(nav_width, band),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| shortcut_nav(plc, ui),
             );
             ui.separator();
             let page_width = (ui.available_width() - 8.0).max(320.0);
             ui.allocate_ui_with_layout(
-                egui::vec2(page_width, height),
+                egui::vec2(page_width, band),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     let banner = if let Some(error) = &plc.last_error {
@@ -3473,15 +3473,19 @@ pub fn editor(app: &mut LincApp, ui: &mut Ui) {
                                 .color(colour),
                         );
                     }
+                    // The page fits the band it was given: the scroll area is the
+                    // fallback for a page that cannot, never the reason the status
+                    // bar leaves the window.
+                    let height = ui.available_height();
                     egui::ScrollArea::vertical()
                         .id_salt("plc-page")
                         .max_width(page_width)
+                        .max_height(height)
                         .auto_shrink([false, false])
                         .show(ui, |ui| page_body(plc, ui, height, &mut actions));
                 },
             );
         });
-        status_bar(plc, ui);
     }
 
     // The other modal windows last: egui paints in call order, so a window drawn
@@ -3937,6 +3941,7 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
         .current_pou()
         .map(|pou| pou.language)
         .unwrap_or(PouLanguage::Ld);
+    let top = ui.cursor().min.y;
     ui.horizontal(|ui| {
         if let Some(pou) = plc.current_pou() {
             ui.label(
@@ -3961,37 +3966,37 @@ fn edit_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action
     }
     ui.add_space(2.0);
     // The editor owns the pane: the properties card and its POU LIST button are
-    // gone, so the ladder, IL text and FBD grid use the whole width.
+    // gone, so the ladder, IL text and FBD grid use the whole width. The body is
+    // what the header lines above did not take, measured rather than guessed: a
+    // fixed `height - 32` left the column taller than the page whenever the
+    // preview line was up, and the page itself then scrolled instead.
+    // What the header lines took, plus the row spacing egui will add before the
+    // body: leaving the spacing out is what made the page a few pixels taller than
+    // the band and put a scrollbar on the page at every window size.
+    let used = (ui.cursor().min.y - top).max(0.0) + ui.spacing().item_spacing.y;
+    let body_height = (height - used).max(120.0);
     let left_width = ui.available_width().max(220.0);
-    let body_height = (height - 32.0).max(120.0);
-    ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            vec2(left_width, body_height),
-            egui::Layout::top_down(Align::Min),
-            |ui| match language {
-                PouLanguage::Ld => {
-                    // Clipped to its column: without a bounded scroll area the
-                    // ladder drew past it and under the properties card.
-                    let sections = plc.current_pou_sections();
-                    egui::ScrollArea::both()
-                        .id_salt("plc-ladder-clip")
-                        .max_width(left_width)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            // Keep the cell cursor on screen: the page is taller
-                            // than the window on a long program, and a cursor
-                            // that walked off the fold could not be seen while
-                            // keys moved it.
-                            let follow = plc.scroll_to_cursor;
-                            plc.scroll_to_cursor = false;
-                            ladder_body(plc, &sections, ui, body_height, actions, follow);
-                        });
-                }
-                PouLanguage::Il => il_editor(plc, ui, body_height),
-                PouLanguage::Fbd => fbd_editor(plc, ui, body_height, actions),
-            },
-        );
-    });
+    ui.allocate_ui_with_layout(
+        vec2(left_width, body_height),
+        egui::Layout::top_down(Align::Min),
+        |ui| match language {
+            PouLanguage::Ld => {
+                // One scroll area for the ladder, and it is the ladder's own: the
+                // clip around it drew a second pair of bars and, being unbounded
+                // inside the page's own scroll area, grew to the content height
+                // and pushed the status bar out of the window.
+                let sections = plc.current_pou_sections();
+                // Keep the cell cursor on screen: the page is taller than the
+                // window on a long program, and a cursor that walked off the fold
+                // could not be seen while keys moved it.
+                let follow = plc.scroll_to_cursor;
+                plc.scroll_to_cursor = false;
+                ladder_body(plc, &sections, ui, actions, follow);
+            }
+            PouLanguage::Il => il_editor(plc, ui, body_height),
+            PouLanguage::Fbd => fbd_editor(plc, ui, body_height, actions),
+        },
+    );
 }
 
 /// The operand a line refers to and its live bit value, if the snapshot has one.
@@ -5723,28 +5728,31 @@ fn sim_page(plc: &mut PlcUi, ui: &mut Ui, height: f32, actions: &mut Vec<Action>
         .current_pou()
         .map(|pou| pou.language)
         .unwrap_or(PouLanguage::Ld);
-    // An IL or FBD monitor carries its own legend above the scroll area, so it
-    // needs a taller reserve or the input panel lands under the window edge.
-    let reserve = if language == PouLanguage::Ld {
-        132.0
-    } else {
-        210.0
-    };
-    let monitor = (height - reserve).max(180.0);
+    let band = egui::vec2(ui.available_width(), height);
     let sections = plc.current_pou_sections();
-    egui::ScrollArea::vertical()
-        .id_salt("plc-sim-monitor")
-        .max_height(monitor)
-        .auto_shrink([false, false])
-        .show(ui, |ui| match language {
-            PouLanguage::Ld => {
-                ladder_body(plc, &sections, ui, monitor, actions, false);
-            }
-            PouLanguage::Il => il_editor(plc, ui, monitor),
-            PouLanguage::Fbd => fbd_editor(plc, ui, monitor, actions),
-        });
-    ui.add_space(4.0);
-    sim_view(plc, ui, actions);
+    ui.allocate_ui_with_layout(band, egui::Layout::top_down(egui::Align::Min), |ui| {
+        // The I/O panel is measured against the bottom edge and the monitor takes
+        // what is left above it. A fixed reserve for the panel was a guess, and a
+        // program with many bound points made the guess short: the panel's rows
+        // then sat under the window edge, which is where the status indicators
+        // went.
+        egui::Panel::bottom("plc-sim-io")
+            .show_separator_line(false)
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| sim_view(plc, ui, actions));
+        let monitor = ui.available_height();
+        egui::ScrollArea::vertical()
+            .id_salt("plc-sim-monitor")
+            .max_height(monitor)
+            .auto_shrink([false, false])
+            .show(ui, |ui| match language {
+                PouLanguage::Ld => {
+                    ladder_body(plc, &sections, ui, actions, false);
+                }
+                PouLanguage::Il => il_editor(plc, ui, monitor),
+                PouLanguage::Fbd => fbd_editor(plc, ui, monitor, actions),
+            });
+    });
 }
 
 /// Why this text cannot be watched, in the words of the list. The compiler is
@@ -6586,6 +6594,13 @@ fn pou_edit_dialog(plc: &mut PlcUi, ctx: &egui::Context, actions: &mut Vec<Actio
     }
 }
 
+/// The workbench's status line, drawn by the overlay below its scrolled content.
+/// It is the window's line, not the page's: a page that grew taller than the clip
+/// used to take the line with it, and it sat under the bottom edge for good.
+pub fn workbench_status(app: &LincApp, ui: &mut Ui) {
+    status_bar(&app.plc, ui);
+}
+
 /// Copy the marked block (or the cell under the cursor) without a keyboard.
 fn status_bar(plc: &PlcUi, ui: &mut Ui) {
     // The cell under the cursor wins; with no
@@ -6773,7 +6788,6 @@ fn ladder_body(
     plc: &mut PlcUi,
     sections: &[linc_plc_core::model::Section],
     ui: &mut Ui,
-    height: f32,
     actions: &mut Vec<Action>,
     follow_cursor: bool,
 ) -> Option<egui::Rect> {
@@ -6786,9 +6800,14 @@ fn ladder_body(
         return None;
     }
     let mut cursor_rect = None;
+    // The ladder is exactly as large as the room it was given, and it is the only
+    // scroll area: the page around it fits the band, so these two bars are the
+    // only ones that ever appear.
+    let room = ui.available_size();
     egui::ScrollArea::both()
         .id_salt("plc-ladder")
-        .max_height((height - 6.0).max(80.0))
+        .max_width(room.x.max(200.0))
+        .max_height(room.y.max(80.0))
         .auto_shrink([false, false])
         .show(ui, |ui| {
             // The rungs stack themselves: `grid_rung` is exactly CELL_HEIGHT tall

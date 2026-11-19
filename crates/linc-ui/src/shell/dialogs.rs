@@ -353,6 +353,15 @@ impl LincApp {
                                 // outside the visible area.
                                 ui.set_min_size(screen.size() - egui::vec2(20.0, 20.0));
                                 ui.set_max_size(screen.size() - egui::vec2(20.0, 20.0));
+                                // The status line is the window's, not the page's:
+                                // it is placed before the scroll area, so the page
+                                // cannot carry it below the bottom edge, which is
+                                // where it lived whenever the content was a few
+                                // pixels taller than the clip.
+                                egui::Panel::bottom("plc-workbench-status")
+                                    .show_separator_line(false)
+                                    .frame(egui::Frame::NONE)
+                                    .show(ui, |ui| crate::screens::plc::workbench_status(self, ui));
                                 egui::ScrollArea::vertical()
                                     .id_salt("plc-editor-scroll")
                                     .auto_shrink([false, false])
