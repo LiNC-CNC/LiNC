@@ -411,6 +411,44 @@ fn resolve_window_mode(mode: &str, machine_kind: &str) -> WindowMode {
     }
 }
 
+/// The window floor, in **physical** pixels: the shell is designed at 1280x720 and
+/// a window may not be made smaller than that design, whatever the shell's text
+/// scale happens to be.
+///
+/// The minimum used to be a size hint in *points*, and the shell scales itself from
+/// the viewport (`theme::apply_design_zoom`), so the hint shrank with the window it
+/// was supposed to bound: drag once below 720p and the next frame's floor was lower
+/// again, and a window manager that does not clamp to the hint let it through. The
+/// floor is computed in physical pixels from the current pixels-per-point, so the
+/// shell's own scaling cannot move it.
+const MIN_WINDOW: [f32; 2] = [1280.0, 720.0];
+
+/// The minimum inner size in points for this pixels-per-point and monitor. A
+/// monitor smaller than the design caps the floor to it: asking for more than the
+/// screen leaves the window hanging off the edge, and the shell scales down for
+/// that panel instead.
+fn min_inner_points(pixels_per_point: f32, monitor: Option<[f32; 2]>) -> [f32; 2] {
+    let pp = if pixels_per_point > 0.05 {
+        pixels_per_point
+    } else {
+        1.0
+    };
+    let mut floor = MIN_WINDOW;
+    if let Some(monitor) = monitor {
+        floor[0] = floor[0].min(monitor[0]);
+        floor[1] = floor[1].min(monitor[1]);
+    }
+    [floor[0] / pp, floor[1] / pp]
+}
+
+/// Whether the window is smaller than the floor, in physical pixels. The tolerance
+/// keeps a rounding-sized difference from asking the window manager again and
+/// again.
+fn window_under_floor(physical: [f32; 2], monitor: Option<[f32; 2]>) -> bool {
+    let floor = min_inner_points(1.0, monitor);
+    physical[0] + 0.5 < floor[0] || physical[1] + 0.5 < floor[1]
+}
+
 /// HAL pin the cabinet's machine-on switch drives; see the machine's post-GUI
 /// file, which extends `sig_rio_machine-on-switch_bit` into it.
 #[cfg(feature = "linuxcnc")]
@@ -438,6 +476,12 @@ struct MachineOffGuard {
     /// Frames spent re-asserting the window state; bounded so a compositor that
     /// disagrees does not get a command every frame forever.
     window_attempts: u8,
+    /// The minimum inner size in points already sent, so the hint is re-sent only
+    /// when the pixels-per-point moves it.
+    min_inner: Option<[f32; 2]>,
+    /// Frames spent putting a window back above the floor, bounded for the same
+    /// reason as `window_attempts`.
+    floor_attempts: u8,
 }
 
 impl MachineOffGuard {
@@ -464,6 +508,8 @@ impl MachineOffGuard {
             last: None,
             window,
             window_attempts: 0,
+            min_inner: None,
+            floor_attempts: 0,
         }
     }
 
@@ -507,6 +553,44 @@ impl MachineOffGuard {
         self.last = Some(now);
     }
 
+    /// Keep the window at or above the 1280x720 design floor.
+    ///
+    /// Two commands, because a size hint alone does not hold: the hint tells a
+    /// window manager where to stop, and the inner size puts the window back when
+    /// one that does not clamp — or a drag that got away — left it smaller.
+    fn hold_window_floor(&mut self, ctx: &egui::Context) {
+        let pp = ctx.pixels_per_point();
+        let monitor = ctx.input(|input| input.viewport().monitor_size.map(|size| [size.x, size.y]));
+        let wanted = min_inner_points(pp, monitor);
+        let changed = self
+            .min_inner
+            .map(|last| (last[0] - wanted[0]).abs() > 0.5 || (last[1] - wanted[1]).abs() > 0.5)
+            .unwrap_or(true);
+        if changed {
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(
+                wanted[0], wanted[1],
+            )));
+            self.min_inner = Some(wanted);
+        }
+        let physical = {
+            let rect = ctx.input(|input| input.viewport_rect());
+            [rect.width() * pp, rect.height() * pp]
+        };
+        if !window_under_floor(physical, monitor) {
+            self.floor_attempts = 0;
+            return;
+        }
+        // A monitor that cannot hold the design gets the floor capped to it, so this
+        // settles once the command lands instead of fighting the window manager.
+        if self.floor_attempts >= 30 {
+            return;
+        }
+        self.floor_attempts += 1;
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+            wanted[0], wanted[1],
+        )));
+    }
+
     /// A build without the HAL reader has no machine-on switch to watch.
     #[cfg(not(feature = "linuxcnc"))]
     fn poll_machine_on(&mut self) {}
@@ -535,6 +619,7 @@ impl eframe::App for MachineOffGuard {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.poll_machine_on();
         self.reassert_window_state(ui.ctx());
+        self.hold_window_floor(ui.ctx());
         eframe::App::ui(&mut self.inner, ui, frame);
     }
 }
@@ -544,6 +629,57 @@ mod machine_off_tests {
     #[cfg(feature = "linuxcnc")]
     use super::{machine_off_edge, machine_off_ends_session};
     use super::{resolve_window_mode, WindowMode};
+
+    use super::{min_inner_points, window_under_floor};
+
+    /// The floor is 1280x720 in physical pixels whatever the shell's scale is. As a
+    /// point size it used to be a flat 1280x720, so at a scale other than 1.0 the
+    /// physical floor moved with it — and because the shell scales itself from the
+    /// viewport, the floor followed the window down.
+    #[test]
+    fn the_window_floor_is_720p_physical_at_any_scale() {
+        assert_eq!(min_inner_points(1.0, None), [1280.0, 720.0]);
+        for pp in [1.0_f32, 1.448, 2.0, 0.5] {
+            let points = min_inner_points(pp, None);
+            assert!(
+                (points[0] * pp - 1280.0).abs() < 0.01 && (points[1] * pp - 720.0).abs() < 0.01,
+                "at {pp} the points {points:?} must come back to 1280x720 physical"
+            );
+        }
+        // A nonsense pixels-per-point falls back to 1.0 rather than dividing by it.
+        assert_eq!(min_inner_points(0.0, None), [1280.0, 720.0]);
+    }
+
+    /// A panel smaller than the design gets its own size as the floor: asking for
+    /// more than the screen leaves the window hanging off the edge.
+    #[test]
+    fn a_small_monitor_caps_the_floor_to_itself() {
+        assert_eq!(
+            min_inner_points(1.0, Some([1024.0, 600.0])),
+            [1024.0, 600.0]
+        );
+        // A monitor wider than the design leaves the design alone.
+        assert_eq!(
+            min_inner_points(1.0, Some([1920.0, 1080.0])),
+            [1280.0, 720.0]
+        );
+    }
+
+    /// The sizes that count as too small: either side below the floor, and not a
+    /// rounding-sized difference.
+    #[test]
+    fn a_window_under_the_floor_is_caught() {
+        assert!(window_under_floor([900.0, 500.0], None));
+        assert!(window_under_floor([1600.0, 700.0], None), "height alone");
+        assert!(window_under_floor([1200.0, 900.0], None), "width alone");
+        assert!(!window_under_floor([1280.0, 720.0], None));
+        assert!(!window_under_floor([1920.0, 1080.0], None));
+        assert!(
+            !window_under_floor([1279.8, 719.8], None),
+            "rounding is not a size"
+        );
+        assert!(!window_under_floor([900.0, 500.0], Some([900.0, 500.0])));
+    }
 
     #[test]
     fn window_mode_resolves_auto_by_machine_kind() {
