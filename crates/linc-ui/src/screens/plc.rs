@@ -6453,85 +6453,151 @@ fn draw_remote_trend(plc: &PlcUi, ui: &mut Ui) {
 /// The manual's 16 input bit positions and the output row: a bound slot shows the
 /// operand name and its value, an unbound one is drawn disabled. The selected byte
 /// has the brighter paper, and a click toggles a bound input.
-fn sim_bit_panel(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
-    for (title, direction) in [("IN", IoDirection::In), ("OUT", IoDirection::Out)] {
-        let points = plc
-            .project
+/// The lamp of the run strip is this wide, and the direction's own cell next to it.
+const BIT_TILE: [f32; 2] = [38.0, 36.0];
+const DIR_CELL: [f32; 2] = [28.0, 36.0];
+const BIT_GAP: f32 = 2.0;
+
+/// Whether both directions fit on one line: `IN` tiles then `OUT` tiles, with the
+/// direction's own cell in front of each run. Two rows otherwise — a run split across
+/// the fold reads worse than two rows, so the choice is per direction, not per tile.
+pub(crate) fn strip_fits_one_line(width: f32, ins: usize, outs: usize) -> bool {
+    let run = |count: usize| {
+        if count == 0 {
+            0.0
+        } else {
+            DIR_CELL[0] + count as f32 * BIT_TILE[0]
+        }
+    };
+    let both = ins > 0 && outs > 0;
+    let needed = run(ins) + run(outs) + if both { BIT_GAP } else { 0.0 };
+    needed <= width
+}
+
+pub(crate) fn sim_bit_panel(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {
+    let points = |direction: IoDirection| {
+        plc.project
             .io
             .iter()
             .filter(|point| point.direction == direction)
-            .collect::<Vec<_>>();
-        // An empty slot says nothing and took a row of space: only bound points
-        // are drawn, numbered by their position among their own direction.
-        if points.is_empty() {
-            continue;
-        }
+            .collect::<Vec<_>>()
+    };
+    let ins = points(IoDirection::In);
+    let outs = points(IoDirection::Out);
+    if ins.is_empty() && outs.is_empty() {
+        return;
+    }
+    // Inputs and outputs share one line and only take two when the width runs out:
+    // two fixed rows halved the strip for no reason and pushed the out row towards
+    // the window edge.
+    let one_line = strip_fits_one_line(ui.available_width(), ins.len(), outs.len());
+    ui.spacing_mut().item_spacing = egui::vec2(BIT_GAP, BIT_GAP);
+    if one_line {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            ui.allocate_ui_with_layout(
-                egui::vec2(24.0, 36.0),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    ui.label(
-                        RichText::new(title)
-                            .monospace()
-                            .size(theme::font_size(8.0))
-                            .color(theme::MUTED),
-                    );
-                },
-            );
-            for (index, point) in points.iter().enumerate() {
-                let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(38.0, 36.0), egui::Sense::click());
-                ui.painter().rect_filled(rect, 2.0, theme::PANEL);
-                let value = plc
-                    .vars
-                    .iter()
-                    .find(|var| var.name == point.name)
-                    .map(|var| var.value)
-                    .unwrap_or(false);
-                let forced = plc.is_forced(&point.name);
-                let colour = if value {
-                    if direction == IoDirection::In {
-                        theme::C4
-                    } else {
-                        theme::C5
-                    }
-                } else {
-                    theme::MUTED
-                };
-                // Bit number above, lamp in the middle, name below it: the label
-                // used to be painted across the lamp.
-                ui.painter().text(
-                    egui::pos2(rect.center().x, rect.top() + 7.0),
-                    Align2::CENTER_CENTER,
-                    format!("{index}"),
-                    FontId::monospace(7.0),
-                    theme::MUTED,
-                );
-                ui.painter().circle_filled(
-                    egui::pos2(rect.center().x, rect.top() + 17.0),
-                    3.5,
-                    colour,
-                );
-                ui.painter().text(
-                    egui::pos2(rect.center().x, rect.bottom() - 2.0),
-                    Align2::CENTER_BOTTOM,
-                    if forced {
-                        format!("F {}", point.name)
-                    } else {
-                        point.name.clone()
-                    },
-                    FontId::monospace(6.5),
-                    colour,
-                );
-                if direction == IoDirection::In && response.clicked() {
-                    actions.push(Action::Force(point.name.clone(), !value));
-                }
+            ui.spacing_mut().item_spacing = egui::vec2(BIT_GAP, BIT_GAP);
+            for (title, direction, group) in [
+                ("IN", IoDirection::In, &ins),
+                ("OUT", IoDirection::Out, &outs),
+            ] {
+                strip_direction(ui, plc, title, direction, group, actions);
             }
         });
-        ui.add_space(2.0);
+    } else {
+        for (title, direction, group) in [
+            ("IN", IoDirection::In, &ins),
+            ("OUT", IoDirection::Out, &outs),
+        ] {
+            if group.is_empty() {
+                continue;
+            }
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(BIT_GAP, BIT_GAP);
+                strip_direction(ui, plc, title, direction, group, actions);
+            });
+        }
     }
+}
+
+/// One direction of the run strip: its label and one lamp per bound point, numbered by
+/// their position among their own direction.
+fn strip_direction(
+    ui: &mut Ui,
+    plc: &PlcUi,
+    title: &str,
+    direction: IoDirection,
+    points: &[&linc_plc_core::IoPoint],
+    actions: &mut Vec<Action>,
+) {
+    if points.is_empty() {
+        return;
+    }
+    ui.allocate_ui_with_layout(
+        egui::vec2(DIR_CELL[0], DIR_CELL[1]),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.label(
+                RichText::new(title)
+                    .monospace()
+                    .size(theme::font_size(8.0))
+                    .color(theme::MUTED),
+            );
+        },
+    );
+    for (index, point) in points.iter().enumerate() {
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(BIT_TILE[0], BIT_TILE[1]), egui::Sense::click());
+        ui.painter().rect_filled(rect, 2.0, theme::PANEL);
+        let value = plc
+            .vars
+            .iter()
+            .find(|var| var.name == point.name)
+            .map(|var| var.value)
+            .unwrap_or(false);
+        let forced = plc.is_forced(&point.name);
+        let colour = if value {
+            if direction == IoDirection::In {
+                theme::C4
+            } else {
+                theme::C5
+            }
+        } else {
+            theme::MUTED
+        };
+        paint_bit_tile(ui.painter(), rect, index, point, forced, colour);
+        if direction == IoDirection::In && response.clicked() {
+            actions.push(Action::Force(point.name.clone(), !value));
+        }
+    }
+}
+
+/// One lamp of the run strip: bit number above, lamp in the middle, name below it.
+fn paint_bit_tile(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    index: usize,
+    point: &linc_plc_core::IoPoint,
+    forced: bool,
+    colour: egui::Color32,
+) {
+    painter.text(
+        egui::pos2(rect.center().x, rect.top() + 7.0),
+        Align2::CENTER_CENTER,
+        format!("{index}"),
+        FontId::monospace(7.0),
+        theme::MUTED,
+    );
+    painter.circle_filled(egui::pos2(rect.center().x, rect.top() + 17.0), 3.5, colour);
+    painter.text(
+        egui::pos2(rect.center().x, rect.bottom() - 2.0),
+        Align2::CENTER_BOTTOM,
+        if forced {
+            format!("F {}", point.name)
+        } else {
+            point.name.clone()
+        },
+        FontId::monospace(6.5),
+        colour,
+    );
 }
 
 fn sim_view(plc: &PlcUi, ui: &mut Ui, actions: &mut Vec<Action>) {

@@ -7927,3 +7927,63 @@ mod ld_editor_keys {
         assert_eq!(rung(&harness).coil().kind, CoilKind::Normal);
     }
 }
+
+/// The run strip: inputs and outputs share one line and take two rows only when the
+/// width cannot hold both. Two fixed rows halved the strip and pushed the out row
+/// towards the window edge.
+#[test]
+fn the_run_strip_puts_inputs_and_outputs_on_one_line() {
+    // The decision is arithmetic on the tile widths, so it is checked directly...
+    assert!(crate::screens::plc::strip_fits_one_line(1200.0, 6, 6));
+    assert!(!crate::screens::plc::strip_fits_one_line(300.0, 6, 6));
+    assert!(!crate::screens::plc::strip_fits_one_line(60.0, 1, 1));
+    // ...and a direction with no points costs no row and no gap.
+    assert!(crate::screens::plc::strip_fits_one_line(80.0, 0, 1));
+    assert!(crate::screens::plc::strip_fits_one_line(80.0, 1, 0));
+
+    // On screen: both direction labels on one line when there is room, stacked when
+    // there is not.
+    let rows_at = |width: f32| {
+        let mut plc = crate::screens::plc::PlcUi::default();
+        let mut project = linc_plc_core::model::Project::example();
+        project.io = (0..6)
+            .map(|index| {
+                linc_plc_core::IoPoint::new(&format!("in{index}"), linc_plc_core::IoDirection::In)
+            })
+            .chain((0..6).map(|index| {
+                linc_plc_core::IoPoint::new(&format!("out{index}"), linc_plc_core::IoDirection::Out)
+            }))
+            .collect();
+        plc.project = project;
+        let ctx = egui::Context::default();
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 200.0));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            crate::screens::plc::sim_bit_panel(&plc, &mut child, &mut actions);
+        });
+        output.textures_delta.clear();
+        painted_text(&output)
+            .into_iter()
+            .filter(|(text, _)| text == "IN" || text == "OUT")
+            .collect::<Vec<_>>()
+    };
+    let y = |rows: &[(String, egui::Rect)], label: &str| {
+        rows.iter()
+            .find(|(text, _)| text == label)
+            .unwrap_or_else(|| panic!("`{label}` is painted: {rows:?}"))
+            .1
+            .center()
+            .y
+    };
+    let wide = rows_at(1200.0);
+    assert!(
+        (y(&wide, "IN") - y(&wide, "OUT")).abs() < 1.0,
+        "IN and OUT share a line when there is room: {wide:?}"
+    );
+    let narrow = rows_at(300.0);
+    assert!(
+        y(&narrow, "OUT") > y(&narrow, "IN"),
+        "OUT takes the second row when the width runs out: {narrow:?}"
+    );
+}
