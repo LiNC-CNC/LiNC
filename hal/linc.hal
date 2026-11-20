@@ -16,7 +16,7 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint,and2.spindle_cw_change,and2.spindle_ccw_change,and2.spindle_sp_change
+loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint,and2.spindle_cw_change,and2.spindle_ccw_change,and2.spindle_sp_change,and2.jog-teleop-homed-xy,and2.jog-teleop-homed-all,and2.jog-teleop,and2.coolant-off,and2.lube-off
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset, or2.machine_off, or2.probe_sim3d) are created here and wired
@@ -72,6 +72,11 @@ addf and2.zp_step_joint servo-thread
 addf and2.spindle_cw_change servo-thread
 addf and2.spindle_ccw_change servo-thread
 addf and2.spindle_sp_change servo-thread
+addf and2.coolant-off servo-thread
+addf and2.lube-off servo-thread
+addf and2.jog-teleop-homed-xy servo-thread
+addf and2.jog-teleop-homed-all servo-thread
+addf and2.jog-teleop servo-thread
 addf not.bdt servo-thread
 addf not.coolant servo-thread
 addf not.is_joint servo-thread
@@ -158,6 +163,9 @@ net cycle-run and2.cycle_run.out => halui.program.run
 
 net cycle-resume and2.cycle_resume.out => halui.program.resume
 
+# linc-panel normalizes the panel bit: cnc_panel.cycle_stop is TRUE only while
+# the key is pressed (the hardware key itself is normally closed). halui pauses
+# on the rising edge, so this fires on press, not on release.
 net cycle-stop cnc_panel.cycle_stop => or2.pause.in1
 net sbk-mode toggle.sbk.out => or2.pause.in0 cnc_panel.led_sbk
 net pause-request or2.pause.out => halui.program.pause
@@ -217,14 +225,22 @@ net spindle-reverse halui.spindle.0.runs-backward => cnc_panel.led_spd_ccw
 # ---------------------------------------------------------------------------
 # Coolant, lube, work lamp
 # ---------------------------------------------------------------------------
+# The off command is level TRUE until its toggle is switched on, and halui
+# sends it on the rising edge. Ungated, that fired EMC_COOLANT_FLOOD_OFF and
+# EMC_LUBE_OFF at every HAL load while the machine was still in E-stop. Gate
+# it on machine-on: an unpowered machine has nothing to switch off.
 net coolant-button cnc_panel.coolant => toggle.coolant.in
 net coolant-on toggle.coolant.out => halui.flood.on not.coolant.in
-net coolant-off not.coolant.out => halui.flood.off
+net coolant-off-in not.coolant.out => and2.coolant-off.in0
+net sig_halui_machine_is-on => and2.coolant-off.in1
+net coolant-off and2.coolant-off.out => halui.flood.off
 net coolant-status halui.flood.is-on => cnc_panel.led_coolant
 
 net lube-button cnc_panel.lube => toggle.lube.in
 net lube-on toggle.lube.out => halui.lube.on not.lube.in
-net lube-off not.lube.out => halui.lube.off
+net lube-off-in not.lube.out => and2.lube-off.in0
+net sig_halui_machine_is-on => and2.lube-off.in1
+net lube-off and2.lube-off.out => halui.lube.off
 net lube-status halui.lube.is-on => cnc_panel.led_lub
 
 net worklamp-button cnc_panel.worklamp => toggle.worklamp.in
@@ -235,12 +251,12 @@ net worklamp-on toggle.worklamp.out => rio.worklamp.bit cnc_panel.led_worklamp
 #
 # Motion runs either in joint/FREE mode, where `halui.joint.N.plus/minus` jog
 # (and work unhomed), or in teleop, where only `halui.axis.L.plus/minus` do —
-# and those are refused until every axis is homed. Which mode you get is not
-# ours to decide: homing leaves the machine in teleop here. So the keys drive
-# both sets of pins, gated by `halui.mode.is-teleop`, and whichever mode motion
-# is in receives the jog it accepts. Sending a joint jog in teleop is refused
-# with a message that only reaches the console, which is what made this look
-# like dead keys.
+# and those are refused until every axis is homed. Homing leaves the machine in
+# teleop, and the jog positions request teleop again when selected (see "Jog
+# modes request teleop motion" below), so the keys drive both sets of pins,
+# gated by `halui.mode.is-teleop`, and whichever mode motion is in receives the
+# jog it accepts. Sending a joint jog in teleop is refused with a message that
+# only reaches the console, which is what made this look like dead keys.
 #
 # `halui.joint.jog-speed` and `halui.axis.jog-speed` both default to 0, so both
 # are fed from `linc.jog-speed` in the post-GUI file.
@@ -354,6 +370,27 @@ net machine-estop halui.estop.is-activated => cnc_panel.led_mc_alarm
 net axis-x-homed halui.joint.0.is-homed => cnc_panel.led_x
 net axis-y-homed halui.joint.1.is-homed => cnc_panel.led_y
 net axis-z-homed halui.joint.2.is-homed => cnc_panel.led_z
+
+# ---------------------------------------------------------------------------
+# Jog modes request teleop motion
+# ---------------------------------------------------------------------------
+# Axis-level jog (`axis.L.jog-enable` with `jog-counts`, which is how the panel
+# keys jog once the machine is homed and how a handwheel wired to the axis jog
+# pins moves it) exists only in teleop: `motion.teleop-mode` is documented as
+# "axis coordinate jogging available". Homing leaves motion in teleop, but a
+# program run leaves it in coordinated mode, and leaving AUTO does not switch
+# it back, so every jog input is refused until the machine is homed again.
+# `halui.mode.teleop` is HAL's coordinated-jog request, so the jog positions
+# (JOG, INC and MPG) ask for it. The request is gated on all joints homed
+# because motion refuses teleop before homing -- and an unhomed machine needs
+# joint/FREE jog, which homing later leaves in teleop by itself.
+net axis-x-homed => and2.jog-teleop-homed-xy.in0
+net axis-y-homed => and2.jog-teleop-homed-xy.in1
+net jog-teleop-homed-xy and2.jog-teleop-homed-xy.out => and2.jog-teleop-homed-all.in0
+net axis-z-homed => and2.jog-teleop-homed-all.in1
+net jog-teleop-homed and2.jog-teleop-homed-all.out => and2.jog-teleop.in0
+net mode-jog-any => and2.jog-teleop.in1
+net jog-teleop-request and2.jog-teleop.out => halui.mode.teleop
 
 net rapid-button cnc_panel.rapid => cnc_panel.led_rapid
 net tool-change => cnc_panel.led_chuck
