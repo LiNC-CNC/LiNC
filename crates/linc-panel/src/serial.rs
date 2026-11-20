@@ -14,7 +14,7 @@ use serialport::{DataBits, Parity, SerialPort, StopBits};
 use crate::{
     base_capabilities, buttons, decode_feed_override, decode_mode_field, decode_rapid_override,
     decode_spindle_override, extract_button_state, led_state_to_bytes, make_snapshot, modbus_crc16,
-    PanelDisplay, PanelDriver, PanelError, PanelOutputs,
+    state_driven_leds, PanelDisplay, PanelDriver, PanelError, PanelOutputs,
 };
 
 /// Record one frame on the panel diagnostic ring, if one is attached.
@@ -294,7 +294,11 @@ impl CncPanelDriver {
         }
 
         // Prepare the LED/7-segment frame from the latest HAL inputs.
-        let mut led_bytes = led_state_to_bytes(self.last_display.leds);
+        // The machine's own state adds the LEDs that are not HAL pins: the jog
+        // cross in HOME/PROGHOME and the direction arrows in AUTO.
+        let leds =
+            self.last_display.leds | state_driven_leds(&self.outputs.mode, self.last_display.vel);
+        let mut led_bytes = led_state_to_bytes(leds);
         led_bytes[8] = crate::dec_to_bcd_hex(self.last_display.sseg_tool);
         led_bytes[9] = crate::dec_to_bcd_hex(self.last_display.sseg_next_tool);
         let mut frame = Vec::with_capacity(14);

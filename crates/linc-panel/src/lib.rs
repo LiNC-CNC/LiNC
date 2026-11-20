@@ -434,6 +434,52 @@ pub fn dec_to_bcd_hex(value: i32) -> u8 {
 }
 
 /// Encode the LED bitmap plus two tool displays into the 10-byte panel frame.
+/// LEDs the panel lights from the machine's own state, as the Probe Basic driver
+/// it replaces did.
+///
+/// Two of its rules never came from a HAL pin:
+///   * in HOME and PROGHOME every jog arrow is lit, plus RAPID, because there the
+///     arrows pick the axis to home instead of jogging it;
+///   * in AUTO the jog arrows follow the commanded velocity, so the panel shows
+///     which way the program is moving. The sign is taken exactly as the
+///     reference driver takes it: no dead band in front of the arrows.
+///
+/// Any other mode adds nothing: the arrows stay dark and the HAL pins decide.
+pub fn state_driven_leds(mode: &PanelModeValidity, velocity: [f64; 3]) -> u64 {
+    let PanelModeValidity::Valid(mode) = mode else {
+        return 0;
+    };
+    match mode {
+        PanelMode::Home | PanelMode::ProgHome => {
+            leds::RAPID
+                | leds::JOG_XP
+                | leds::JOG_XN
+                | leds::JOG_YP
+                | leds::JOG_YN
+                | leds::JOG_ZP
+                | leds::JOG_ZN
+        }
+        // The two directions per axis, in X, Y, Z order.
+        PanelMode::Auto => [
+            (0, leds::JOG_XP, leds::JOG_XN),
+            (1, leds::JOG_YP, leds::JOG_YN),
+            (2, leds::JOG_ZP, leds::JOG_ZN),
+        ]
+        .iter()
+        .fold(0u64, |leds, (axis, positive, negative)| {
+            let speed = velocity[*axis];
+            if speed > 0.0 {
+                leds | positive
+            } else if speed < 0.0 {
+                leds | negative
+            } else {
+                leds
+            }
+        }),
+        _ => 0,
+    }
+}
+
 pub fn led_state_to_bytes(leds: u64) -> [u8; 10] {
     let mut led_state: u128 = u64::MAX as u128;
     led_state &= !(leds as u128);
@@ -562,6 +608,92 @@ mod tests {
     /// `CHUCK` moves to the free bit 28, which hardware verification confirmed.
     /// `K2` was on bit 34 in the first port, aliasing `K1`; the machine verified
     /// it on bit 31, so every button has its own bit again.
+    /// HOME and PROGHOME light the whole jog cross plus RAPID, whether or not
+    /// the HAL pins say so: there the arrows pick the axis to home.
+    #[test]
+    fn home_modes_light_every_jog_arrow_and_rapid() {
+        let expected = leds::RAPID
+            | leds::JOG_XP
+            | leds::JOG_XN
+            | leds::JOG_YP
+            | leds::JOG_YN
+            | leds::JOG_ZP
+            | leds::JOG_ZN;
+        for mode in [PanelMode::Home, PanelMode::ProgHome] {
+            assert_eq!(
+                state_driven_leds(&PanelModeValidity::Valid(mode), [0.0; 3]),
+                expected,
+                "{mode:?} lights the jog cross"
+            );
+        }
+    }
+
+    /// In AUTO the arrows follow the commanded velocity, one per axis direction,
+    /// with a floor so a servo holding position does not blink an arrow.
+    #[test]
+    fn auto_mode_follows_the_command_velocity() {
+        let auto = PanelModeValidity::Valid(PanelMode::Auto);
+        assert_eq!(
+            state_driven_leds(&auto, [1.5, -2.0, 0.0]),
+            leds::JOG_XP | leds::JOG_YN
+        );
+        assert_eq!(
+            state_driven_leds(&auto, [-0.5, 3.0, -7.0]),
+            leds::JOG_XN | leds::JOG_YP | leds::JOG_ZN
+        );
+        assert_eq!(
+            state_driven_leds(&auto, [0.0, -0.0, 0.0]),
+            0,
+            "a standing axis lights nothing: the sign test is exact, as in the reference"
+        );
+        assert_eq!(
+            state_driven_leds(&auto, [1e-9, 0.0, 0.0]),
+            leds::JOG_XP,
+            "any positive velocity lights the arrow, no dead band"
+        );
+    }
+
+    /// The masks are LED bits, not the button bits of the same name: the button
+    /// namespace sits on different bit positions, and using it lit K3, SAFE_DOOR,
+    /// DRN and SPD.CCW on the real panel.
+    #[test]
+    fn the_state_driven_masks_are_leds_the_panel_has() {
+        let known = LED_PINS.iter().fold(0u64, |mask, (_, bit)| mask | bit);
+        let home = state_driven_leds(&PanelModeValidity::Valid(PanelMode::Home), [0.0; 3]);
+        let forward = state_driven_leds(&PanelModeValidity::Valid(PanelMode::Auto), [1.0; 3]);
+        let reverse = state_driven_leds(&PanelModeValidity::Valid(PanelMode::Auto), [-1.0; 3]);
+        assert_eq!(home & !known, 0, "HOME lights only panel LEDs");
+        assert_eq!(forward & !known, 0, "AUTO forward lights only panel LEDs");
+        assert_eq!(reverse & !known, 0, "AUTO reverse lights only panel LEDs");
+    }
+
+    /// Every other mode leaves the arrows to the HAL pins, and an unknown mode
+    /// claims nothing at all.
+    #[test]
+    fn other_and_unknown_modes_add_no_leds() {
+        for mode in [
+            PanelMode::Edit,
+            PanelMode::Mdi,
+            PanelMode::Jog,
+            PanelMode::Inc,
+            PanelMode::Mpg,
+        ] {
+            assert_eq!(
+                state_driven_leds(&PanelModeValidity::Valid(mode), [1.0, 1.0, 1.0]),
+                0,
+                "{mode:?} adds nothing"
+            );
+        }
+        assert_eq!(
+            state_driven_leds(&PanelModeValidity::default(), [1.0; 3]),
+            0
+        );
+        assert_eq!(
+            state_driven_leds(&PanelModeValidity::Invalid(vec![PanelMode::Auto]), [1.0; 3]),
+            0
+        );
+    }
+
     #[test]
     fn button_table_matches_the_verified_panel() {
         // Hardware-verified on the machine's panel.
