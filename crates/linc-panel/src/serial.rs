@@ -4,7 +4,7 @@
 //! the existing MODBUS-like panel protocol, decodes steady modes and override
 //! levels, and never opens a second link.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -36,6 +36,126 @@ fn record_frame(
     if let Ok(mut bus) = bus.lock() {
         bus.push_frame(direction, bytes, decoded, crc_ok, error);
     }
+}
+
+/// Reply frame: header `EB 01`, eight payload bytes, two CRC bytes.
+const REPLY_LEN: usize = 12;
+/// The two bytes every poll reply starts with.
+const REPLY_HEADER: [u8; 2] = [0xEB, 0x01];
+/// The panel echoes the LED commit frame back on the link.
+const COMMIT_ECHO: [u8; 4] = [0xEB, 0x02, 0x81, 0xCE];
+/// Bytes hunted for the reply header before a cycle is abandoned. A frame is
+/// twelve bytes, so a longer hunt means the panel is not answering this cycle.
+const RESYNC_LIMIT: usize = 48;
+
+/// Walks the input stream looking for the reply header, one byte at a time.
+///
+/// The panel answers a poll with `EB 01 ...`, but it also echoes the LED commit
+/// frame (`EB 02 81 CE`) and can leave half a frame behind when a cycle was
+/// interrupted. Reading a fixed twelve bytes therefore starts mid-frame as soon
+/// as one stray byte sits in front of the reply, the CRC fails, and the old code
+/// dropped the link for a second. This drops whatever does not lead into the
+/// header and keeps the count, so a resync is visible in the log instead of
+/// looking like a dead panel.
+#[derive(Debug, Default)]
+struct ReplyScanner {
+    /// Last byte seen: the header can be split across two reads.
+    previous: Option<u8>,
+    /// Bytes fed in so far. The two that make the header are not skipped.
+    fed: usize,
+}
+
+impl ReplyScanner {
+    /// Feed one byte. True when this byte completes the `EB 01` header.
+    fn push(&mut self, byte: u8) -> bool {
+        self.fed += 1;
+        if self.previous == Some(REPLY_HEADER[0]) && byte == REPLY_HEADER[1] {
+            return true;
+        }
+        self.previous = Some(byte);
+        false
+    }
+
+    /// Bytes that were not part of the header.
+    fn skipped(&self) -> usize {
+        self.fed.saturating_sub(REPLY_HEADER.len())
+    }
+}
+
+/// Read one byte inside a cycle, with a timeout short enough not to stall it.
+fn read_cycle_byte(port: &mut dyn SerialPort, timeout: Duration) -> Option<u8> {
+    if port.set_timeout(timeout).is_err() {
+        return None;
+    }
+    let mut byte = [0u8; 1];
+    match port.read(&mut byte) {
+        Ok(1) => Some(byte[0]),
+        _ => None,
+    }
+}
+
+/// Read the poll reply, hunting for its header first.
+///
+/// Returns the frame and how many bytes had to be dropped to find it, so the
+/// caller can record a resync.
+fn read_reply(port: &mut dyn SerialPort) -> Result<([u8; REPLY_LEN], usize), PanelError> {
+    let timeout = Duration::from_millis(60);
+    let mut scanner = ReplyScanner::default();
+    let mut frame = [0u8; REPLY_LEN];
+    let mut filled = 0usize;
+    let mut in_frame = false;
+    for _ in 0..RESYNC_LIMIT {
+        let Some(byte) = read_cycle_byte(port, timeout) else {
+            break;
+        };
+        if !in_frame {
+            if scanner.push(byte) {
+                in_frame = true;
+                frame[0] = REPLY_HEADER[0];
+                frame[1] = REPLY_HEADER[1];
+                filled = 2;
+            }
+            continue;
+        }
+        frame[filled] = byte;
+        filled += 1;
+        if filled == REPLY_LEN {
+            return Ok((frame, scanner.skipped()));
+        }
+    }
+    Err(PanelError::Protocol(if in_frame {
+        "truncated reply".into()
+    } else {
+        "no reply header".into()
+    }))
+}
+
+/// Take the LED commit echo back off the link.
+///
+/// The panel repeats those four bytes after the commit write; left in the buffer
+/// they become the head of the next reply. A panel revision that does not echo
+/// has nothing waiting, so absence is not an error and must not cost a cycle.
+fn drain_commit_echo(port: &mut dyn SerialPort, tap: &Option<Arc<Mutex<linc_diag::PanelBus>>>) {
+    let waiting = port.bytes_to_read().unwrap_or(0) as usize;
+    if waiting == 0 {
+        return;
+    }
+    let mut echo = Vec::with_capacity(COMMIT_ECHO.len());
+    for _ in 0..waiting.min(COMMIT_ECHO.len()) {
+        match read_cycle_byte(port, Duration::from_millis(20)) {
+            Some(byte) => echo.push(byte),
+            None => break,
+        }
+    }
+    if echo.is_empty() {
+        return;
+    }
+    let decoded = if echo == COMMIT_ECHO {
+        "led commit echo".to_string()
+    } else {
+        "stray byte".to_string()
+    };
+    record_frame(tap, "rx", &echo, Some(decoded), None, None);
 }
 
 pub struct CncPanelDriver {
@@ -122,18 +242,33 @@ impl CncPanelDriver {
             return Err(PanelError::Transport("not open".into()));
         };
         let started = Instant::now();
+        // The panel echoes the LED commit frame (`EB 02 81 CE`) back on the
+        // link. Left in the input buffer, those four bytes become the head of
+        // the next 12-byte reply, fail its CRC, and drop the link with a
+        // protocol error every other cycle. Each request therefore starts from
+        // an empty buffer; the old Python driver got the same effect by closing
+        // and reopening the port after every transaction.
+        if let Err(error) = port.clear(serialport::ClearBuffer::Input) {
+            log::debug!("panel input buffer clear failed: {error}");
+        }
         let request = [0xEB, 0x01, 0x80, 0x8E];
         record_frame(&tap, "tx", &request, Some("poll".into()), None, None);
         port.write_all(&request)?;
         port.flush()?;
         std::thread::sleep(Duration::from_micros(4000));
 
-        let mut response = [0u8; 12];
-        if let Err(error) = port.read_exact(&mut response) {
-            // No bytes were returned, so the record carries the error and an
-            // empty payload rather than an invented reply.
-            record_frame(&tap, "rx", &[], None, None, Some(error.to_string()));
-            return Err(error.into());
+        // Hunt for the reply header rather than trusting it to be next: the
+        // commit echo or a half frame in front of it would shift the whole reply
+        // by four bytes and fail every CRC.
+        let (response, skipped) = match read_reply(port.as_mut()) {
+            Ok(frame) => frame,
+            Err(error) => {
+                record_frame(&tap, "rx", &[], None, None, Some(error.to_string()));
+                return Err(error);
+            }
+        };
+        if skipped > 0 {
+            log::debug!("panel reply resynced after dropping {skipped} byte(s)");
         }
         self.stats.rx_bytes += response.len() as u64;
         self.stats.last_rx_age_ms = Some(0);
@@ -185,6 +320,10 @@ impl CncPanelDriver {
         port.write_all(&commit)?;
         self.stats.tx_bytes += 4;
         port.flush()?;
+        // The panel echoes the commit frame. Read it back now, when it is known
+        // to be the only thing on the link; a later blind clear could also eat
+        // the first bytes of a reply.
+        drain_commit_echo(port.as_mut(), &tap);
 
         if self.last_display.sseg_status >= 0 && !self.status_transport_warned {
             // The current protocol carries two tool displays only. The panel
@@ -325,11 +464,26 @@ impl PanelDriver for CncPanelDriver {
                     self.stats.clone(),
                 ))
             }
+            // A frame that failed its CRC or never completed is one bad cycle.
+            // The next poll resyncs on the header and tries again: closing the
+            // port put the link behind a one-second reconnect throttle, so a
+            // single lost reply cost a second of panel input on a 20 Hz link.
+            Err(error @ PanelError::Protocol(_)) => {
+                self.stats.timeouts += 1;
+                log::debug!("panel frame dropped this cycle: {error}");
+                self.stats.last_rx_age_ms =
+                    self.last_rx.map(|last| last.elapsed().as_millis() as u64);
+                Ok(make_snapshot(
+                    self.connected,
+                    self.error,
+                    &self.outputs,
+                    self.caps.clone(),
+                    self.stats.clone(),
+                ))
+            }
             Err(error) => {
                 self.stats.timeouts += 1;
-                if !matches!(error, PanelError::Protocol(_)) {
-                    log::warn!("panel communication failed: {error}");
-                }
+                log::warn!("panel communication failed: {error}");
                 self.connected = false;
                 self.error = true;
                 self.port = None;
@@ -362,6 +516,70 @@ impl PanelDriver for CncPanelDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The reply header is what the reader trusts; these are the protocol's own
+    /// bytes and a typo here would look like a dead panel.
+    #[test]
+    fn the_frame_constants_match_the_panel_protocol() {
+        assert_eq!(REPLY_HEADER, [0xEB, 0x01]);
+        assert_eq!(COMMIT_ECHO, [0xEB, 0x02, 0x81, 0xCE]);
+        assert_eq!(REPLY_LEN, 12);
+    }
+
+    /// The recorded shape that broke the old reader: the commit echo sits in
+    /// front of the reply, so a fixed twelve-byte read starts four bytes early.
+    #[test]
+    fn the_scanner_finds_the_reply_after_the_commit_echo() {
+        let mut scanner = ReplyScanner::default();
+        let recorded = [0xEB, 0x02, 0x81, 0xCE, 0xEB, 0x01];
+        let mut found_at = None;
+        for (index, byte) in recorded.iter().enumerate() {
+            if scanner.push(*byte) {
+                found_at = Some(index);
+                break;
+            }
+        }
+        assert_eq!(
+            found_at,
+            Some(5),
+            "the header is the echo's tail, not its head"
+        );
+        assert_eq!(
+            scanner.skipped(),
+            4,
+            "the four echo bytes had to be dropped"
+        );
+    }
+
+    /// A header split across two reads still lands, because the scanner keeps
+    /// the previous byte.
+    #[test]
+    fn the_scanner_keeps_a_header_split_across_reads() {
+        let mut scanner = ReplyScanner::default();
+        assert!(!scanner.push(0xEB));
+        assert!(scanner.push(0x01));
+    }
+
+    /// A repeated header byte is not a header pair on its own.
+    #[test]
+    fn a_repeated_header_byte_is_not_a_pair() {
+        let mut scanner = ReplyScanner::default();
+        assert!(!scanner.push(0xEB));
+        assert!(!scanner.push(0xEB));
+        assert!(scanner.push(0x01));
+    }
+
+    /// Garbage in front of the reply is counted, so the log can say the link
+    /// resynced instead of failing silently.
+    #[test]
+    fn garbage_before_the_reply_is_skipped_and_counted() {
+        let mut scanner = ReplyScanner::default();
+        for byte in [0x00, 0xFF, 0x81, 0xEB] {
+            assert!(!scanner.push(byte));
+        }
+        assert!(scanner.push(0x01));
+        assert_eq!(scanner.skipped(), 3, "00 FF 81 sat in front of the header");
+    }
 
     #[test]
     fn driver_starts_disconnected_without_a_port() {

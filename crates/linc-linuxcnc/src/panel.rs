@@ -69,7 +69,7 @@ const BUTTON_PINS: [(&str, u32); 46] = [
     ("jog_bn", 56),
     ("jog_xp", 48),
     ("opt", 40),
-    ("lub", 32),
+    ("lube", 32),
     ("spd_ccw", 24),
     ("k3", 16),
 ];
