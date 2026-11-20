@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build LiNC .debs for Debian releases in containers.
 #
-#   scripts/build-deb-docker.sh                  # bookworm + trixie, amd64
+#   scripts/build-deb-docker.sh                  # bookworm, amd64 (the mill's release)
 #   scripts/build-deb-docker.sh trixie           # one release
 #   scripts/build-deb-docker.sh bookworm --with-tests
 #   scripts/build-deb-docker.sh trixie --source-build   # via dpkg-buildpackage
@@ -23,7 +23,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PARENT="$(dirname "$ROOT")"
-RELEASES=(bookworm trixie)
+RELEASES=(bookworm)
 ARCH="amd64"
 TESTS=0
 SHELL_MODE=0
@@ -68,6 +68,15 @@ fi
 # hash of the Dockerfile it was built from, because mtimes do not survive a
 # fresh clone or a docker save/load round trip.
 DOCKERFILE_HASH="$(sha256sum "$DOCKERFILE" | cut -d' ' -f1)"
+
+# cargo decides freshness from mtimes, so a file edited before the last build in
+# the shared target cache is invisible to it: a build made from a clean worktree
+# afterwards leaves the edited file looking older than the artifacts, and the
+# stale object is reused. Touch every tracked file that differs from HEAD (staged
+# or not) so the container always compiles what is on disk.
+if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$ROOT" diff --name-only HEAD -z | xargs -0 -r touch -- 2>/dev/null || true
+fi
 
 image_is_current() {
     [ "$REBUILD" = 0 ] || return 1
