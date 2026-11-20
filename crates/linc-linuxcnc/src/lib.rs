@@ -605,7 +605,12 @@ impl NmlBackend {
         let protect = !panel.program_protect_known || panel.program_protect;
         let inputs =
             OffsetSyncInputs::from_status(status, self.profile.machine_ini.axes.len(), protect);
-        match plan_offset_sync(&inputs, &self.parameters, &axes) {
+        match plan_offset_sync(
+            &inputs,
+            &self.parameters,
+            &axes,
+            &self.profile.machine_ini.linear_units,
+        ) {
             OffsetSync::Done(reason) => {
                 if !self.offsets_synced {
                     log::info!("stored work offsets: {reason}");
@@ -809,6 +814,17 @@ impl NmlBackend {
 
     fn canonical_nc_file(&self, path: &Path) -> Result<PathBuf, MachineError> {
         contained_nc_file(self.profile.nc_files_root(), path).ok_or(MachineError::UnsafePath)
+    }
+
+    /// Put the interpreter back into the modal units it had before an offset
+    /// write pinned them to the machine's own: a loaded program must keep its
+    /// units across a keypad offset edit.
+    fn restore_program_units(&mut self, before: i32) -> Result<(), MachineError> {
+        let code = program_units_code(before);
+        if code == machine_units_code(&self.profile.machine_ini.linear_units) {
+            return Ok(());
+        }
+        self.issue_blocks(&[code.to_string()])
     }
 
     fn validate_ready(&mut self) -> Result<MachineSnapshot, MachineError> {
@@ -1084,7 +1100,17 @@ impl NmlBackend {
                 .map_err(MachineError::Invalid)?;
         }
         let axes = self.axis_names();
-        let mut parts = vec![format!("G10 L2 P{index}")];
+        // G10 is interpreted in the interpreter's *current* modal units, and in
+        // G91 it adds instead of sets. A machine left in G20 (an inch program or
+        // an inch MDI line) therefore stored every millimetre value times 25.4:
+        // a typed Z-100 became -2540. Force what the write means, then put the
+        // modal units back so a loaded program keeps its own.
+        let units_before = self.poll_status()?.task.program_units;
+        let mut parts = vec![g10_prefix(
+            &self.profile.machine_ini.linear_units,
+            "G10 L2",
+            index,
+        )];
         for (axis, value) in values.iter() {
             parts.push(format!("{axis}{value:.6}"));
         }
@@ -1093,6 +1119,7 @@ impl NmlBackend {
         }
         self.issue_blocks(&[parts.join(" ")])?;
         self.wait_complete(Duration::from_secs(2))?;
+        self.restore_program_units(units_before)?;
         if index == self.poll_status()?.offsets.g5x_index.clamp(1, 9) as u8 {
             let status = self.poll_status()?;
             let mut kept = AxisMap::new();
@@ -1147,8 +1174,12 @@ impl NmlBackend {
             .map(|(axis, value)| format!("{axis}{value:.6}"))
             .collect::<Vec<_>>()
             .join(" ");
-        self.issue_blocks(&[format!("G10 L20 P{index} {parts}")])?;
+        // Same modal-units trap as write_work_offset.
+        let units_before = self.poll_status()?.task.program_units;
+        let block = g10_prefix(&self.profile.machine_ini.linear_units, "G10 L20", index);
+        self.issue_blocks(&[format!("{block} {parts}")])?;
         self.wait_complete(Duration::from_secs(2))?;
+        self.restore_program_units(units_before)?;
         let status = self.poll_status()?;
         let live_index = status.offsets.g5x_index.clamp(1, 9) as u8;
         if live_index == index {
@@ -1938,6 +1969,7 @@ pub(crate) fn plan_offset_sync(
     inputs: &OffsetSyncInputs,
     parameters: &ParameterFile,
     axes: &[String],
+    linear_units: &str,
 ) -> OffsetSync {
     if inputs.estop || !inputs.task_on {
         return OffsetSync::Wait("the machine is not ON");
@@ -1960,7 +1992,7 @@ pub(crate) fn plan_offset_sync(
         return OffsetSync::Done("no stored offsets");
     }
 
-    let mut parts = vec![format!("G10 L2 P{index}")];
+    let mut parts = vec![g10_prefix(linear_units, "G10 L2", index)];
     let mut expected = AxisMap::new();
     for axis in axes {
         let Some(value) = parameters.work_axis(index, axis) else {
@@ -2062,6 +2094,32 @@ pub(crate) fn row_matches(
 /// before any MDI reaches the controller.
 pub(crate) fn probe_write_blocked(block: &str, writes_allowed: bool) -> bool {
     linc_core::probe::probe_write_action(block).is_some() && !writes_allowed
+}
+
+/// The modal-units code for the machine's linear units.
+fn machine_units_code(linear_units: &str) -> &'static str {
+    match linear_units.trim().to_ascii_lowercase().as_str() {
+        "inch" | "inches" | "in" => "G20",
+        _ => "G21",
+    }
+}
+
+/// The modal-units code for a `task.program_units` reading: 1 is G20, 2 is G21.
+fn program_units_code(program_units: i32) -> &'static str {
+    if program_units == 1 {
+        "G20"
+    } else {
+        "G21"
+    }
+}
+
+/// Opener for a G10 block that pins absolute mode and the machine's units.
+///
+/// `G10 L2`/`G10 L20` are read in the interpreter's current modal units, and in
+/// G91 they add instead of set. Without this a machine left in G20 stored every
+/// millimetre value times 25.4.
+fn g10_prefix(linear_units: &str, verb: &str, index: u8) -> String {
+    format!("G90 {} {verb} P{index}", machine_units_code(linear_units))
 }
 
 fn pose_component(pose: &linuxcnc_nml::Pose, index: usize) -> f64 {
@@ -2710,14 +2768,28 @@ mod tests {
     }
 
     #[test]
+    fn a_g10_block_pins_absolute_mode_and_the_machine_units() {
+        // The mill is metric: a keypad value is millimetres whatever the
+        // interpreter's modal units are.
+        assert_eq!(g10_prefix("mm", "G10 L2", 1), "G90 G21 G10 L2 P1");
+        // An inch machine must say so, or every value lands times 25.4.
+        assert_eq!(g10_prefix("inch", "G10 L20", 5), "G90 G20 G10 L20 P5");
+        assert_eq!(machine_units_code("mm"), "G21");
+        assert_eq!(machine_units_code("inch"), "G20");
+        // task.program_units: 1 is inch, 2 is mm.
+        assert_eq!(program_units_code(1), "G20");
+        assert_eq!(program_units_code(2), "G21");
+    }
+
+    #[test]
     fn startup_publication_writes_the_complete_stored_row() {
         let parameters = parameters_with(&g54_row());
-        let sync = plan_offset_sync(&offset_inputs(), &parameters, &axes3());
+        let sync = plan_offset_sync(&offset_inputs(), &parameters, &axes3(), "mm");
         let (index, block) = published(&sync);
         assert_eq!(index, 1);
         assert_eq!(
             block,
-            "G10 L2 P1 X-10.000000 Y-20.000000 Z-30.000000 R0.000000"
+            "G90 G21 G10 L2 P1 X-10.000000 Y-20.000000 Z-30.000000 R0.000000"
         );
     }
 
@@ -2726,12 +2798,12 @@ mod tests {
         let parameters = parameters_with(&g54_row());
         let mut inputs = offset_inputs();
         inputs.live_index = 0;
-        let sync = plan_offset_sync(&inputs, &parameters, &axes3());
+        let sync = plan_offset_sync(&inputs, &parameters, &axes3(), "mm");
         let (index, block) = published(&sync);
         // The controller's live row is G54's; the stored #5220 value does not
         // silently switch coordinate systems.
         assert_eq!(index, 1);
-        assert!(block.starts_with("G10 L2 P1 "), "{block}");
+        assert!(block.starts_with("G90 G21 G10 L2 P1 "), "{block}");
     }
 
     #[test]
@@ -2740,12 +2812,12 @@ mod tests {
         let parameters = parameters_with(&g55_row());
         let mut inputs = offset_inputs();
         inputs.live_index = 2;
-        let sync = plan_offset_sync(&inputs, &parameters, &axes3());
+        let sync = plan_offset_sync(&inputs, &parameters, &axes3(), "mm");
         let (index, block) = published(&sync);
         assert_eq!(index, 2);
         assert_eq!(
             block,
-            "G10 L2 P2 X-11.500000 Y-22.500000 Z-0.250000 R30.000000"
+            "G90 G21 G10 L2 P2 X-11.500000 Y-22.500000 Z-0.250000 R30.000000"
         );
     }
 
@@ -2759,7 +2831,7 @@ mod tests {
         inputs.live.z = -0.25;
         inputs.live_rotation = 30.0;
         assert_eq!(
-            plan_offset_sync(&inputs, &parameters, &axes3()),
+            plan_offset_sync(&inputs, &parameters, &axes3(), "mm"),
             OffsetSync::Done("the live row already matches")
         );
     }
@@ -2773,7 +2845,7 @@ mod tests {
         inputs.live.y = -22.5;
         inputs.live.z = -0.25;
         // Axes match, the stored rotation does not.
-        let sync = plan_offset_sync(&inputs, &parameters, &axes3());
+        let sync = plan_offset_sync(&inputs, &parameters, &axes3(), "mm");
         let (_, block) = published(&sync);
         assert!(block.ends_with("R30.000000"), "{block}");
     }
@@ -2784,13 +2856,13 @@ mod tests {
         let mut inputs = offset_inputs();
         inputs.protect = true;
         assert_eq!(
-            plan_offset_sync(&inputs, &parameters, &axes3()),
+            plan_offset_sync(&inputs, &parameters, &axes3(), "mm"),
             OffsetSync::Wait("PROTECT is on")
         );
         // Releasing PROTECT resumes the normal path.
         inputs.protect = false;
         assert!(matches!(
-            plan_offset_sync(&inputs, &parameters, &axes3()),
+            plan_offset_sync(&inputs, &parameters, &axes3(), "mm"),
             OffsetSync::Publish { .. }
         ));
     }
@@ -2807,12 +2879,12 @@ mod tests {
         let parameters = parameters_with(&g54_row());
         let mut inputs = offset_inputs();
         inputs.idle = true;
-        let sync = plan_offset_sync(&inputs, &parameters, &axes3());
+        let sync = plan_offset_sync(&inputs, &parameters, &axes3(), "mm");
         let (index, block) = published(&sync);
         assert_eq!(index, 1);
         assert_eq!(
             block,
-            "G10 L2 P1 X-10.000000 Y-20.000000 Z-30.000000 R0.000000"
+            "G90 G21 G10 L2 P1 X-10.000000 Y-20.000000 Z-30.000000 R0.000000"
         );
     }
 
@@ -2828,7 +2900,7 @@ mod tests {
             let mut inputs = offset_inputs();
             mutate(&mut inputs);
             assert_eq!(
-                plan_offset_sync(&inputs, &parameters, &axes3()),
+                plan_offset_sync(&inputs, &parameters, &axes3(), "mm"),
                 OffsetSync::Wait(reason)
             );
         }
@@ -2838,7 +2910,7 @@ mod tests {
     fn a_parameter_file_without_the_active_row_is_left_alone() {
         let parameters = parameters_with(&[(5220, 1.0), (1030, 5.0)]);
         assert_eq!(
-            plan_offset_sync(&offset_inputs(), &parameters, &axes3()),
+            plan_offset_sync(&offset_inputs(), &parameters, &axes3(), "mm"),
             OffsetSync::Done("no stored offsets")
         );
     }
