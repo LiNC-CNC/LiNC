@@ -9,9 +9,58 @@ const LOGO_HEIGHT: f32 = 30.0;
 /// Width cap for the same image: a very wide logo must not push the machine
 /// name and the metrics off the bar.
 const LOGO_MAX_WIDTH: f32 = 220.0;
+/// Width cap for the `PROGRAM` metric, in the points the value is painted at.
+/// The loaded file's name is the one unbounded value in the top bar, and a
+/// long one used to push `STATE`, `TOOL`, `SPINDLE`, `FEED` and `WORK` into
+/// each other. Over the cap the name is cut and the whole of it stays in the
+/// hover text.
+const PROGRAM_MAX_WIDTH: f32 = 240.0;
 
 pub(super) fn metric(ui: &mut egui::Ui, label: &str, value: String, size: f32) {
     metric_colored(ui, label, value, size, theme::FG);
+}
+
+/// A top-bar metric whose value cannot grow past `cap`: a value wider than the
+/// bar has room for is cut with an ellipsis instead of shoving the metrics
+/// drawn after it. The uncut value is what the pointer shows.
+pub(super) fn metric_capped(ui: &mut egui::Ui, label: &str, value: String, size: f32, cap: f32) {
+    ui.add_space(6.0);
+    ui.vertical(|ui| {
+        ui.label(
+            RichText::new(label)
+                .size(theme::font_size(9.0))
+                .color(theme::MUTED),
+        );
+        let fitted = fit_metric_text(ui, &value, size, cap);
+        let response = ui.label(
+            RichText::new(fitted.clone())
+                .monospace()
+                .size(size)
+                .color(theme::FG),
+        );
+        if fitted != value {
+            response.on_hover_text(&value);
+        }
+    });
+}
+
+/// `text` cut to `room` points in the font the metric values use, marked where
+/// the gap is. The tail keeps the extension, so a program's name still says what
+/// kind of file it is.
+fn fit_metric_text(ui: &egui::Ui, text: &str, size: f32, room: f32) -> String {
+    theme::fit_middle(|candidate| metric_width(ui, candidate, size), text, room)
+}
+
+/// Width of `text` as a metric value paints it: monospace at `size` points,
+/// unscaled. `theme::measure` walks the type ramp instead, so measuring a value
+/// with it would cut names that fit on screen.
+fn metric_width(ui: &egui::Ui, text: &str, size: f32) -> f32 {
+    ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(text.to_owned(), FontId::monospace(size), Color32::WHITE)
+            .size()
+            .x
+    })
 }
 
 /// A top-bar metric whose value carries a state colour: the label stays quiet,
@@ -127,7 +176,7 @@ impl LincApp {
                 });
             });
             ui.add_space(18.0);
-            metric(ui, "PROGRAM", self.program_label(), 13.0);
+            metric_capped(ui, "PROGRAM", self.program_label(), 13.0, PROGRAM_MAX_WIDTH);
             let (state_word, state_color) = program_state_word(&self.snapshot.program);
             metric_colored(ui, "STATE", state_word.into(), 13.0, state_color);
             metric(
@@ -206,15 +255,19 @@ impl LincApp {
                 ui.add_space(14.0);
                 // `PANEL ●`: the word names what the dot watches, the colour
                 // carries the state, the tooltip spells it out.
-                let online = !self.panel_offline();
+                let offline = self.panel_offline();
                 theme::status_dot(
                     ui,
-                    if online { theme::SUCCESS } else { theme::ERROR },
-                    "PANEL",
-                    if online {
-                        "PANEL ONLINE"
+                    if offline {
+                        theme::ERROR
                     } else {
+                        theme::SUCCESS
+                    },
+                    "PANEL",
+                    if offline {
                         "PANEL OFFLINE"
+                    } else {
+                        "PANEL ONLINE"
                     },
                 );
             });
@@ -397,7 +450,10 @@ impl LincApp {
                 // reports `?` rather than guessing. A running machine ON stays
                 // steady; MACHINE OFF blinks so it cannot fade into a bar full
                 // of green.
-                let machine_is_off = !self.snapshot.machine.on && !self.snapshot.meta.stale;
+                let machine_is_off = matches!(
+                    (self.snapshot.machine.on, self.snapshot.meta.stale),
+                    (false, false)
+                );
                 let (machine_text, machine_color) =
                     machine_status_field(self.snapshot.machine.on, self.snapshot.meta.stale);
                 let machine_color = if machine_is_off {

@@ -346,12 +346,35 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                     }
                 })
                 .unwrap_or_else(|| "UNTITLED".into());
-            ui.label(
-                RichText::new(file)
+            // The header shares its row with the editability chip and the RUNNING
+            // word, and the row does not wrap: a name wider than what is left is
+            // cut in the middle, so the extension stays on screen and neither chip
+            // is pushed off the card.
+            let state_word = if editable { "EDITABLE" } else { "READ-ONLY" };
+            let reserved = theme::measure(ui, state_word, 9.0)
+                + if app.snapshot.task.running {
+                    theme::measure(ui, "RUNNING", 9.0)
+                } else {
+                    0.0
+                }
+                + if app.program.editor.dirty {
+                    theme::measure(ui, "*", 12.0)
+                } else {
+                    0.0
+                }
+                + 32.0;
+            let room = (ui.available_width() - reserved).max(80.0);
+            let shown =
+                theme::fit_middle(|candidate| theme::measure(ui, candidate, 12.0), &file, room);
+            let name = ui.label(
+                RichText::new(shown.clone())
                     .monospace()
                     .size(theme::font_size(12.0))
                     .color(theme::FG),
             );
+            if shown != file {
+                name.on_hover_text(&file);
+            }
             if app.program.editor.dirty {
                 ui.label(RichText::new("*").color(theme::WARNING));
             }
@@ -364,15 +387,13 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                             .color(theme::SUCCESS),
                     );
                 }
-                ui.label(
-                    RichText::new(if editable { "EDITABLE" } else { "READ-ONLY" })
-                        .size(theme::font_size(9.0))
-                        .color(if editable {
-                            theme::SUCCESS
-                        } else {
-                            theme::WARNING
-                        }),
-                );
+                ui.label(RichText::new(state_word).size(theme::font_size(9.0)).color(
+                    if editable {
+                        theme::SUCCESS
+                    } else {
+                        theme::WARNING
+                    },
+                ));
             });
         });
         theme::separator(ui);

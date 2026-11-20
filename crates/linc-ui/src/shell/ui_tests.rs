@@ -672,6 +672,55 @@ fn the_top_bar_always_carries_the_network_metric() {
     );
 }
 
+/// The loaded file's name is the one unbounded value in the top bar. A name
+/// longer than its column is cut with an ellipsis, so the metrics drawn after
+/// it keep their room; a shorter one is drawn whole.
+#[test]
+fn a_long_program_name_is_cut_so_the_metrics_beside_it_keep_their_room() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let name = "Electtk_110F_01_long_program_name_that_cannot_fit_in_the_bar.tap";
+    harness.app.snapshot.program.display_name = format!("/home/hkitech/linuxcnc/nc_files/{name}");
+
+    let mut output = harness.ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+        harness.app.top_bar(ui);
+    });
+    output.textures_delta.clear();
+    let texts = painted_text(&output);
+    assert!(
+        !texts.iter().any(|(text, _)| text == name),
+        "the full name is wider than the bar allows and must not be painted: {texts:?}"
+    );
+    let cut = texts
+        .iter()
+        .find(|(text, _)| text.contains('\u{2026}') && text.ends_with(".tap"))
+        .map(|(text, rect)| (text.clone(), *rect))
+        .expect("the PROGRAM value is drawn, cut in the middle");
+    assert!(
+        name.starts_with(cut.0.split('\u{2026}').next().unwrap_or_default()),
+        "the cut keeps the head of the name: {}",
+        cut.0
+    );
+    let state = texts
+        .iter()
+        .find(|(text, _)| text == "STATE")
+        .map(|(_, rect)| *rect)
+        .expect("the STATE label is drawn beside it");
+    assert!(
+        cut.1.right() < state.left(),
+        "the cut name stops before the next metric: {:?} runs into {:?}",
+        cut.1,
+        state
+    );
+
+    // A name that fits is not touched: the cut is a fallback, not the format.
+    harness.app.snapshot.program.display_name = "/nc/short.tap".into();
+    let texts = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        texts.iter().any(|text| text == "short.tap"),
+        "a short name is drawn whole: {texts:?}"
+    );
+}
+
 /// `[ui] logo` takes the wordmark's slot and leaves the machine name beside
 /// it. A file that cannot be read falls back to the wordmark rather than
 /// leaving a blank slot where the brand was.

@@ -120,6 +120,55 @@ pub fn measure(ui: &Ui, text: &str, base: f32) -> f32 {
     })
 }
 
+/// `text` cut in the middle to `room`, marked where the gap is, so the end of a
+/// long name — a program's extension — stays on screen. `measure` is the painted
+/// width of a candidate in the caller's own font, because a bar value and a card
+/// header are set at different sizes.
+///
+/// The tail keeps the extension and a few characters before it: which kind of
+/// file is loaded is what the operator reads off the name, and a head-only cut
+/// throws exactly that away.
+pub fn fit_middle(measure: impl Fn(&str) -> f32, text: &str, room: f32) -> String {
+    if measure(text) <= room {
+        return text.to_string();
+    }
+    const ELLIPSIS: &str = "\u{2026}";
+    let chars: Vec<char> = text.chars().collect();
+    // Characters after the last dot hold the extension; the tail keeps those and
+    // a few before them, so a short ".tap" or a long ".ngc" both read.
+    let extension = chars
+        .iter()
+        .rposition(|character| *character == '.')
+        .map_or(0, |dot| chars.len() - dot - 1);
+    let mut tail_len = chars.len().saturating_sub(1).min((extension + 4).max(8));
+    loop {
+        if tail_len == 0 {
+            return ELLIPSIS.to_string();
+        }
+        let tail: String = chars[chars.len() - tail_len..].iter().collect();
+        if measure(&format!("{ELLIPSIS}{tail}")) > room {
+            tail_len -= 1;
+            continue;
+        }
+        // The widest head that still fits: the width grows with the head, so a
+        // binary search costs a handful of layouts rather than one per character
+        // on every frame.
+        let mut low = 0usize;
+        let mut high = chars.len() - tail_len;
+        while low < high {
+            let middle = low + (high - low).div_ceil(2);
+            let head: String = chars[..middle].iter().collect();
+            if measure(&format!("{head}{ELLIPSIS}{tail}")) <= room {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        let head: String = chars[..low].iter().collect();
+        return format!("{head}{ELLIPSIS}{tail}");
+    }
+}
+
 /// Shared table geometry: cell padding either side of a measured column.
 pub const CELL_PAD: f32 = 16.0;
 
@@ -606,6 +655,56 @@ mod font_tests {
             .families
             .get(&egui::FontFamily::Proportional)
             .is_some_and(|family| family.iter().any(|name| name == "Hack")));
+    }
+}
+
+#[cfg(test)]
+/// A character is the unit of measure here, so the cut keeps its promise about
+/// the tail and the extension without a font.
+mod fit_middle_tests {
+    use super::fit_middle;
+
+    fn width(text: &str) -> f32 {
+        text.chars().count() as f32
+    }
+
+    #[test]
+    fn a_name_that_fits_is_not_touched() {
+        assert_eq!(fit_middle(width, "Short.tap", 40.0), "Short.tap");
+        assert_eq!(fit_middle(width, "Exactly10c", 10.0), "Exactly10c");
+    }
+
+    #[test]
+    fn a_cut_name_keeps_its_extension_and_its_head() {
+        let name = "Electtk_110F_01_very_long_program_name_for_status_bar_test.tap";
+        let cut = fit_middle(width, name, 30.0);
+        assert!(cut.contains('\u{2026}'), "the gap is marked: {cut}");
+        assert!(
+            cut.ends_with(".tap"),
+            "the extension is what names the file: {cut}"
+        );
+        let head = cut.split('\u{2026}').next().unwrap_or_default();
+        assert!(
+            name.starts_with(head),
+            "the head is the name's own start: {cut}"
+        );
+        assert!(
+            width(&cut) <= 30.0,
+            "the cut fits the room it was given: {cut}"
+        );
+    }
+
+    #[test]
+    fn the_tail_carries_more_than_the_extension() {
+        let name = "some/deep/path/to_a_program_with_a_long_name.nc";
+        let cut = fit_middle(width, name, 24.0);
+        assert!(cut.ends_with("name.nc"), "{cut}");
+    }
+
+    #[test]
+    fn no_room_left_leaves_only_the_mark() {
+        assert_eq!(fit_middle(width, "long_program.tap", 1.0), "\u{2026}");
+        assert_eq!(fit_middle(width, "long_program.tap", 0.0), "\u{2026}");
     }
 }
 
