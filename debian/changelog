@@ -1,3 +1,22 @@
+linc (0.3.0-1) unstable; urgency=medium
+
+  * A profile logo in the top bar: [ui] logo draws a PNG or GIF in place of
+    the LiNC wordmark, scaled to the bar, with the machine name kept beside
+    it. A missing file fails --check-config; an image that cannot be decoded
+    keeps the wordmark and logs one warning.
+  * Spindle-speed keys on the manual screens: Ctrl+PgUp/PgDn step the running
+    spindle's programmed speed by the machine's increment and Ctrl+S enters an
+    absolute speed. Both edit the speed, not the override, and a running
+    program's next S word still wins.
+  * A CUT card for machines that publish no load feedback, so the second
+    card on the Machine page carries chip load instead of an empty meter.
+  * The shell never scales below the design floor, and the window cannot be
+    made smaller than the 1280x720 baseline.
+  * Debian packages for bookworm and trixie, built in containers against the
+    release's own glibc and LinuxCNC 2.9.
+
+ -- Hans Baier <foss@hans-baier.de>  Fri, 20 Nov 2026 08:20:00 +0700
+
 linc (0.2.0-1) unstable; urgency=medium
 
   * Sidebar SHORTCUTS rows that name a single command are clickable: the mouse
