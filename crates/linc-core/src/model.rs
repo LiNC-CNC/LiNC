@@ -926,8 +926,13 @@ impl ProgramState {
         if let Some(line) = self.highlight_line() {
             return Some(line.saturating_sub(1));
         }
-        let last = self.last_command_line();
-        (last > 0 && self.current_line >= last).then_some(usize::MAX)
+        // A finished program keeps its path on screen. Eaten is what the tool
+        // has cut *while cutting*; clearing the view at the end of every run
+        // left the operator looking at an empty box exactly when the part is
+        // finished and the shape matters most. The old expression is kept: the
+        // interpreter's line only reaches `line_count` when it reports the last
+        // block, and keying this on the "motionless tail" ate whole programs.
+        (self.line_count > 0 && self.current_line >= self.line_count).then_some(usize::MAX)
     }
 }
 
@@ -2110,11 +2115,14 @@ mod tests {
             None,
             "the interpreter stopped before M2"
         );
-        program.current_line = 3;
+        assert!(
+            program.tail_is_motionless(3),
+            "M2 is the last command, so a run that stopped here reached the end"
+        );
         assert_eq!(
             program.consumed_through(),
-            Some(usize::MAX),
-            "M2 was the last command, so the whole path is behind the tool"
+            None,
+            "a finished run leaves the path on screen"
         );
     }
 
