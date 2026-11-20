@@ -434,6 +434,32 @@ fn window_under_floor(physical: [f32; 2], monitor: Option<[f32; 2]>) -> bool {
 #[cfg(feature = "linuxcnc")]
 const MACHINE_ON_PIN: &str = "linc.machine-on";
 
+/// The controller's E-stop latch, read in the same cycle as `MACHINE_ON_PIN`.
+///
+/// `snapshot.machine.estop` comes from the previous status poll, and the E-stop
+/// input lands later than the machine-on pin: on this cabinet the pin was read
+/// one poll before the E-stop bit arrived, so the guard saw "switch off, no
+/// E-stop" and ended the session anyway.
+#[cfg(feature = "linuxcnc")]
+const ESTOP_PIN: &str = "halui.estop.is-activated";
+
+/// How long a machine-off edge must stand without E-stop before the session
+/// ends. A real switch-off is indefinite, so this only delays the quit; an edge
+/// caused by the E-stop latch is gone before the window closes.
+#[cfg(feature = "linuxcnc")]
+const MACHINE_OFF_GRACE: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Whether the drop that just arrived is the E-stop's doing.
+///
+/// The E-stop chain is powered from the cabinet, so it reads active as soon as
+/// the machine has no power: the report that arrives *after* the drop proves
+/// nothing, and a guard that trusted it kept the session on every switch-off.
+/// Only an E-stop that was already standing when the pin dropped explains the
+/// drop; a switch-off with no E-stop in place is the operator's.
+fn machine_off_is_estop_driven(estop_before_edge: bool, probe_trip: bool) -> bool {
+    estop_before_edge || probe_trip
+}
+
 /// Ends the session when the cabinet is switched off.
 ///
 /// The read lives here rather than in `linc-ui`, which must never touch HAL;
@@ -451,6 +477,13 @@ struct MachineOffGuard {
     reader: Option<HalReader>,
     #[cfg(feature = "linuxcnc")]
     last: Option<bool>,
+    /// When the machine-on pin first dropped without a shutdown being allowed,
+    /// so a switch-off has to persist before it ends the session.
+    #[cfg(feature = "linuxcnc")]
+    machine_off_pending: Option<std::time::Instant>,
+    /// Previous E-stop reading, to see the rising edge that disarms shutdown.
+    #[cfg(feature = "linuxcnc")]
+    last_estop: Option<bool>,
     /// How the window should sit, re-asserted after creation.
     window: WindowMode,
     /// Frames spent re-asserting the window state; bounded so a compositor that
@@ -486,6 +519,10 @@ impl MachineOffGuard {
             reader,
             #[cfg(feature = "linuxcnc")]
             last: None,
+            #[cfg(feature = "linuxcnc")]
+            machine_off_pending: None,
+            #[cfg(feature = "linuxcnc")]
+            last_estop: None,
             window,
             window_attempts: 0,
             min_inner: None,
@@ -525,13 +562,51 @@ impl MachineOffGuard {
             return;
         };
         let probe_trip_switched_machine_off = self.inner.snapshot.probe_trip_switched_machine_off();
-        if machine_off_ends_session(self.last, now, probe_trip_switched_machine_off) {
-            self.inner.request_machine_off();
-        } else if machine_off_edge(self.last, now) {
-            log::info!("machine-on dropped during a probe-trip machine-off; session kept");
+        // E-stop cuts machine power while the cabinet relay latch keeps the
+        // panel's machine-on input high; switching the panel off then drops the
+        // pin, and that is not a shutdown request. The controller stays in
+        // E-stop so the operator can reset, and the loaded program survives.
+        //
+        // `snapshot.machine.estop` lags the HAL pin by a poll, so the pin is read
+        // in the same cycle as the one that dropped. What matters is the reading
+        // from *before* the drop: the cabinet's E-stop chain has no power once the
+        // machine is off, so it reads active right after any switch-off.
+        let estop_pin = matches!(reader.read(ESTOP_PIN), Some(HalPinValue::Bit(true)));
+        let estop_now = self.inner.snapshot.machine.estop || estop_pin;
+        let estop_before_edge = self.last_estop.unwrap_or(false);
+        self.last_estop = Some(estop_now);
+
+        if machine_off_edge(self.last, now) {
+            if machine_off_is_estop_driven(estop_before_edge, probe_trip_switched_machine_off) {
+                self.machine_off_pending = None;
+                if probe_trip_switched_machine_off {
+                    log::info!("machine-on dropped during a probe-trip machine-off; session kept");
+                } else {
+                    log::info!("machine-on dropped during E-stop; session kept");
+                }
+            } else {
+                // The switch-off is the operator's. Watch it for the grace
+                // window so a single glitched poll cannot end a session.
+                self.machine_off_pending = Some(std::time::Instant::now());
+            }
+        } else if now {
+            // The input came back: this was not a shutdown after all.
+            if self.machine_off_pending.take().is_some() {
+                log::info!("machine-on input is back; the session stays");
+            }
+        }
+
+        if let Some(since) = self.machine_off_pending {
+            if since.elapsed() >= MACHINE_OFF_GRACE {
+                self.machine_off_pending = None;
+                self.inner.request_machine_off();
+            }
         }
         self.last = Some(now);
     }
+
+    #[cfg(not(feature = "linuxcnc"))]
+    fn poll_machine_on(&mut self) {}
 
     /// Keep the window at or above the 1280x720 design floor.
     ///
@@ -570,10 +645,6 @@ impl MachineOffGuard {
             wanted[0], wanted[1],
         )));
     }
-
-    /// A build without the HAL reader has no machine-on switch to watch.
-    #[cfg(not(feature = "linuxcnc"))]
-    fn poll_machine_on(&mut self) {}
 }
 
 /// True only on a genuine high-to-low transition. `previous` stays `None` until
@@ -584,16 +655,8 @@ fn machine_off_edge(previous: Option<bool>, now: bool) -> bool {
     previous == Some(true) && !now
 }
 
-/// A switch-off ends the session unless a probe trip has already switched the
-/// machine off and the operator is cycling the switch to re-power it.
-#[cfg(feature = "linuxcnc")]
-fn machine_off_ends_session(
-    previous: Option<bool>,
-    now: bool,
-    probe_trip_switched_machine_off: bool,
-) -> bool {
-    machine_off_edge(previous, now) && !probe_trip_switched_machine_off
-}
+/// A switch-off ends the session unless the machine was already off for a
+/// reason the operator did not request — see `machine_off_is_estop_driven`.
 
 impl eframe::App for MachineOffGuard {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
@@ -607,7 +670,7 @@ impl eframe::App for MachineOffGuard {
 #[cfg(test)]
 mod machine_off_tests {
     #[cfg(feature = "linuxcnc")]
-    use super::{machine_off_edge, machine_off_ends_session};
+    use super::{machine_off_edge, machine_off_is_estop_driven};
     use super::{resolve_window_mode, WindowMode};
 
     use super::{min_inner_points, window_under_floor};
@@ -697,18 +760,22 @@ mod machine_off_tests {
         assert!(!machine_off_edge(None, true));
     }
 
+    /// The drop belongs to the E-stop only when the E-stop was already standing
+    /// before it. The chain is unpowered with the cabinet off, so the E-stop
+    /// report that follows a switch-off is the consequence, never the cause.
     #[test]
     #[cfg(feature = "linuxcnc")]
-    fn a_probe_trip_machine_off_survives_the_recovery_toggle() {
-        // The trip switched the machine off through halui; halui needs a rising
-        // edge to power back on, so the operator cycles the switch. The off
-        // half must keep the session alive for the reset.
-        assert!(!machine_off_ends_session(Some(true), false, true));
-        // The switch-off after the trip is reset is a real shutdown again.
-        assert!(machine_off_ends_session(Some(true), false, false));
-        // The trip latch suppresses only the falling edge.
-        assert!(!machine_off_ends_session(Some(false), true, true));
-        assert!(!machine_off_ends_session(None, false, true));
+    fn only_an_estop_already_standing_explains_the_drop() {
+        assert!(machine_off_is_estop_driven(true, false));
+        assert!(
+            !machine_off_is_estop_driven(false, false),
+            "a plain switch-off quits, however the chain reads afterwards"
+        );
+        assert!(
+            machine_off_is_estop_driven(false, true),
+            "probe-trip recovery"
+        );
+        assert!(machine_off_is_estop_driven(true, true));
     }
 }
 
