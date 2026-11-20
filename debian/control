@@ -3,15 +3,20 @@ Section: misc
 Priority: optional
 Maintainer: LiNC contributors <linc@example.invalid>
 Rules-Requires-Root: no
-Build-Depends: debhelper-compat (= 13), cargo, rustc, pkg-config,
- libxkbcommon-dev, libwayland-dev, libx11-dev, libxi-dev, libxcursor-dev,
- libxrandr-dev, libgl1-mesa-dev
+Build-Depends: debhelper-compat (= 13), cargo, rustc (>= 1.95), pkg-config,
+ libboost-dev, libxkbcommon-dev, libwayland-dev, libx11-dev, libxi-dev,
+ libxcursor-dev, libxrandr-dev, libgl1-mesa-dev, linuxcnc-uspace-dev
 Standards-Version: 4.6.2
 Homepage: https://example.invalid/linc
 
 Package: linc
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, linuxcnc (>= 2.9) | linuxcnc-uspace
+# glutin reaches GL, X11 and Wayland through dlopen, so ${shlibs:Depends} never
+# sees them: the window opens only if the libs below are installed.
+Depends: ${shlibs:Depends}, ${misc:Depends},
+ libgl1, libegl1, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0,
+ libwayland-cursor0, libwayland-egl1, libx11-6, libxi6, libxcursor1,
+ libxrandr2, libxcb1, linuxcnc (>= 2.9) | linuxcnc-uspace
 Recommends: fonts-dejavu-core
 Suggests: linuxcnc-doc-en
 Description: touch-first HMI for LinuxCNC

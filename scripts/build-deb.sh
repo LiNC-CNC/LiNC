@@ -120,9 +120,12 @@ stage() {
     install -m755 "$bin_dir/linc-mcp" "$stage_dir/usr/bin/linc-mcp"
 
     # The sim profile is the self-contained example; machine profiles come from
-    # the vendor, so only the sample and its INI/HAL are shipped.
+    # the vendor, so only the sample and its INI/HAL are shipped. The INI names
+    # a program prefix and a tool table, so the package carries them too, or the
+    # example installs dead and --check-config rejects it.
     install -m644 configs/base.toml configs/sim.toml configs/sim.ini \
-        "$stage_dir/usr/share/linc/configs/"
+        configs/tool.tbl "$stage_dir/usr/share/linc/configs/"
+    cp -a configs/gcode "$stage_dir/usr/share/linc/configs/"
     install -m644 hal/*.hal "$stage_dir/usr/share/linc/hal/"
     cp -a subroutines/probe_basic "$stage_dir/usr/share/linc/subroutines/"
     install -m644 assets/branding/linc-icon-256.png \
@@ -135,14 +138,22 @@ stage() {
     local installed_kb
     installed_kb=$(du -sk "$stage_dir/usr" | cut -f1)
 
-    local depends
+    # glutin opens GL, X11 and Wayland with dlopen, so dpkg-shlibdeps never sees
+    # them in the ELF and would leave the package depending on libc alone. The
+    # runtime set is spelled out here and merged with whatever it does find.
+    local runtime="libgl1, libegl1, libxkbcommon0, libxkbcommon-x11-0, \
+libwayland-client0, libwayland-cursor0, libwayland-egl1, \
+libx11-6, libxi6, libxcursor1, libxrandr2, libxcb1"
+    local depends=""
     if command -v dpkg-shlibdeps >/dev/null; then
         # Native build only; a cross build cannot inspect the target's shlibs.
         depends="$(dpkg-shlibdeps -O "$stage_dir/usr/bin/linc" 2>/dev/null \
             | sed -n 's/^shlibs:Depends=//p')"
     fi
-    if [ -z "${depends:-}" ]; then
-        depends="libc6, libgcc-s1, libstdc++6, libgl1, libxkbcommon0, libwayland-client0, libx11-6, libxi6, libxcursor1, libxrandr2, libxcb1"
+    if [ -n "$depends" ]; then
+        depends="$depends, $runtime"
+    else
+        depends="libc6, libgcc-s1, libstdc++6, $runtime"
     fi
     depends="$depends, linuxcnc (>= 2.9) | linuxcnc-uspace"
 
@@ -190,6 +201,15 @@ for arch in "${ARCHES[@]}"; do
     run_cargo "$arch" build --release --locked --target "$target" "${cargo_jobs[@]}"
 
     bin_dir="target/$target/release"
+    # `stage` runs in a command substitution, and bash keeps the outer script
+    # alive when a command inside it fails: without this check a missing binary
+    # packs an empty .deb and still says it built one.
+    for binary in linc linc-panel linc-mcp; do
+        if [ ! -x "$bin_dir/$binary" ]; then
+            echo "error: $bin_dir/$binary is missing; the release build did not produce it" >&2
+            exit 1
+        fi
+    done
     if [ "$RUN_TESTS" = 1 ] && [ "$target" = "$HOST" ]; then
         echo "==> testing $arch"
         run_cargo "$arch" test --release --locked --workspace --target "$target" "${cargo_jobs[@]}"

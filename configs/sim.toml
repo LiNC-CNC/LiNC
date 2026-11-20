@@ -25,6 +25,7 @@ servo_load = ["X", "Y", "Z", "S"]
 # (MAIN · F5 .. OFFS · F8, F10 for the view toggle) instead of the simulated
 # panel's printed keycaps alone.
 keyboard = "pc"
+second_card = "cut"
 
 [panel]
 kind = "simulated"

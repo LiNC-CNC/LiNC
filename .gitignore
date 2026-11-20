@@ -30,3 +30,11 @@ configs/sim.var
 # pi agent session state (todos, scratch), not project source
 /.pi/
 /crates/linc-core/tests/scratch_dump.rs
+
+# Debian build output: dpkg-buildpackage and scripts/build-deb.sh
+/debian/linc/
+/debian/.debhelper/
+/debian/files
+/debian/*.substvars
+/debian/debhelper-build-stamp
+/dist/
