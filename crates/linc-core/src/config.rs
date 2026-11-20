@@ -125,6 +125,11 @@ pub struct UiConfig {
     pub theme: String,
     pub start_page: String,
     pub window_title: String,
+    /// Brand image drawn in the top bar in place of the `LiNC` wordmark. A
+    /// relative path resolves against the profile, like every other path. An
+    /// empty value means "no logo" so the key can stay while it is edited.
+    #[serde(default)]
+    pub logo: Option<String>,
     pub scale: String,
     pub axis_order: Vec<String>,
     pub pages: Vec<String>,
@@ -892,6 +897,7 @@ impl Profile {
         ini_override: Option<PathBuf>,
     ) -> Result<Self, ConfigError> {
         // Paths resolve relative to the profile.
+        resolve_ui_logo(&mut config.ui, &base_dir);
         let ini_path =
             ini_override.unwrap_or_else(|| resolve_path(&base_dir, &config.machine.linuxcnc_ini));
         config.machine.linuxcnc_ini = ini_path.to_string_lossy().into_owned();
@@ -1038,6 +1044,18 @@ fn load_merged(path: &Path, chain: &mut Vec<PathBuf>) -> Result<toml::Value, Con
     Ok(merged)
 }
 
+/// Resolve the optional brand image against the profile. `""` clears it.
+fn resolve_ui_logo(ui: &mut UiConfig, base: &Path) {
+    ui.logo = ui.logo.take().and_then(|value| {
+        let value = value.trim();
+        if value.is_empty() {
+            None
+        } else {
+            Some(resolve_path(base, value).to_string_lossy().into_owned())
+        }
+    });
+}
+
 fn resolve_path(base: &Path, value: &str) -> PathBuf {
     let expanded = expand_tilde(value.trim());
     if expanded.is_absolute() {
@@ -1142,6 +1160,16 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
             "ui.keyboard must be panel or pc (got {:?})",
             config.ui.keyboard
         )));
+    }
+    // The logo is read at paint time by the UI, which owns the image decoder.
+    // The loader still checks the file so a typo fails `--check-config`
+    // instead of leaving a wordmark where a brand image was expected.
+    if let Some(logo) = config.ui.logo.as_deref() {
+        if !Path::new(logo).is_file() {
+            return Err(ConfigError::Invalid(format!(
+                "ui.logo does not exist: {logo}"
+            )));
+        }
     }
     if config.machine.name.trim().is_empty() {
         return Err(ConfigError::Invalid(
@@ -2187,6 +2215,78 @@ enabled = true
         write(&profile, &profile_text("qwerty"));
         let error = Profile::load(&profile, None).unwrap_err();
         assert!(error.to_string().contains("ui.keyboard"), "{error}");
+    }
+
+    /// `[ui] logo` is a brand image for the top bar. It resolves against the
+    /// profile like every other path, and an empty value means "no logo".
+    #[test]
+    fn a_ui_logo_resolves_against_the_profile() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        std::fs::create_dir_all(dir.path().join("brand")).unwrap();
+        write(&dir.path().join("brand/logo.gif"), "GIF89a");
+        let profile = dir.path().join("sim.toml");
+        let profile_text = |logo: &str| {
+            format!(
+                r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[ui]
+logo = "{logo}"
+[panel]
+kind = "simulated"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+"#
+            )
+        };
+        write(&profile, &profile_text("brand/logo.gif"));
+        let loaded = Profile::load(&profile, None).unwrap();
+        assert_eq!(
+            loaded.config.ui.logo.as_deref(),
+            Some(dir.path().join("brand/logo.gif").to_str().unwrap()),
+            "the path resolves beside the profile"
+        );
+        write(&profile, &profile_text(""));
+        let loaded = Profile::load(&profile, None).unwrap();
+        assert_eq!(loaded.config.ui.logo, None, "an empty value means no logo");
+    }
+
+    #[test]
+    fn a_missing_ui_logo_fails_the_check() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let profile = dir.path().join("sim.toml");
+        write(
+            &profile,
+            r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[ui]
+logo = "brand/gone.png"
+[panel]
+kind = "simulated"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+"#,
+        );
+        let error = Profile::load(&profile, None).unwrap_err();
+        assert!(error.to_string().contains("ui.logo"), "{error}");
+        assert!(error.to_string().contains("brand/gone.png"), "{error}");
     }
 
     #[test]

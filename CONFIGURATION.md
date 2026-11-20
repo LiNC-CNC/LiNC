@@ -563,6 +563,25 @@ The standalone simulator panel has its own zoom control,
 `[simulation] panel_scale`, also in `0.5..3.0`; it is independent of the HMI
 scale.
 
+### Brand logo
+
+`[ui] logo` puts a brand image in the top bar in place of the `LiNC` wordmark.
+The machine name, `SIM` badge and metrics stay where they are. The value is a
+path: absolute, or relative to the profile, like every other path. PNG and GIF
+(the first frame) are decoded; the image is scaled to fit 30 px of the bar's
+height, keeps its aspect ratio, and is capped at 220 px wide so a wide logo
+cannot push the metrics off a 1280 px baseline window.
+
+```toml
+[ui]
+logo = "branding/logo.png"
+```
+
+An empty value means no logo, which is how a profile keeps the key while it is
+being edited. `--check-config` rejects a path that does not name a file. A file
+that exists but cannot be decoded leaves the wordmark in place and logs one
+warning, so a bad image never empties the bar.
+
 ### Spindle feedback
 
 `[hal.pins] spindle_speed` names the HAL pin carrying actual spindle-speed
@@ -688,7 +707,7 @@ The bindings do not change: the panel's navigation keys already send `F5` to
 | `[machine]` | `name`, `kind`, `gui`, `linuxcnc_ini` |
 | `[mill]` | optional `max_axes` |
 | `[lathe]` | optional `turret_stations`, `power_turret`, `live_tooling`, `live_tool_max_rpm`, `c_axis`, `y_axis`, `sub_spindle` |
-| `[ui]` | `theme`, `start_page`, `window_title`, `scale`, `axis_order`, `pages`, `servo_load`, `second_card`, `window_mode`, `decorations`, `dro_position`, `keyboard` |
+| `[ui]` | `theme`, `start_page`, `window_title`, `logo`, `scale`, `axis_order`, `pages`, `servo_load`, `second_card`, `window_mode`, `decorations`, `dro_position`, `keyboard` |
 | `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running`, `show_parent_above_root` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter` |

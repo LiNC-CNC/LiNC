@@ -45,6 +45,10 @@ keyboard = "panel"
 # Window-manager decorations. The control-panel setup is a borderless maximised
 # window: window_mode = "maximized" with decorations = false.
 decorations = true
+# Optional brand image drawn in the top bar in place of the "LiNC" wordmark.
+# Absolute, or relative to this profile. PNG and GIF are decoded; a file that
+# cannot be read or decoded keeps the wordmark and logs one warning.
+# logo = "branding/logo.png"
 
 [program]
 default_view = "split"

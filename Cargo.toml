@@ -38,7 +38,7 @@ eframe = { version = "0.37", default-features = false, features = [
     "wayland",
     "x11",
 ] }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["gif", "png"] }
 ropey = "1.6"
 libloading = "0.8"
 libc = "0.2"

@@ -422,7 +422,8 @@ Fixed shell, no right-hand status column:
 
 - **Top status bar**: machine name, physical mode, program, tool, spindle,
   feed, work offset, panel link, alarm/message counts, render rate (`NN FPS`,
-  warning colour below 30), time.
+  warning colour below 30), time. The `LiNC` wordmark in its left slot is
+  replaced by the `[ui] logo` image when a profile names one.
 - **No page titles.** The navigation names the page and the top bar names the
   machine state, so a heading above the content only costs vertical space.
   Each page keeps an invisible focus anchor at the top so arrow-key navigation

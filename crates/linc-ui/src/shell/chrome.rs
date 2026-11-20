@@ -3,6 +3,13 @@
 
 use super::*;
 
+/// Height of a configured `[ui] logo` in the top bar. The bar is 48 px with
+/// 8 px inner margins, so 30 px keeps a pixel of air above and below it.
+const LOGO_HEIGHT: f32 = 30.0;
+/// Width cap for the same image: a very wide logo must not push the machine
+/// name and the metrics off the bar.
+const LOGO_MAX_WIDTH: f32 = 220.0;
+
 pub(super) fn metric(ui: &mut egui::Ui, label: &str, value: String, size: f32) {
     metric_colored(ui, label, value, size, theme::FG);
 }
@@ -28,16 +35,60 @@ pub(super) fn metric_colored(
 }
 
 impl LincApp {
+    /// The `[ui] logo` decoded once. `None` keeps the `LiNC` wordmark: the
+    /// profile has no logo, or the file could not be read or decoded and has
+    /// been reported once. The file is not retried every frame.
+    fn logo_texture(&mut self, ctx: &egui::Context) -> Option<egui::TextureHandle> {
+        if self.chrome.logo_loaded {
+            return self.chrome.logo.clone();
+        }
+        self.chrome.logo_loaded = true;
+        let path = self.profile.config.ui.logo.clone()?;
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                log::warn!("[ui] logo {path} cannot be read: {error}");
+                return None;
+            }
+        };
+        let image = match image::load_from_memory(&bytes) {
+            Ok(image) => image.to_rgba8(),
+            Err(error) => {
+                log::warn!("[ui] logo {path} cannot be decoded: {error}");
+                return None;
+            }
+        };
+        let size = [image.width() as usize, image.height() as usize];
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+        let texture = ctx.load_texture("ui-logo", color_image, egui::TextureOptions::LINEAR);
+        self.chrome.logo = Some(texture.clone());
+        Some(texture)
+    }
+
     pub(super) fn top_bar(&mut self, ui: &mut egui::Ui) {
+        let logo = self.logo_texture(ui.ctx());
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("LiNC")
-                            .size(theme::font_size(16.0))
-                            .strong()
-                            .color(theme::FG),
-                    );
+                    // The configured brand image takes the wordmark's slot.
+                    // The machine name stays beside either one.
+                    match &logo {
+                        Some(texture) => {
+                            ui.add(
+                                egui::Image::from_texture(texture)
+                                    .max_height(LOGO_HEIGHT)
+                                    .max_width(LOGO_MAX_WIDTH),
+                            );
+                        }
+                        None => {
+                            ui.label(
+                                RichText::new("LiNC")
+                                    .size(theme::font_size(16.0))
+                                    .strong()
+                                    .color(theme::FG),
+                            );
+                        }
+                    }
                     if self.is_sim() {
                         ui.add_space(4.0);
                         let (rect, _) =
@@ -477,6 +528,11 @@ impl LincApp {
 pub(crate) struct ChromeUi {
     pub quit_requested: bool,
     pub last_snapshot_ms: u64,
+    /// `[ui] logo`, decoded on the first paint. `None` keeps the wordmark.
+    pub logo: Option<egui::TextureHandle>,
+    /// One decode attempt per session: a broken file is reported once, not on
+    /// every frame.
+    pub logo_loaded: bool,
     /// Highest alarm id the operator has been told about. Controller errors used
     /// to appear only in the Machine page's message card, so a program that
     /// aborted looked like it had simply jumped to the end.

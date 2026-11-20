@@ -672,6 +672,68 @@ fn the_top_bar_always_carries_the_network_metric() {
     );
 }
 
+/// `[ui] logo` takes the wordmark's slot and leaves the machine name beside
+/// it. A file that cannot be read falls back to the wordmark rather than
+/// leaving a blank slot where the brand was.
+#[test]
+fn a_configured_logo_replaces_the_wordmark() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let logo = harness._dir.path().join("logo.png");
+    image::RgbaImage::from_pixel(8, 4, image::Rgba([0x4d, 0xa3, 0xff, 0xff]))
+        .save(&logo)
+        .unwrap();
+    harness.app.profile.config.ui.logo = Some(logo.to_string_lossy().into_owned());
+
+    let texts = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        !texts.iter().any(|text| text == "LiNC"),
+        "the image replaces the wordmark: {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|text| text == "Test"),
+        "the machine name stays beside it: {texts:?}"
+    );
+    assert!(harness.app.chrome.logo.is_some(), "the image decoded once");
+
+    // GIF is the other format the shipped logos use; the first frame is the
+    // logo, which is all a static brand image needs.
+    let gif = harness._dir.path().join("logo.gif");
+    std::fs::write(
+        &gif,
+        [
+            0x47u8, 0x49, 0x46, 0x38, 0x37, 0x61, 0x02, 0x00, 0x02, 0x00, 0x80, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00,
+            0x00, 0x08, 0x06, 0x00, 0x01, 0x08, 0x04, 0x10, 0x10, 0x00, 0x3b,
+        ],
+    )
+    .unwrap();
+    harness.app.profile.config.ui.logo = Some(gif.to_string_lossy().into_owned());
+    harness.app.chrome.logo = None;
+    harness.app.chrome.logo_loaded = false;
+    let texts = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        !texts.iter().any(|text| text == "LiNC"),
+        "a GIF replaces the wordmark too: {texts:?}"
+    );
+    assert!(harness.app.chrome.logo.is_some(), "the GIF decoded");
+
+    harness.app.profile.config.ui.logo = Some(
+        harness
+            ._dir
+            .path()
+            .join("gone.png")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    harness.app.chrome.logo = None;
+    harness.app.chrome.logo_loaded = false;
+    let texts = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        texts.iter().any(|text| text == "LiNC"),
+        "a missing file keeps the wordmark: {texts:?}"
+    );
+}
+
 /// The probe field is the newest tenant of the bottom bar, and the row has to
 /// keep fitting the 1280 px baseline window. Measured from the font rather
 /// than guessed: every width below is theme::measure at the field's own size,

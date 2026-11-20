@@ -343,6 +343,8 @@ impl LincApp {
             chrome: ChromeUi {
                 quit_requested: false,
                 last_snapshot_ms: now_ms(),
+                logo: None,
+                logo_loaded: false,
                 alarm_id_seen: 0,
                 last_connection: Some(snapshot.panel.connected),
                 last_protect: Some(snapshot.panel.protect_effective()),
