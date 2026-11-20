@@ -347,6 +347,12 @@ impl LincApp {
             self.tools.number = None;
             self.tools.position = None;
         }
+        // The spindle speed dialog is the manual page's and is drawn only there:
+        // the same rule, applied on every page change including the one the
+        // panel's mode switch makes.
+        if page != Page::Manual {
+            self.manual.spindle_speed = None;
+        }
         if page == Page::Help {
             self.help.ensure_loaded();
         }

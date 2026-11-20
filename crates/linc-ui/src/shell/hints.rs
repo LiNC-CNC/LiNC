@@ -456,35 +456,55 @@ impl LincApp {
                 _ => hints.push(Shortcut::hint("PgUp/PgDn", "TABS")),
             },
             Page::Manual | Page::Homing => {
-                hints.push(Shortcut::run(
-                    k.graph_fit.label(),
-                    "FIT",
-                    ShortcutCommand::FitGraph,
-                ));
-                hints.push(Shortcut::run(
-                    view_cycle.clone(),
-                    "VIEW",
-                    ShortcutCommand::CycleView,
-                ));
-                hints.push(Shortcut::run(
-                    k.toggle_bounds.label(),
-                    "BOUNDS",
-                    ShortcutCommand::CycleBounds,
-                ));
-                hints.push(Shortcut::run(
-                    k.graph_clear.label(),
-                    "CLEAR TRAIL",
-                    ShortcutCommand::ClearTrail,
-                ));
-                hints.push(Shortcut::run(
-                    k.remaining.label(),
-                    "REMAINING",
-                    ShortcutCommand::CycleRemaining,
-                ));
-                hints.push(Shortcut::hint(k.view_pan_hint(), "PAN"));
-                hints.push(Shortcut::hint(k.view_zoom_hint(), "ZOOM"));
-                hints.extend(lathe_hints.clone());
-                hints.push(Shortcut::hint("Arrows", "SELECT"));
+                // Three groups: the toolpath, the spindle, and the keys the page
+                // itself owns. The spindle group is manual modes only: HOME and
+                // PROG.HOME share this page family without a spindle control.
+                let mut view_items = vec![
+                    Shortcut::run(k.graph_fit.label(), "FIT", ShortcutCommand::FitGraph),
+                    Shortcut::run(view_cycle.clone(), "VIEW", ShortcutCommand::CycleView),
+                    Shortcut::run(
+                        k.toggle_bounds.label(),
+                        "BOUNDS",
+                        ShortcutCommand::CycleBounds,
+                    ),
+                    Shortcut::run(
+                        k.graph_clear.label(),
+                        "CLEAR TRAIL",
+                        ShortcutCommand::ClearTrail,
+                    ),
+                    Shortcut::run(
+                        k.remaining.label(),
+                        "REMAINING",
+                        ShortcutCommand::CycleRemaining,
+                    ),
+                    Shortcut::hint(k.view_pan_hint(), "PAN"),
+                    Shortcut::hint(k.view_zoom_hint(), "ZOOM"),
+                ];
+                view_items.extend(lathe_hints.clone());
+                groups.push(ShortcutGroup {
+                    title: "VIEW",
+                    items: view_items,
+                });
+
+                if self.nav.page == Page::Manual
+                    && matches!(
+                        self.snapshot.panel.mode.mode(),
+                        Some(PanelMode::Jog | PanelMode::Inc | PanelMode::Mpg)
+                    )
+                {
+                    // The group title names the subject, so the rows name only
+                    // the action: FASTER, SLOWER, SET RPM.
+                    groups.push(ShortcutGroup {
+                        title: "SPINDLE",
+                        items: vec![
+                            Shortcut::hint(k.spindle_speed_up.label(), "FASTER"),
+                            Shortcut::hint(k.spindle_speed_down.label(), "SLOWER"),
+                            Shortcut::hint(k.spindle_speed.label(), "SET RPM"),
+                        ],
+                    });
+                }
+
+                let mut key_items = vec![Shortcut::hint("Arrows", "SELECT")];
                 // Only INC takes the digits: a continuous JOG has no increment
                 // to pick, MPG selects its step on the handwheel, and
                 // HOME/PROG.HOME share this page family without a step row.
@@ -492,22 +512,30 @@ impl LincApp {
                     && self.snapshot.panel.mode.mode() == Some(PanelMode::Inc)
                     && !self.increments().is_empty()
                 {
-                    hints.push(Shortcut::hint(
+                    key_items.push(Shortcut::hint(
                         format!("1-{}", self.increments().len()),
                         "INCREMENT",
                     ));
                 }
-                hints.push(Shortcut::hint("X/Y/Z", "ZERO AXIS"));
-                hints.push(Shortcut::run(
+                key_items.push(Shortcut::hint("X/Y/Z", "ZERO AXIS"));
+                key_items.push(Shortcut::run(
                     "A",
                     "ZERO ALL",
                     ShortcutCommand::ManualZeroAll,
                 ));
-                hints.push(Shortcut::run(
+                key_items.push(Shortcut::run(
                     "O",
                     "LIMIT RECOVERY",
                     ShortcutCommand::LimitRecovery,
                 ));
+                groups.push(ShortcutGroup {
+                    title: if self.nav.page == Page::Homing {
+                        "HOMING"
+                    } else {
+                        "MANUAL"
+                    },
+                    items: key_items,
+                });
             }
             Page::Offsets => {
                 hints.push(Shortcut::hint("Arrows", "SELECT"));

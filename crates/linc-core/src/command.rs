@@ -1,16 +1,20 @@
 //! The closed machine command set.
 //!
-//! Machine-control commands (cycle, jog, spindle, coolant, overrides, E-stop)
-//! are intentionally not representable, with one exception: `RecoverLimit`
-//! issues a single bounded increment away from a tripped hard limit. It cannot
-//! express a direction, a distance, a speed or a free jog.
+//! Machine-control commands (cycle, jog, spindle start/stop, coolant,
+//! overrides, E-stop) are intentionally not representable, with two bounded
+//! exceptions: `RecoverLimit` issues a single increment away from a tripped
+//! hard limit, and `StepSpindleSpeed` adds or subtracts one INI increment from
+//! the speed of a spindle that is already turning. Neither can express a
+//! distance, an absolute speed, a free jog or a spindle start.
 
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::model::{AxisMap, ProbeResult, ToolChangeToken, ToolRow};
+use crate::model::{
+    AxisMap, InterpState, MachinePower, MachineSnapshot, ProbeResult, ToolChangeToken, ToolRow,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MdiOrigin {
@@ -24,6 +28,11 @@ pub enum MdiOrigin {
     ManualToolChange,
     /// Panel PROG.HOME path (observed by the HMI, issued by the panel service).
     ProgHome,
+    /// The manual screens' numeric spindle speed, when the spindle is stopped:
+    /// a bare `S` block sets the interpreter's word, which is what the panel's
+    /// own SPD keys start with. It is not MDI mode's word, so it is allowed
+    /// with the panel in JOG, INC or MPG.
+    SpindleSpeed,
 }
 
 impl MdiOrigin {
@@ -34,6 +43,7 @@ impl MdiOrigin {
             Self::ToolChange => "TOOL CHANGE",
             Self::ManualToolChange => "MANUAL CHANGE",
             Self::ProgHome => "PROG.HOME",
+            Self::SpindleSpeed => "SPINDLE SPEED",
         }
     }
 }
@@ -146,6 +156,17 @@ impl HalValue {
     }
 }
 
+/// Which way one spindle speed step goes.
+///
+/// A direction, not an amount: LinuxCNC adds or subtracts
+/// `[SPINDLE_n]INCREMENT` itself, so the HMI cannot name a speed, cross zero or
+/// move the spindle in one step it did not take.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpindleStep {
+    Slower,
+    Faster,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MachineCommand {
     IssueMdi {
@@ -179,6 +200,32 @@ pub enum MachineCommand {
     /// refuses unless `axis` is the only tripped axis.
     RecoverLimit {
         axis: String,
+    },
+    /// One step on the programmed speed of the spindle that is already turning:
+    /// the same action as Axis's `-`/`+`. LinuxCNC adds or subtracts
+    /// `[SPINDLE_n]INCREMENT` (100 rpm unless the INI says otherwise) to the
+    /// motion controller's speed, keeps the sign, and clamps to the spindle's
+    /// `MAX_FORWARD_VELOCITY`/`MAX_REVERSE_VELOCITY`.
+    ///
+    /// This is not spindle override: the override factor and the panel knob are
+    /// untouched. It also does not rewrite the interpreter's S word, so the next
+    /// `S` in a running program puts the programmed speed back.
+    StepSpindleSpeed {
+        step: SpindleStep,
+    },
+    /// Put the spindle at `rpm`. A running spindle changes speed under it; a
+    /// stopped one gets the interpreter's S word, so the panel's next start
+    /// runs at `rpm` and nothing turns now. Bounded by
+    /// `[DISPLAY]MAX_SPINDLE_SPEED` and the machine's own spindle limits.
+    ///
+    /// The running path sends `EMC_SPINDLE_ON` with the direction the operator
+    /// can see, because `EMC_SPINDLE_SPEED` takes its sign from the
+    /// interpreter's remembered direction and a panel start never sets that.
+    /// The stopped path sets the interpreter's word, which is the value the
+    /// panel starts with. The override is untouched on both paths, and the next
+    /// `S` in a running program still wins.
+    SetSpindleSpeed {
+        rpm: f64,
     },
     LoadProgram {
         path: PathBuf,
@@ -283,6 +330,8 @@ impl MachineCommand {
             Self::SetCurrentTool { .. } => "Set current tool",
             Self::ArmLimitsOverride { .. } => "Arm limits override",
             Self::RecoverLimit { .. } => "Recover limit",
+            Self::StepSpindleSpeed { .. } => "Step spindle speed",
+            Self::SetSpindleSpeed { .. } => "Set spindle speed",
             Self::LoadProgram { .. } => "Load program",
             Self::UnloadProgram => "Unload program",
             Self::SaveProgram { .. } => "Save program",
@@ -303,6 +352,98 @@ impl MachineCommand {
             Self::ClearTrail => "Clear live trail",
         }
     }
+}
+
+/// The panel and power gates every spindle command shares.
+///
+/// The panel stays the authority: without it the HMI cannot see the mode the
+/// operator selected, and a stale panel is the same as no panel.
+fn check_spindle_panel(snapshot: &MachineSnapshot) -> Result<(), MachineError> {
+    if !snapshot.panel.connected || snapshot.panel.communication_error {
+        return Err(MachineError::PanelOffline);
+    }
+    if !snapshot.panel.mode.is_valid() {
+        return Err(MachineError::InvalidPanelMode);
+    }
+    if snapshot.task.power != MachinePower::On {
+        return Err(MachineError::MachineOff);
+    }
+    Ok(())
+}
+
+/// The spindle a trim command may act on.
+///
+/// It must be turning because `EMC_SPINDLE_INCREASE` and
+/// `EMC_SPINDLE_DECREASE` skip a stopped spindle without an error, and a key
+/// that does nothing is worse than one that says why.
+fn spindle_for_trim(
+    snapshot: &MachineSnapshot,
+) -> Result<&crate::model::SpindleState, MachineError> {
+    check_spindle_panel(snapshot)?;
+    let Some(spindle) = snapshot.spindles.first() else {
+        return Err(MachineError::SpindleStopped);
+    };
+    if !spindle.on || spindle.commanded_speed == 0.0 || spindle.direction == 0 {
+        return Err(MachineError::SpindleStopped);
+    }
+    Ok(spindle)
+}
+
+/// Rules for a spindle speed step, shared by the simulator and the machine
+/// backend so the two cannot drift.
+///
+/// `increment` is the INI's `[SPINDLE_n]INCREMENT`; the step itself is applied
+/// by LinuxCNC, so the value is used only to know where the step would land.
+/// `ceiling` is `[DISPLAY]MAX_SPINDLE_SPEED`, and `0.0` means the profile names
+/// none.
+pub fn check_spindle_step(
+    snapshot: &MachineSnapshot,
+    step: SpindleStep,
+    increment: f64,
+    ceiling: f64,
+) -> Result<(), MachineError> {
+    let spindle = spindle_for_trim(snapshot)?;
+    // Reverse reads as a negative speed, so the ceiling is on the magnitude:
+    // `Faster` always means further from zero, whichever way the spindle turns.
+    if step == SpindleStep::Faster
+        && ceiling > 0.0
+        && spindle.commanded_speed.abs() + increment > ceiling
+    {
+        return Err(MachineError::SpindleSpeedLimit);
+    }
+    Ok(())
+}
+
+/// Rules for an absolute spindle speed, shared the same way.
+///
+/// Unlike a step, this does not need the spindle to be turning. With it
+/// stopped, the number becomes the interpreter's S word and the panel's next
+/// start runs at it; nothing turns now. The interpreter has to be idle because
+/// the stopped path runs a `S` block, and a running program owns that word.
+pub fn check_spindle_speed(
+    snapshot: &MachineSnapshot,
+    rpm: f64,
+    ceiling: f64,
+) -> Result<(), MachineError> {
+    check_spindle_panel(snapshot)?;
+    if snapshot.probe_trip_active() {
+        return Err(MachineError::ProbeTripped);
+    }
+    if snapshot.task.interp != InterpState::Idle || snapshot.task.running {
+        return Err(MachineError::NotIdle);
+    }
+    if snapshot.program.running {
+        return Err(MachineError::ProgramRunning);
+    }
+    if !rpm.is_finite() || rpm <= 0.0 {
+        return Err(MachineError::Invalid(
+            "spindle speed must be greater than zero".into(),
+        ));
+    }
+    if ceiling > 0.0 && rpm > ceiling {
+        return Err(MachineError::SpindleSpeedLimit);
+    }
+    Ok(())
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Serialize, Deserialize)]
@@ -333,6 +474,10 @@ pub enum MachineError {
     EmergencyStop,
     #[error("spindle is running")]
     SpindleRunning,
+    #[error("spindle is not turning")]
+    SpindleStopped,
+    #[error("spindle speed is at its maximum")]
+    SpindleSpeedLimit,
     #[error("homing is in progress")]
     HomingInProgress,
     #[error("a tool change is pending")]
@@ -385,6 +530,8 @@ impl MachineError {
             Self::CabinetOff => "CABINET OFF",
             Self::EmergencyStop => "E-STOP ACTIVE",
             Self::SpindleRunning => "SPINDLE RUNNING",
+            Self::SpindleStopped => "SPINDLE STOPPED",
+            Self::SpindleSpeedLimit => "SPINDLE AT LIMIT",
             Self::HomingInProgress => "HOMING",
             Self::ToolChangePending => "TOOL CHANGE",
             Self::LimitNotTripped { .. } => "NOT ON A LIMIT",
@@ -455,6 +602,54 @@ pub fn starts_spindle(block: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The numeric entry takes a speed from a stopped spindle, because the
+    /// number becomes the S word the panel starts with. A step on the same
+    /// spindle is refused: LinuxCNC skips it at zero speed.
+    #[test]
+    fn a_stopped_spindle_takes_a_speed_but_not_a_step() {
+        use crate::model::{MachineVariant, PanelMode, PanelModeValidity, SpindleState};
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.panel.connected = true;
+        snapshot.panel.mode = PanelModeValidity::Valid(PanelMode::Jog);
+        snapshot.task.power = MachinePower::On;
+        snapshot.task.interp = InterpState::Idle;
+        snapshot.spindles.push(SpindleState {
+            index: 0,
+            name: "MAIN SPINDLE".into(),
+            commanded_speed: 0.0,
+            actual_speed: 0.0,
+            load: None,
+            override_factor: 1.0,
+            direction: 0,
+            on: false,
+            live_tool: false,
+            live_tool_axial: false,
+            live_tool_max_rpm: 0.0,
+        });
+
+        assert_eq!(check_spindle_speed(&snapshot, 1200.0, 0.0), Ok(()));
+        assert_eq!(
+            check_spindle_step(&snapshot, SpindleStep::Faster, 100.0, 0.0),
+            Err(MachineError::SpindleStopped),
+            "a step still needs a turning spindle"
+        );
+        assert_eq!(
+            check_spindle_speed(&snapshot, 1300.0, 1200.0),
+            Err(MachineError::SpindleSpeedLimit)
+        );
+        assert!(matches!(
+            check_spindle_speed(&snapshot, 0.0, 0.0),
+            Err(MachineError::Invalid(_))
+        ));
+
+        // The stopped path runs a `S` block, so a busy interpreter refuses it.
+        snapshot.task.interp = InterpState::Reading;
+        assert_eq!(
+            check_spindle_speed(&snapshot, 1200.0, 0.0),
+            Err(MachineError::NotIdle)
+        );
+    }
 
     #[test]
     fn a_spindle_start_is_recognised_and_a_stop_is_not() {

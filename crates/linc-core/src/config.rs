@@ -463,6 +463,14 @@ pub struct KeysConfig {
     /// Pages with a toolpath: zoom the view in and out.
     pub view_zoom_in: String,
     pub view_zoom_out: String,
+    /// Page-local to the manual screens (JOG/MPG/INC): one step on the running
+    /// spindle's programmed speed, the way Axis's `-`/`+` work. Not override.
+    pub spindle_speed_up: String,
+    pub spindle_speed_down: String,
+    /// Page-local to the manual screens: type an absolute spindle speed for the
+    /// spindle that is already turning. Ctrl+S is free there; the save chord is
+    /// page-local to Program and the MDI pane's copy to MAIN+MDI.
+    pub spindle_speed: String,
     /// Page-local to Program: jump to a line number.
     pub goto_line: String,
     pub program_run_from_line: String,
@@ -530,6 +538,9 @@ impl KeysConfig {
             view_pan_down: "Ctrl+Down".into(),
             view_zoom_in: "Ctrl+Plus".into(),
             view_zoom_out: "Ctrl+Minus".into(),
+            spindle_speed_up: "Ctrl+PageUp".into(),
+            spindle_speed_down: "Ctrl+PageDown".into(),
+            spindle_speed: "Ctrl+S".into(),
             goto_line: "Ctrl+G".into(),
             program_run_from_line: "Ctrl+R".into(),
             files_delete: "Delete".into(),

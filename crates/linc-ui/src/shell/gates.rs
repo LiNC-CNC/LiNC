@@ -201,6 +201,7 @@ impl LincApp {
             || self.help.dialog.is_some()
             || self.tools.number.is_some()
             || self.tools.position.is_some()
+            || self.manual.spindle_speed.is_some()
             || self.snapshot.tool_change.status == linc_core::model::ToolChangeStatus::ManualPrompt
     }
 
@@ -229,6 +230,12 @@ impl LincApp {
     pub fn escape(&mut self) {
         if self.tools.number.is_some() {
             self.tools.number = None;
+            return;
+        }
+        // The manual screens' speed dialog takes its own Escape in the page, so
+        // a refused entry keeps it open. This is the path for any other caller.
+        if self.manual.spindle_speed.is_some() {
+            self.manual.spindle_speed = None;
             return;
         }
         // The tool-position dialog takes its own Escape in the page, where a

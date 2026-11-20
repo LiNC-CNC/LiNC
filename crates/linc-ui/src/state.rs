@@ -2073,6 +2073,40 @@ pub struct ManualUi {
     pub fit: bool,
     /// Keep the live toolpath framed until the operator pans/zooms.
     pub auto_fit: bool,
+    /// The numeric spindle speed dialog, while it is open. Part of
+    /// `LincApp::overlay_open`, so the page keys and the shell's global keys
+    /// stand down behind it.
+    pub spindle_speed: Option<SpindleSpeedEntry>,
+}
+
+/// The manual screens' spindle speed dialog: one line of digits, prefilled
+/// with the speed the controller reports now.
+pub struct SpindleSpeedEntry {
+    pub text: String,
+    /// Why the last confirm was refused, shown inside the dialog. A refused
+    /// entry keeps the dialog open with its text.
+    pub error: Option<String>,
+    /// Opened this frame: the field takes focus and selects the whole value, so
+    /// Enter alone re-issues it and the first digit replaces it. There is no
+    /// click-to-focus on the panel, and no Tab.
+    pub fresh: bool,
+}
+
+impl SpindleSpeedEntry {
+    /// The dialog as it opens: the speed the controller reports, rounded. A
+    /// stopped spindle seeds nothing, so the first digit typed is the whole
+    /// value instead of being appended to a zero the machine will not accept.
+    pub fn new(current_rpm: f64) -> Self {
+        Self {
+            text: if current_rpm.abs() > 0.5 {
+                format!("{:.0}", current_rpm.abs())
+            } else {
+                String::new()
+            },
+            error: None,
+            fresh: true,
+        }
+    }
 }
 
 impl Default for ManualUi {
@@ -2085,6 +2119,7 @@ impl Default for ManualUi {
             view: ViewMode::Iso3d,
             fit: true,
             auto_fit: true,
+            spindle_speed: None,
         }
     }
 }
@@ -2529,6 +2564,13 @@ pub struct Keymap {
     /// Pages with a toolpath: zoom the view while the pointer is over it.
     pub view_zoom_in: Binding,
     pub view_zoom_out: Binding,
+    /// Page-local to the manual screens (JOG/MPG/INC): one step on the running
+    /// spindle's programmed speed. Ctrl+Plus/Minus is the toolpath zoom and
+    /// Ctrl+Up/Down the pan, so the trim takes the Page keys.
+    pub spindle_speed_up: Binding,
+    pub spindle_speed_down: Binding,
+    /// Page-local to the manual screens: the numeric spindle speed dialog.
+    pub spindle_speed: Binding,
     /// Page-local to Program: ask for a line number and jump there.
     pub goto_line: Binding,
     /// Page-local to Program: start the loaded program at the current line.
@@ -2670,6 +2712,21 @@ impl Keymap {
             view_zoom_out: binding(
                 &keys.view_zoom_out,
                 Binding::new(Key::Minus, ctrl),
+                &mut rejected,
+            ),
+            spindle_speed_up: binding(
+                &keys.spindle_speed_up,
+                Binding::new(Key::PageUp, ctrl),
+                &mut rejected,
+            ),
+            spindle_speed_down: binding(
+                &keys.spindle_speed_down,
+                Binding::new(Key::PageDown, ctrl),
+                &mut rejected,
+            ),
+            spindle_speed: binding(
+                &keys.spindle_speed,
+                Binding::new(Key::S, ctrl),
                 &mut rejected,
             ),
             goto_line: binding(&keys.goto_line, Binding::new(Key::G, ctrl), &mut rejected),
@@ -3181,6 +3238,46 @@ mod page_key_tests {
             "the field takes focus and selects on the first frame"
         );
         assert_eq!(super::ToolNumberEntry::new(0).text, "0");
+    }
+
+    /// The manual screens' spindle keys: Page keys for the trim because
+    /// Ctrl+Plus/Minus is the toolpath zoom and Ctrl+Up/Down the pan, and Ctrl+S
+    /// for the numeric entry because save is page-local to Program.
+    #[test]
+    fn the_spindle_keys_ship_in_base_toml_and_miss_the_toolpath_chords() {
+        let keymap = Keymap::from_config(&linc_core::config::KeysConfig::spec_default());
+        assert!(keymap.rejected.is_empty(), "{:?}", keymap.rejected);
+        assert_eq!(keymap.spindle_speed_up.label(), "Ctrl+PgUp");
+        assert_eq!(keymap.spindle_speed_down.label(), "Ctrl+PgDn");
+        assert_eq!(keymap.spindle_speed.label(), "Ctrl+S");
+        for other in [
+            ("zoom in", keymap.view_zoom_in),
+            ("zoom out", keymap.view_zoom_out),
+            ("pan up", keymap.view_pan_up),
+            ("pan down", keymap.view_pan_down),
+        ] {
+            assert_ne!(keymap.spindle_speed_up, other.1, "{other:?}");
+            assert_ne!(keymap.spindle_speed_down, other.1, "{other:?}");
+        }
+        let base = include_str!("../../../configs/base.toml");
+        for line in [
+            "spindle_speed_up = \"Ctrl+PageUp\"",
+            "spindle_speed_down = \"Ctrl+PageDown\"",
+            "spindle_speed = \"Ctrl+S\"",
+        ] {
+            assert!(
+                base.contains(line),
+                "configs/base.toml must carry the spindle speed default {line}"
+            );
+        }
+
+        // A profile can move them like any other chord.
+        let mut keys = linc_core::config::KeysConfig::spec_default();
+        keys.spindle_speed_up = "Ctrl+F11".to_string();
+        let keymap = Keymap::from_config(&keys);
+        assert_eq!(keymap.spindle_speed_up.key, egui::Key::F11);
+        assert!(keymap.spindle_speed_up.modifiers.ctrl);
+        assert!(keymap.rejected.is_empty(), "{:?}", keymap.rejected);
     }
 
     #[test]

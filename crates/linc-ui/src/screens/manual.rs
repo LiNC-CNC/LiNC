@@ -9,13 +9,19 @@
 //! the override and the status line shows when it is on.
 
 use egui::Ui;
+use linc_core::command::{MachineCommand, SpindleStep};
 use linc_core::model::{MachineVariant, PanelMode};
 
 use crate::screens::common::{self, LiveAxisRow};
 use crate::shell::LincApp;
 use crate::state::ShortcutCommand;
+use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
+    // The numeric speed dialog owns the keyboard while it is open; the page keys
+    // stand down behind it and the window is drawn last, over the page.
+    spindle_speed_dialog_keys(app, ui);
+    handle_spindle_keys(app, ui);
     handle_zero_keys(app, ui);
     handle_increment_keys(app, ui);
     // No mode banner: the panel's mode key and the navigation already say which
@@ -77,6 +83,221 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             }
         },
     );
+    draw_spindle_speed_dialog(app, ui);
+}
+
+/// Modes whose keys trim or set the spindle speed: the manual family only.
+/// AUTO, EDIT and MDI keep the chords for themselves, and Homing shares the
+/// page family without a spindle control.
+fn spindle_keys_active(mode: Option<PanelMode>) -> bool {
+    matches!(mode, Some(PanelMode::Jog | PanelMode::Inc | PanelMode::Mpg))
+}
+
+/// `Ctrl+PgUp` / `Ctrl+PgDn` step the running spindle's programmed speed and
+/// `Ctrl+S` opens the numeric entry.
+///
+/// The step is the same command Axis's `-`/`+` send. It goes through
+/// `check_spindle_step`, the rule both backends apply too, so the key answers on
+/// the frame it is pressed instead of waiting for a round trip that would refuse
+/// it anyway.
+pub(crate) fn handle_spindle_keys(app: &mut LincApp, ui: &mut Ui) {
+    if app.overlay_open() || !spindle_keys_active(app.snapshot.panel.mode.mode()) {
+        return;
+    }
+    let text_focused = ui.memory(|memory| {
+        memory.has_focus(egui::Id::unique("linc-program-editor"))
+            || memory.has_focus(egui::Id::unique("linc-tool-cell"))
+    });
+    if text_focused || ui.ctx().text_edit_focused() {
+        return;
+    }
+    let up = app.prefs.keymap.spindle_speed_up;
+    let down = app.prefs.keymap.spindle_speed_down;
+    let entry_key = app.prefs.keymap.spindle_speed;
+    let mut step = None;
+    let mut open_entry = false;
+    ui.input_mut(|input| {
+        if input.consume_key(up.modifiers, up.key) {
+            step = Some(SpindleStep::Faster);
+        }
+        if input.consume_key(down.modifiers, down.key) {
+            step = Some(SpindleStep::Slower);
+        }
+        if input.consume_key(entry_key.modifiers, entry_key.key) {
+            open_entry = true;
+        }
+    });
+    if open_entry {
+        open_spindle_speed_dialog(app);
+        return;
+    }
+    let Some(step) = step else {
+        return;
+    };
+    let ini = &app.profile.machine_ini;
+    match linc_core::command::check_spindle_step(
+        &app.snapshot,
+        step,
+        ini.spindle_increment,
+        ini.max_spindle_speed,
+    ) {
+        Ok(()) => app.send(MachineCommand::StepSpindleSpeed { step }),
+        Err(error) => app.toast(error.to_string(), theme::WARNING),
+    }
+}
+
+/// Open the numeric dialog on the speed the controller reports, so Enter alone
+/// re-issues it and the first digit replaces it.
+fn open_spindle_speed_dialog(app: &mut LincApp) {
+    let current = app
+        .snapshot
+        .spindles
+        .first()
+        .map(|spindle| spindle.commanded_speed)
+        .unwrap_or(0.0);
+    app.manual.spindle_speed = Some(crate::state::SpindleSpeedEntry::new(current));
+}
+
+/// Close it and give the keyboard back: the field held it, and the panel has no
+/// Tab to walk out with.
+fn close_spindle_speed_dialog(app: &mut LincApp, ui: &mut Ui) {
+    app.manual.spindle_speed = None;
+    ui.memory_mut(|memory| memory.stop_text_input());
+}
+
+/// Enter sets the speed, Escape cancels, and a refused entry keeps the dialog
+/// open with its text and the reason.
+fn spindle_speed_dialog_keys(app: &mut LincApp, ui: &mut Ui) {
+    if app.manual.spindle_speed.is_none() {
+        return;
+    }
+    let back = app.prefs.keymap.back;
+    let activate = app.prefs.keymap.activate;
+    let (confirm, cancel) = ui.input_mut(|input| {
+        // Escape is the configured back key on every profile; both are taken so
+        // a rebound back key does not leave the dialog with no way out.
+        let cancel = input.consume_key(back.modifiers, back.key)
+            || input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+        let confirm = input.consume_key(activate.modifiers, activate.key);
+        (confirm, cancel)
+    });
+    if cancel {
+        close_spindle_speed_dialog(app, ui);
+        return;
+    }
+    if !confirm {
+        return;
+    }
+    let Some(mut entry) = app.manual.spindle_speed.take() else {
+        return;
+    };
+    match confirm_spindle_speed(app, &entry.text) {
+        Ok(()) => close_spindle_speed_dialog(app, ui),
+        Err(reason) => {
+            entry.error = Some(reason);
+            app.manual.spindle_speed = Some(entry);
+        }
+    }
+}
+
+/// What a confirmed number sends: an absolute speed for a spindle that is
+/// already turning. The gate is the one the backends apply, so the dialog cannot
+/// accept a number the machine would refuse on a rule it did not check.
+fn confirm_spindle_speed(app: &mut LincApp, text: &str) -> Result<(), String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("type a spindle speed".into());
+    }
+    let rpm = trimmed
+        .parse::<f64>()
+        .map_err(|_| format!("{trimmed} is not a spindle speed"))?;
+    let ceiling = app.profile.machine_ini.max_spindle_speed;
+    linc_core::command::check_spindle_speed(&app.snapshot, rpm, ceiling)
+        .map_err(|error| error.to_string())?;
+    app.send(MachineCommand::SetSpindleSpeed { rpm });
+    Ok(())
+}
+
+/// The dialog itself: the speed in force, the step and the ceiling, one line of
+/// digits, and the reason the last confirm was refused.
+fn draw_spindle_speed_dialog(app: &mut LincApp, ui: &mut Ui) {
+    let Some(mut entry) = app.manual.spindle_speed.take() else {
+        return;
+    };
+    let fresh = std::mem::replace(&mut entry.fresh, false);
+    let error = entry.error.clone();
+    let mut text = entry.text.clone();
+    let cancel_key = app.prefs.keymap.back.label();
+    let ini = &app.profile.machine_ini;
+    let (now, step, ceiling) = app
+        .snapshot
+        .spindles
+        .first()
+        .map(|spindle| {
+            (
+                spindle.commanded_speed.abs(),
+                ini.spindle_increment,
+                ini.max_spindle_speed,
+            )
+        })
+        .unwrap_or((0.0, ini.spindle_increment, ini.max_spindle_speed));
+    let mut summary = format!("NOW {now:.0} RPM  ·  STEP {step:.0}");
+    if ceiling > 0.0 {
+        summary.push_str(&format!("  ·  MAX {ceiling:.0}"));
+    }
+    let id = egui::Id::unique("linc-spindle-speed");
+    egui::Window::new("SPINDLE SPEED")
+        .id(egui::Id::unique("linc-spindle-speed-dialog"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .default_width(380.0)
+        .show(ui.ctx(), |ui| {
+            ui.label(
+                egui::RichText::new(&summary)
+                    .monospace()
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            ui.add_space(6.0);
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut text)
+                    .id(id)
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(140.0)
+                    .hint_text("rpm"),
+            );
+            if fresh {
+                // No click-to-focus and no Tab on this keyboard: the field
+                // takes it on the frame the dialog opens, with the whole value
+                // selected, so Enter alone re-issues it.
+                field.request_focus();
+                if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(text.chars().count()),
+                        )));
+                    state.store(ui.ctx(), id);
+                }
+            }
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(format!("ENTER SETS  ·  {cancel_key} CANCELS"))
+                    .size(theme::font_size(9.0))
+                    .color(theme::MUTED),
+            );
+            if let Some(message) = &error {
+                ui.label(
+                    egui::RichText::new(message)
+                        .size(theme::font_size(10.0))
+                        .color(theme::ERROR),
+                );
+            }
+        });
+    entry.text = text;
+    app.manual.spindle_speed = Some(entry);
 }
 
 fn coordinates_readout(app: &LincApp) -> Vec<LiveAxisRow> {
@@ -270,5 +491,35 @@ mod tests {
             assert!(!zero_keys_active(Some(mode)), "{mode:?}");
         }
         assert!(!zero_keys_active(None));
+    }
+
+    /// The spindle keys belong to the manual family only: AUTO, EDIT and MDI
+    /// keep them, and Homing shares the page family without a spindle control.
+    #[test]
+    fn the_spindle_keys_are_manual_modes_only() {
+        for mode in [PanelMode::Jog, PanelMode::Inc, PanelMode::Mpg] {
+            assert!(spindle_keys_active(Some(mode)), "{mode:?}");
+        }
+        for mode in [
+            PanelMode::Auto,
+            PanelMode::Edit,
+            PanelMode::Mdi,
+            PanelMode::Home,
+            PanelMode::ProgHome,
+        ] {
+            assert!(!spindle_keys_active(Some(mode)), "{mode:?}");
+        }
+        assert!(!spindle_keys_active(None));
+    }
+
+    /// The dialog opens on the speed the controller reports, and on nothing when
+    /// the spindle is stopped so the first digit is the whole value.
+    #[test]
+    fn the_spindle_speed_dialog_seeds_on_the_commanded_speed() {
+        let entry = crate::state::SpindleSpeedEntry::new(4185.4);
+        assert_eq!(entry.text, "4185");
+        assert!(entry.fresh);
+        assert!(entry.error.is_none());
+        assert_eq!(crate::state::SpindleSpeedEntry::new(0.0).text, "");
     }
 }

@@ -18,13 +18,14 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use linuxcnc_nml::{
-    Command as NmlCommand, MessageKind, NmlClient, NmlError, Status as NmlStatus,
+    Command as NmlCommand, MessageKind, NmlClient, NmlError, SpindleDirection, Status as NmlStatus,
     TaskMode as NmlTaskMode, TaskState as NmlTaskState, Tool as NmlTool,
 };
 
 use linc_core::backend::MachineBackend;
 use linc_core::command::{
-    starts_spindle, HalValue, LincOutput, MachineCommand, MachineError, MdiOrigin, ProbeTarget,
+    check_spindle_speed, check_spindle_step, starts_spindle, HalValue, LincOutput, MachineCommand,
+    MachineError, MdiOrigin, ProbeTarget, SpindleStep,
 };
 use linc_core::config::Profile;
 use linc_core::diag::BridgeInfo;
@@ -1696,6 +1697,55 @@ impl NmlBackend {
             MachineCommand::ClearTrail => {
                 self.builder.clear_trail();
                 Ok(())
+            }
+            MachineCommand::StepSpindleSpeed { step } => {
+                // A fresh poll: the gates read the spindle's own speed and the
+                // panel's current mode, and a snapshot from before the last
+                // step would let a second press overshoot the ceiling.
+                let snapshot = self.refresh();
+                let ini = &self.profile.machine_ini;
+                check_spindle_step(
+                    &snapshot,
+                    step,
+                    ini.spindle_increment,
+                    ini.max_spindle_speed,
+                )?;
+                self.nml_send(&match step {
+                    SpindleStep::Faster => NmlCommand::SpindleIncrease { spindle: 0 },
+                    SpindleStep::Slower => NmlCommand::SpindleDecrease { spindle: 0 },
+                })
+            }
+            MachineCommand::SetSpindleSpeed { rpm } => {
+                let snapshot = self.refresh();
+                let ceiling = self.profile.machine_ini.max_spindle_speed;
+                check_spindle_speed(&snapshot, rpm, ceiling)?;
+                let turning = snapshot.spindles.first().is_some_and(|spindle| spindle.on);
+                if turning {
+                    // `EMC_SPINDLE_ON` carries the direction the operator can
+                    // see. `EMC_SPINDLE_SPEED` would take its sign from the
+                    // interpreter's remembered direction, which a panel start
+                    // never sets, so a bare `S` there could send speed 0.
+                    let reverse = snapshot.spindles[0].direction < 0;
+                    self.nml_send(&NmlCommand::SpindleOn {
+                        direction: if reverse {
+                            SpindleDirection::Reverse
+                        } else {
+                            SpindleDirection::Forward
+                        },
+                        speed: rpm,
+                        spindle: 0,
+                        // A manual speed change is not a program block: the
+                        // next feed move must not wait for the spindle.
+                        wait_for_speed: false,
+                    })
+                } else {
+                    // A stopped spindle has no speed to change, so the number
+                    // becomes the interpreter's S word: halui's forward and
+                    // reverse start with it, and the speed message the
+                    // interpreter sends inherits the stopped state, so nothing
+                    // turns. `S` names no direction and starts nothing.
+                    self.issue_blocks(&[format!("S{rpm}")])
+                }
             }
             MachineCommand::SetHalOutput { output, value } => {
                 if !value.matches(output) {

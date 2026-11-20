@@ -6710,6 +6710,182 @@ fn ctrl() -> egui::Modifiers {
     egui::Modifiers::CTRL | egui::Modifiers::COMMAND
 }
 
+/// The manual screens trim the running spindle's speed with Ctrl+PgUp and
+/// Ctrl+PgDn. The step names a direction only; the increment is the INI's.
+#[test]
+fn the_spindle_trim_keys_send_one_step_on_the_manual_screens() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.frame(&[]);
+    harness.sent.borrow_mut().clear();
+
+    harness.frame_with(&[(egui::Key::PageUp, ctrl())]);
+    assert!(
+        matches!(
+            harness.sent.borrow().last(),
+            Some(MachineCommand::StepSpindleSpeed {
+                step: linc_core::command::SpindleStep::Faster
+            })
+        ),
+        "Ctrl+PgUp steps up: {:?}",
+        harness.sent_debug()
+    );
+    harness.frame_with(&[(egui::Key::PageDown, ctrl())]);
+    assert!(
+        matches!(
+            harness.sent.borrow().last(),
+            Some(MachineCommand::StepSpindleSpeed {
+                step: linc_core::command::SpindleStep::Slower
+            })
+        ),
+        "Ctrl+PgDn steps down: {:?}",
+        harness.sent_debug()
+    );
+}
+
+/// The manual page's SHORTCUTS pane is grouped by subject: the toolpath, the
+/// spindle, and the keys the page itself owns. The group title carries the
+/// subject, so the spindle rows name only the action.
+#[test]
+fn the_manual_shortcuts_are_grouped_by_subject() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.frame(&[]);
+    let groups = harness.app.key_hints();
+    let titles: Vec<&str> = groups.iter().map(|group| group.title).collect();
+    assert_eq!(titles, ["VIEW", "SPINDLE", "MANUAL"], "{titles:?}");
+    let spindle = groups
+        .iter()
+        .find(|group| group.title == "SPINDLE")
+        .expect("the spindle group");
+    let labels: Vec<&str> = spindle.items.iter().map(|item| item.label).collect();
+    assert_eq!(labels, ["FASTER", "SLOWER", "SET RPM"], "{labels:?}");
+    assert_eq!(
+        spindle.items[0].key,
+        harness.app.prefs.keymap.spindle_speed_up.label()
+    );
+
+    // HOME / PROG.HOME share the page family without a spindle control.
+    let mut harness = ProbeHarness::new(PanelMode::Home, false, true);
+    harness.app.set_page(Page::Homing);
+    harness.frame(&[]);
+    let titles: Vec<&str> = harness
+        .app
+        .key_hints()
+        .iter()
+        .map(|group| group.title)
+        .collect();
+    assert_eq!(titles, ["VIEW", "HOMING"], "{titles:?}");
+}
+
+/// AUTO keeps the spindle chords for itself: the page may be showing, but the
+/// panel mode decides, and nothing goes out.
+#[test]
+fn the_spindle_keys_are_inert_outside_the_manual_modes() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.frame(&[]);
+    harness.sent.borrow_mut().clear();
+
+    harness.frame_with(&[(egui::Key::PageUp, ctrl())]);
+    harness.frame_with(&[(egui::Key::S, ctrl())]);
+    assert!(
+        !harness.sent.borrow().iter().any(|command| matches!(
+            command,
+            MachineCommand::StepSpindleSpeed { .. } | MachineCommand::SetSpindleSpeed { .. }
+        )),
+        "AUTO sends no spindle command: {:?}",
+        harness.sent_debug()
+    );
+    assert!(
+        harness.app.manual.spindle_speed.is_none(),
+        "the dialog does not open in AUTO"
+    );
+}
+
+/// Ctrl+S opens the numeric entry prefilled with the speed in force; typing
+/// replaces it and Enter sends the absolute speed.
+#[test]
+fn ctrl_s_opens_the_spindle_speed_dialog_and_enter_sets_it() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.frame(&[]);
+    harness.sent.borrow_mut().clear();
+
+    harness.frame_with(&[(egui::Key::S, ctrl())]);
+    let entry = harness
+        .app
+        .manual
+        .spindle_speed
+        .as_ref()
+        .expect("Ctrl+S opens the dialog");
+    assert_eq!(entry.text, "4200", "prefilled with the commanded speed");
+
+    type_text(&mut harness, "1800");
+    harness.frame(&[egui::Key::Enter]);
+    assert!(
+        harness.app.manual.spindle_speed.is_none(),
+        "Enter closes the dialog"
+    );
+    assert!(
+        matches!(
+            harness.sent.borrow().last(),
+            Some(MachineCommand::SetSpindleSpeed { rpm }) if (*rpm - 1800.0).abs() < 1e-9
+        ),
+        "the typed speed goes out: {:?}",
+        harness.sent_debug()
+    );
+}
+
+/// A value the machine cannot read keeps the dialog open with the reason, and
+/// Escape leaves without sending anything.
+#[test]
+fn a_refused_spindle_speed_keeps_the_dialog_and_escape_sends_nothing() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.frame(&[]);
+    harness.frame_with(&[(egui::Key::S, ctrl())]);
+    harness.sent.borrow_mut().clear();
+
+    // The prefilled value is selected on the frame the dialog opens, so the
+    // first character typed replaces it.
+    type_text(&mut harness, "fast");
+    harness.frame(&[egui::Key::Enter]);
+    let entry = harness
+        .app
+        .manual
+        .spindle_speed
+        .as_ref()
+        .expect("a refused entry keeps the dialog");
+    assert!(
+        entry
+            .error
+            .as_deref()
+            .is_some_and(|text| text.contains("is not a spindle speed")),
+        "the refusal is shown: {:?}",
+        entry.error
+    );
+    assert!(
+        !harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::SetSpindleSpeed { .. })),
+        "nothing was sent"
+    );
+
+    harness.frame(&[egui::Key::Escape]);
+    assert!(harness.app.manual.spindle_speed.is_none());
+    assert!(
+        !harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::SetSpindleSpeed { .. })),
+        "Escape sends nothing either"
+    );
+}
+
 /// The pane reserves the MODAL band at the bottom of its card and still
 /// fills the slot it was given: the column beside it ends on the same line.
 #[test]

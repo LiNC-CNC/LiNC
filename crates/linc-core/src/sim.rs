@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::backend::MachineBackend;
-use crate::command::{HalValue, LincOutput, MachineCommand, MachineError, MdiOrigin, ProbeTarget};
+use crate::command::{
+    HalValue, LincOutput, MachineCommand, MachineError, MdiOrigin, ProbeTarget, SpindleStep,
+};
 use crate::config::Profile;
 use crate::gcode::{parse_preview_full, SegmentKind, Tools};
 use crate::model::*;
@@ -1837,6 +1839,57 @@ impl MachineBackend for SimBackend {
                 self.clear_trail();
                 Ok(())
             }
+            MachineCommand::StepSpindleSpeed { step } => {
+                let ini = &self.profile.machine_ini;
+                crate::command::check_spindle_step(
+                    &self.snapshot,
+                    step,
+                    ini.spindle_increment,
+                    ini.max_spindle_speed,
+                )?;
+                let increment = ini.spindle_increment;
+                if let Some(spindle) = self.snapshot.spindles.first_mut() {
+                    // Reverse reads as a negative speed, so `Faster` always
+                    // moves away from zero. LinuxCNC's decrease stops one
+                    // increment short of zero rather than crossing it, and the
+                    // simulator follows the same rule so a profile cannot
+                    // reverse its spindle with the trim key.
+                    let sign = if spindle.commanded_speed < 0.0 {
+                        -1.0
+                    } else {
+                        1.0
+                    };
+                    let step_delta = match step {
+                        SpindleStep::Faster => sign * increment,
+                        SpindleStep::Slower => -sign * increment,
+                    };
+                    if step == SpindleStep::Faster || spindle.commanded_speed.abs() > increment {
+                        spindle.commanded_speed += step_delta;
+                    }
+                    // No encoder in the simulator: the feedback follows the
+                    // commanded speed through the override, the same rule
+                    // `apply_panel_state` publishes every poll.
+                    spindle.actual_speed = spindle.commanded_speed * spindle.override_factor;
+                }
+                Ok(())
+            }
+            MachineCommand::SetSpindleSpeed { rpm } => {
+                let ceiling = self.profile.machine_ini.max_spindle_speed;
+                crate::command::check_spindle_speed(&self.snapshot, rpm, ceiling)?;
+                if let Some(spindle) = self.snapshot.spindles.first_mut() {
+                    // The S word carries the direction the spindle has, and a
+                    // stopped spindle keeps the one it last ran in. Nothing
+                    // here starts it: `on` is left exactly as it was.
+                    let direction = if spindle.direction < 0 { -1.0 } else { 1.0 };
+                    spindle.commanded_speed = rpm * direction;
+                    spindle.actual_speed = if spindle.on {
+                        spindle.commanded_speed * spindle.override_factor
+                    } else {
+                        0.0
+                    };
+                }
+                Ok(())
+            }
             MachineCommand::SetHalOutput { output, value } => {
                 if !value.matches(output) {
                     return Err(MachineError::Invalid("wrong HAL value type".into()));
@@ -1956,6 +2009,111 @@ enabled = true
         assert!(snapshot.program.content.is_some());
         assert!(snapshot.program.line_count > 10);
         assert!(!snapshot.live_trail.is_empty());
+    }
+
+    /// The trim key steps the speed the controller holds by the INI increment,
+    /// which is 100 rpm when `[SPINDLE_0]INCREMENT` is absent, and the feedback
+    /// follows it through the override the way a loopback encoder would.
+    #[test]
+    fn the_spindle_trim_steps_by_the_ini_increment() {
+        use crate::command::{MachineCommand, SpindleStep};
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Jog);
+        let before = backend.snapshot().spindles[0].commanded_speed;
+        assert!(before > 100.0, "the fixture starts a running spindle");
+
+        backend
+            .send(MachineCommand::StepSpindleSpeed {
+                step: SpindleStep::Faster,
+            })
+            .unwrap();
+        let after = backend.snapshot();
+        assert_eq!(after.spindles[0].commanded_speed, before + 100.0);
+        assert_eq!(after.spindles[0].actual_speed, before + 100.0);
+
+        backend
+            .send(MachineCommand::StepSpindleSpeed {
+                step: SpindleStep::Slower,
+            })
+            .unwrap();
+        assert_eq!(backend.snapshot().spindles[0].commanded_speed, before);
+    }
+
+    /// Past `[DISPLAY]MAX_SPINDLE_SPEED` the step is refused instead of being
+    /// clamped silently: the operator asked for a speed the machine will not
+    /// hold, and the key says so.
+    #[test]
+    fn a_spindle_step_past_the_ceiling_is_refused() {
+        use crate::command::{MachineCommand, SpindleStep};
+        let (_dir, mut profile) = profile_fixture();
+        profile.machine_ini.max_spindle_speed = 4250.0;
+        let mut backend = SimBackend::new(profile, PanelMode::Jog);
+        assert_eq!(
+            backend.send(MachineCommand::StepSpindleSpeed {
+                step: SpindleStep::Faster,
+            }),
+            Err(MachineError::SpindleSpeedLimit)
+        );
+        // Slowing down is never at the ceiling.
+        backend
+            .send(MachineCommand::StepSpindleSpeed {
+                step: SpindleStep::Slower,
+            })
+            .unwrap();
+    }
+
+    /// A stopped spindle is refused rather than stepped: LinuxCNC skips the
+    /// step silently at zero speed, and the panel's SPD keys are what start it.
+    /// The numeric entry is different: it sets the S word the panel starts with.
+    #[test]
+    fn a_stopped_spindle_refuses_a_trim_but_takes_a_speed() {
+        use crate::command::{MachineCommand, SpindleStep};
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Jog);
+        backend.snapshot.spindles[0].on = false;
+        backend.snapshot.spindles[0].commanded_speed = 0.0;
+        backend.snapshot.spindles[0].actual_speed = 0.0;
+        assert_eq!(
+            backend.send(MachineCommand::StepSpindleSpeed {
+                step: SpindleStep::Faster,
+            }),
+            Err(MachineError::SpindleStopped)
+        );
+
+        backend
+            .send(MachineCommand::SetSpindleSpeed { rpm: 1200.0 })
+            .expect("a stopped spindle takes the S word");
+        let snapshot = backend.snapshot();
+        assert_eq!(snapshot.spindles[0].commanded_speed, 1200.0);
+        assert!(!snapshot.spindles[0].on, "the entry never starts it");
+        assert_eq!(snapshot.spindles[0].actual_speed, 0.0, "nothing turned");
+    }
+
+    /// The numeric entry sets an absolute speed and keeps the direction the
+    /// spindle is turning: the number never reverses it.
+    #[test]
+    fn the_numeric_entry_keeps_the_spindle_direction() {
+        use crate::command::MachineCommand;
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Jog);
+        backend
+            .send(MachineCommand::SetSpindleSpeed { rpm: 1500.0 })
+            .unwrap();
+        assert_eq!(backend.snapshot().spindles[0].commanded_speed, 1500.0);
+        assert_eq!(backend.snapshot().spindles[0].direction, 1);
+
+        backend.snapshot.spindles[0].direction = -1;
+        backend
+            .send(MachineCommand::SetSpindleSpeed { rpm: 800.0 })
+            .unwrap();
+        let snapshot = backend.snapshot();
+        assert_eq!(snapshot.spindles[0].commanded_speed, -800.0);
+        assert_eq!(snapshot.spindles[0].direction, -1);
+
+        assert!(matches!(
+            backend.send(MachineCommand::SetSpindleSpeed { rpm: 0.0 }),
+            Err(MachineError::Invalid(_))
+        ));
     }
 
     #[test]

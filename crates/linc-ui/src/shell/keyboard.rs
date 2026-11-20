@@ -83,8 +83,11 @@ impl LincApp {
             // and Escape in the page, before the table draws: a refused entry
             // must keep the dialog open and report why, which a consumed Escape
             // could not do. Their fields have focus, so the shell has nothing
-            // else to give them.
-            if (self.tools.number.is_some() || self.tools.position.is_some())
+            // else to give them. The manual screens' speed dialog works the same
+            // way and keeps its text when a speed is refused.
+            if (self.tools.number.is_some()
+                || self.tools.position.is_some()
+                || self.manual.spindle_speed.is_some())
                 && self.overlay.modal.is_none()
                 && self.help.dialog.is_none()
             {

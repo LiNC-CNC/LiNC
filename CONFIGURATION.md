@@ -718,7 +718,7 @@ The bindings do not change: the panel's navigation keys already send `F5` to
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `save_preamble`, `save_postamble` |
 | `[toolpath]` | `show_grid`, `show_live_trail`, `trail_max_points`, `clear_trail_action`, `show_program_bounds`, `show_machine_bounds`, `show_stock`, `stock_alpha`, `bounds_mode` (preference), `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `tool_number`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds`, `remaining`, `toggle_lathe_mirror`, `toggle_lathe_diameter`, `limit_recovery` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `tool_number`, `spindle_speed_up`, `spindle_speed_down`, `spindle_speed`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds`, `remaining`, `toggle_lathe_mirror`, `toggle_lathe_diameter`, `limit_recovery` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_execution`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |
@@ -989,6 +989,26 @@ number. `consume_key` matches the modifiers exactly and the row load takes its
 key first, so a profile that rebound `tool_number` onto a bare `T` would never
 see it — pick a free chord (`Ctrl` + a letter is the panel's habit, since it has
 no Shift).
+
+### `[keys]` manual-screen spindle bindings
+
+Page-local to the manual screens (JOG, INC and MPG). AUTO, EDIT and MDI keep
+all three for themselves, and the character of the command matters: these edit
+the programmed spindle speed, not the override, and none of them can start,
+stop or reverse the spindle.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `spindle_speed_up` | `Ctrl+PageUp` | One step up in the running spindle's programmed speed. LinuxCNC adds `[SPINDLE_0]INCREMENT` — 100 rpm unless the INI section says otherwise — clamped to the spindle's own velocity limits. The same action as Axis's `+`. Refused when the spindle is stopped, the panel is offline, the machine is OFF, or the step would pass `[DISPLAY] MAX_SPINDLE_SPEED`. |
+| `spindle_speed_down` | `Ctrl+PageDown` | One step down, same rule and same limits. Reverse reads as a negative speed, so the step moves toward zero without crossing it. |
+| `spindle_speed` | `Ctrl+S` | Open the numeric entry on the speed in force. `Enter` sets it, `Esc` cancels, and a value the machine cannot take (not a number, zero, past `MAX_SPINDLE_SPEED`, or an interpreter that is not idle) keeps the dialog open with the reason. A running spindle changes speed under it and keeps its direction (`EMC_SPINDLE_ON`); a stopped spindle takes the number as the interpreter's S word, the value the panel's SPD keys start with, and nothing turns. |
+
+`Ctrl+S` is free on these screens: SAVE is page-local to Program, and the MDI
+buffer's copy needs MAIN in MDI mode. `Ctrl+Plus`/`Ctrl+Minus` are the toolpath
+zoom and `Ctrl+Up`/`Ctrl+Down` the pan, which is why the trim takes the Page
+keys. Every step bumps only the speed the controller holds: the interpreter's S
+word is unchanged, so the next `S` in a running program puts the programmed
+speed back.
 
 ### `[keys]` toolpath view bindings
 

@@ -172,6 +172,10 @@ pub struct MachineIni {
     pub axes: Vec<AxisIni>,
     pub spindles: usize,
     pub max_spindle_speed: f64,
+    /// `[SPINDLE_0]INCREMENT`, the rpm one `+`/`-` step asks LinuxCNC for.
+    /// LinuxCNC reads the same entry; the HMI parses it for the simulator and
+    /// for the ceiling check, where it is the size of the step about to land.
+    pub spindle_increment: f64,
     pub min_spindle_override: f64,
     pub max_spindle_override: f64,
     pub max_feed_override: f64,
@@ -357,6 +361,10 @@ impl MachineIni {
             axes,
             spindles: ini.get_u32("TRAJ", "SPINDLES").unwrap_or(1).max(1) as usize,
             max_spindle_speed: ini.get_f64("DISPLAY", "MAX_SPINDLE_SPEED").unwrap_or(0.0),
+            // LinuxCNC's own default when the entry is absent (`inispindle.cc`
+            // reads `INCREMENT` with 100.0), so the simulator steps by what the
+            // machine would.
+            spindle_increment: ini.get_f64("SPINDLE_0", "INCREMENT").unwrap_or(100.0),
             min_spindle_override: ini
                 .get_f64("DISPLAY", "MIN_SPINDLE_OVERRIDE")
                 .unwrap_or(0.5),
@@ -500,6 +508,18 @@ HOME_USE_INDEX = YES
                 (".01mm".to_string(), 0.01),
             ]
         );
+    }
+
+    /// `[SPINDLE_0]INCREMENT` is what LinuxCNC adds per `+`/`-` step, and the
+    /// simulator steps by the same number; absent, it is LinuxCNC's own 100 rpm.
+    #[test]
+    fn the_spindle_increment_follows_the_ini_and_defaults_to_100() {
+        let ini = MachineIni::parse(Path::new("/tmp/machine/probe_basic.ini"), SIM).unwrap();
+        assert_eq!(ini.spindle_increment, 100.0);
+        let with_section = format!("{SIM}\n[SPINDLE_0]\nINCREMENT = 250\n");
+        let ini =
+            MachineIni::parse(Path::new("/tmp/machine/probe_basic.ini"), &with_section).unwrap();
+        assert_eq!(ini.spindle_increment, 250.0);
     }
 
     #[test]

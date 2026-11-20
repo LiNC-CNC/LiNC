@@ -205,6 +205,16 @@ view_pan_up = "Ctrl+Up"
 view_pan_down = "Ctrl+Down"
 view_zoom_in = "Ctrl+Plus"
 view_zoom_out = "Ctrl+Minus"
+# Page-local to the manual screens (JOG/MPG/INC): one step on the running
+# spindle's programmed speed, the way Axis's -/+ buttons work. This edits the
+# speed itself, not the spindle override. The step is [SPINDLE_0]INCREMENT
+# (100 rpm unless the INI says otherwise).
+spindle_speed_up = "Ctrl+PageUp"
+spindle_speed_down = "Ctrl+PageDown"
+# Page-local to the manual screens: type an absolute speed for the spindle that
+# is already turning. Ctrl+S is free here; SAVE is page-local to Program and the
+# MDI buffer's copy needs MAIN + MDI.
+spindle_speed = "Ctrl+S"
 goto_line = "Ctrl+G"
 # Page-local to Program: start the loaded program at a line.
 program_run_from_line = "Ctrl+R"

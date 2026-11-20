@@ -1574,6 +1574,20 @@ jog in JOG mode.
 - The graph updates at the normal 10–20 Hz position rate; no animation loop is
   required while idle. When the panel mode or axis selection is unknown after
   reconnect, show `UNKNOWN` until a fresh panel state arrives.
+- **Spindle speed keys.** `Ctrl+PgUp` / `Ctrl+PgDn` (`[keys] spindle_speed_up`
+  / `spindle_speed_down`) step the programmed speed of the spindle that is
+  already turning by `[SPINDLE_0]INCREMENT` (100 rpm unless the INI says
+  otherwise): the same action as Axis's `+`/`-`, through the same
+  `EMC_SPINDLE_INCREASE`/`EMC_SPINDLE_DECREASE` messages, and not the spindle
+  override. `Ctrl+S` (`[keys] spindle_speed`) opens a numeric dialog on the
+  speed in force; `Enter` sets it, `Esc` cancels, and a refused value keeps the
+  dialog open with the reason. All three are manual-family only: AUTO, EDIT and
+  MDI keep them. A step on a stopped spindle is refused, because LinuxCNC skips
+  it at zero speed; the numeric entry is not, and with the spindle stopped it
+  sets the interpreter's S word — the value the panel's `SPD.*` keys start with
+  — so nothing turns now. While the spindle runs, the entry changes the speed in
+  force and sends `EMC_SPINDLE_ON` with the direction on screen. Neither path
+  touches the override.
 
 ## 7. Visual system
 
@@ -1827,6 +1841,8 @@ pub enum MachineCommand {
     SetCurrentTool { tool: u16 },
     LoadProgram { path: PathBuf, expected_revision: Option<u64> },
     SaveProgram { path: PathBuf, expected_revision: u64 },
+    StepSpindleSpeed { step: SpindleStep },
+    SetSpindleSpeed { rpm: f64 },
     SetWorkOffset { index: u8, values: AxisMap<f64>, rotation: Option<f64> },
     SetToolTableRow { row: ToolRow, expected_revision: u64 },
     ApplyProbeResult { result: ProbeResult, target: ProbeTarget },
@@ -1849,9 +1865,15 @@ command.
 `SetHalOutput` is a closed enum, not a pin-name string. The HMI may write only
 the declared `linc.*` outputs; arbitrary HAL writes are not representable.
 
-Machine-control commands (panel mode, cycle, jog, spindle, coolant, overrides)
-are not part of the HMI command set. The only mode change is the temporary MDI
-selection inside `IssueMdi`, which restores the prior task mode.
+Machine-control commands (panel mode, cycle, jog, spindle start/stop/direction,
+coolant, overrides) are not part of the HMI command set. Two bounded spindle
+exceptions exist, and neither can start, stop or reverse the spindle:
+`StepSpindleSpeed` adds or subtracts one `[SPINDLE_n]INCREMENT` from a spindle
+that is already turning, and `SetSpindleSpeed` puts such a spindle at an
+absolute rpm. Both leave the override alone and leave the interpreter's S word
+untouched, so the next `S` in a running program wins. The only mode change is
+the temporary MDI selection inside `IssueMdi`, which restores the prior task
+mode.
 
 Panel snapshot should include at least:
 
