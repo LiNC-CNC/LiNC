@@ -880,6 +880,41 @@ impl ProgramState {
         (self.running || self.paused).then(|| self.executing_line())
     }
 
+    /// The last line that carries a command: a closing `%` and trailing blank
+    /// lines are not part of the program, so "the interpreter reached the end"
+    /// must not depend on how many of them the file happens to end with.
+    pub fn last_command_line(&self) -> usize {
+        match &self.content {
+            Some(text) => text
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| {
+                    let trimmed = line.trim();
+                    !trimmed.is_empty() && trimmed != "%"
+                })
+                .last()
+                .map_or(0, |(index, _)| index + 1),
+            // No text on hand: the controller's line count is all there is.
+            None => self.line_count,
+        }
+    }
+
+    /// Everything after `line` is motion-free: `M2`/`M30`, spindle and coolant
+    /// shutdown, comments, blank lines, the closing `%`.
+    ///
+    /// The controller reports `current_line` as the last block that carried
+    /// motion, not the line of the `M2` that ends the file, so a finished
+    /// program looks like it stopped one or more lines short. Asking whether
+    /// anything left can still move the machine is what tells "finished" from
+    /// "stopped here".
+    pub fn tail_is_motionless(&self, line: usize) -> bool {
+        match &self.content {
+            Some(text) => text.lines().skip(line).all(|line| !carries_motion(line)),
+            // Without the text the controller's own count is the only evidence.
+            None => line > 0 && line >= self.line_count,
+        }
+    }
+
     /// The last line whose motion is complete: the REMAINING view drops every
     /// segment at or before it.
     ///
@@ -891,8 +926,42 @@ impl ProgramState {
         if let Some(line) = self.highlight_line() {
             return Some(line.saturating_sub(1));
         }
-        (self.line_count > 0 && self.current_line >= self.line_count).then_some(usize::MAX)
+        let last = self.last_command_line();
+        (last > 0 && self.current_line >= last).then_some(usize::MAX)
     }
+}
+
+/// Whether a block can move an axis: an axis word outside a comment.
+///
+/// Only motion words count. `G`/`M`/`T`/`S`/`F`/`N` lines (`M5`, `M9`, `M30`)
+/// end a program without moving anything, which is exactly what a finished run
+/// leaves behind.
+fn carries_motion(block: &str) -> bool {
+    const AXIS_WORDS: [char; 9] = ['X', 'Y', 'Z', 'A', 'B', 'C', 'U', 'V', 'W'];
+    let mut in_comment = false;
+    let mut previous = '\0';
+    for character in block.chars() {
+        if in_comment {
+            if character == ')' {
+                in_comment = false;
+            }
+            continue;
+        }
+        match character {
+            '(' => in_comment = true,
+            ';' => break,
+            _ => {
+                let upper = character.to_ascii_uppercase();
+                // A letter that starts a word, not one inside a word: `G54` has
+                // no axis, `X0.000` does.
+                if AXIS_WORDS.contains(&upper) && !previous.is_ascii_alphabetic() {
+                    return true;
+                }
+            }
+        }
+        previous = character;
+    }
+    false
 }
 
 impl Default for ProgramState {
@@ -2023,6 +2092,57 @@ mod tests {
         // Esc rewinds the interpreter to the top, and the path comes back.
         program.current_line = 0;
         assert_eq!(program.consumed_through(), None);
+    }
+
+    #[test]
+    fn a_program_ends_at_its_last_command_not_its_last_line() {
+        let mut program = ProgramState::default();
+        program.content = Some(std::sync::Arc::new("G0 X0\nG1 X10\nM2\n\n%\n".to_string()));
+        program.line_count = 5;
+        program.current_line = 2;
+        assert_eq!(
+            program.last_command_line(),
+            3,
+            "the blank line and the closing % are not commands"
+        );
+        assert_eq!(
+            program.consumed_through(),
+            None,
+            "the interpreter stopped before M2"
+        );
+        program.current_line = 3;
+        assert_eq!(
+            program.consumed_through(),
+            Some(usize::MAX),
+            "M2 was the last command, so the whole path is behind the tool"
+        );
+    }
+
+    #[test]
+    fn a_finished_program_leaves_only_motionless_blocks_behind() {
+        let mut program = ProgramState::default();
+        program.content = Some(std::sync::Arc::new(
+            "G0 Z1\nM5\nM9\n(clean up X10)\n; X10 staged\nM30\n%\n".to_string(),
+        ));
+        program.line_count = 7;
+        // The controller reports the line of the last block that moved an axis.
+        assert!(
+            program.tail_is_motionless(1),
+            "shutdown codes, comments and the closing % cannot move the machine"
+        );
+        assert!(
+            !program.tail_is_motionless(0),
+            "the G0 on line 1 still has to run"
+        );
+    }
+
+    #[test]
+    fn a_run_that_stopped_before_a_move_has_not_finished() {
+        let mut program = ProgramState::default();
+        program.content = Some(std::sync::Arc::new("G0 Z1\nG1 X10\nM30\n".to_string()));
+        program.line_count = 3;
+        assert!(!program.tail_is_motionless(1), "G1 X10 is still ahead");
+        assert!(program.tail_is_motionless(2), "only M30 is left");
     }
 
     #[test]

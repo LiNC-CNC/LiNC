@@ -111,10 +111,46 @@ impl LincApp {
         // Re-arm the follow only when a run starts. Doing it on every poll
         // overrode a line the operator had just picked with Ctrl+G or the
         // arrows, so the selection snapped back to the running line.
-        if self.snapshot.task.running && !self.program.program_was_running {
+        let running = self.snapshot.task.running;
+        if running && !self.program.program_was_running {
             self.program.follow_current = true;
+            // A new run clears the mark the last one left in the listing.
+            self.program.completed_at = None;
+        } else if !running && self.program.program_was_running {
+            self.on_run_finished();
         }
-        self.program.program_was_running = self.snapshot.task.running;
+        self.program.program_was_running = running;
+    }
+
+    /// The run just stopped. A program that reached its last command leaves the
+    /// editor at the top, because that is where the next cycle starts, and keeps
+    /// the finished line marked in the listing. A run that was stopped part way,
+    /// or tripped an E-stop or a fault, keeps its selection: that line answers
+    /// "where did it stop", which is the question the operator has just then.
+    ///
+    /// Only the selection moves. `snapshot.program.current_line` is left where
+    /// the controller put it, so the progress readout keeps its 100% and the
+    /// REMAINING view keeps the path behind the tool eaten.
+    fn on_run_finished(&mut self) {
+        let program = &self.snapshot.program;
+        let last = program.last_command_line();
+        // The controller stops reporting at the last block that carried motion,
+        // so "it reached the end" means either that line was the last command or
+        // everything after it can no longer move an axis.
+        let reached_end = last > 0
+            && program.current_line > 0
+            && (program.current_line >= last || program.tail_is_motionless(program.current_line));
+        let stopped = self.snapshot.task.paused
+            || self.snapshot.task.interp != linc_core::model::InterpState::Idle
+            || self.snapshot.machine.estop
+            || self.snapshot.machine.fault;
+        if !reached_end || stopped {
+            return;
+        }
+        self.program.completed_at = Some(program.current_line);
+        self.program.selected_line = 1;
+        self.program.code_scroll_to_line = Some(1);
+        self.program.follow_current = true;
     }
 
     pub(crate) fn sync_offsets_from_snapshot(&mut self, force: bool) {

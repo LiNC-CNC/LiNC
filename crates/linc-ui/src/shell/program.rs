@@ -146,6 +146,7 @@ impl LincApp {
         // the graph and the gutter point at the wrong block.
         self.program.selected_line = 1;
         self.program.code_scroll_to_line = Some(1);
+        self.program.completed_at = None;
         self.set_page(Page::Program);
     }
 
@@ -245,6 +246,7 @@ impl LincApp {
         self.program.selected_line = 1;
         self.program.cursor_line = Some(1);
         self.program.code_scroll_to_line = Some(1);
+        self.program.completed_at = None;
         self.program.follow_current = true;
         self.refresh_preview();
     }

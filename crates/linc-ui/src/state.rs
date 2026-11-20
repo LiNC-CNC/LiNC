@@ -1277,6 +1277,11 @@ pub struct ProgramUi {
     /// Rising-edge detector, so follow-current is re-armed when a program
     /// starts but not again on every poll after the operator selects a line.
     pub program_was_running: bool,
+    /// The line a finished run ended on, when that run reached the end of the
+    /// program. The selection goes back to the top; this keeps the block the
+    /// program finished on visible instead of asking the operator to remember
+    /// it.
+    pub completed_at: Option<usize>,
     /// A program load is in flight; navigation waits for the backend verdict.
     pub pending_load: bool,
     /// How the run has moved through the program's loops.
@@ -1290,6 +1295,7 @@ impl Default for ProgramUi {
     fn default() -> Self {
         Self {
             program_was_running: false,
+            completed_at: None,
             pending_load: false,
             loop_progress: LoopProgress::default(),
             preview_generation: 0,

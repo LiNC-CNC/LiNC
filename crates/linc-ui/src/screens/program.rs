@@ -351,12 +351,17 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
             // cut in the middle, so the extension stays on screen and neither chip
             // is pushed off the card.
             let state_word = if editable { "EDITABLE" } else { "READ-ONLY" };
+            // The word that shares the row with the editability chip: a running
+            // program, or the mark a finished one leaves until the next run.
+            let run_word = if app.snapshot.task.running {
+                Some(("RUNNING", theme::SUCCESS))
+            } else if app.program.completed_at.is_some() {
+                Some(("FINISHED", theme::ACCENT))
+            } else {
+                None
+            };
             let reserved = theme::measure(ui, state_word, 9.0)
-                + if app.snapshot.task.running {
-                    theme::measure(ui, "RUNNING", 9.0)
-                } else {
-                    0.0
-                }
+                + run_word.map_or(0.0, |(word, _)| theme::measure(ui, word, 9.0))
                 + if app.program.editor.dirty {
                     theme::measure(ui, "*", 12.0)
                 } else {
@@ -380,12 +385,8 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
             }
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(8.0);
-                if app.snapshot.task.running {
-                    ui.label(
-                        RichText::new("RUNNING")
-                            .size(theme::font_size(9.0))
-                            .color(theme::SUCCESS),
-                    );
+                if let Some((word, color)) = run_word {
+                    ui.label(RichText::new(word).size(theme::font_size(9.0)).color(color));
                 }
                 ui.label(RichText::new(state_word).size(theme::font_size(9.0)).color(
                     if editable {
@@ -764,6 +765,35 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     egui::pos2(clip.right(), bottom),
                 );
                 common::selection_band(ui, band);
+            }
+            // The block a finished run ended on. The selection was sent back to
+            // the top, and this dim mark keeps "it got to here" on screen
+            // instead of leaving the operator to remember it.
+            if let Some(finished) = app.program.completed_at {
+                if finished != current && finished <= starts.len() {
+                    let (top, bottom) =
+                        line_span(&output.galley, output.galley_pos.y, &starts, finished);
+                    let band = egui::Rect::from_min_max(
+                        egui::pos2(clip.left() + common::SELECTION_EDGE_PADDING, top),
+                        egui::pos2(clip.right(), bottom),
+                    )
+                    .intersect(clip);
+                    if band.width() > 0.0 && band.height() > 0.0 {
+                        painter.rect_filled(
+                            band,
+                            egui::CornerRadius::same((theme::SELECTION_RADIUS / 2.0) as u8),
+                            theme::tint(theme::MUTED, theme::SELECTION_ALPHA / 2),
+                        );
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                band.min,
+                                egui::vec2(theme::SELECTION_BAR, band.height()),
+                            ),
+                            egui::CornerRadius::same(1),
+                            theme::MUTED,
+                        );
+                    }
+                }
             }
             if let Some(line) = scroll_to {
                 let index = line.max(1).min(starts.len());

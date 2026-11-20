@@ -2595,6 +2595,85 @@ fn jump_to_line_clamps_and_selects() {
 }
 
 #[test]
+fn finishing_a_program_puts_the_cursor_back_at_the_top() {
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    app.snapshot.program.content = Some(std::sync::Arc::new(
+        "G0 X0\nG1 X10\nG1 X20\nM2\n\n%\n".to_string(),
+    ));
+    app.snapshot.program.line_count = 6;
+    app.snapshot.task.running = true;
+    app.snapshot.task.interp = linc_core::model::InterpState::Reading;
+    // What the controller actually publishes: the last block that carried
+    // motion. `M2` on the next line is never reported.
+    app.snapshot.program.current_line = 3;
+    app.sync_program();
+    assert_eq!(app.program.selected_line, 3, "follow drags the selection");
+
+    app.snapshot.task.running = false;
+    app.snapshot.task.interp = linc_core::model::InterpState::Idle;
+    app.sync_program();
+    assert_eq!(
+        app.program.selected_line, 1,
+        "a finished program starts at its first line again"
+    );
+    assert_eq!(
+        app.program.completed_at,
+        Some(3),
+        "the block it finished on stays marked"
+    );
+    assert!(app.program.follow_current, "the next run follows again");
+    assert_eq!(
+        app.snapshot.program.current_line, 3,
+        "the controller's line is left alone: progress keeps its 100% and\n         the REMAINING view keeps the path eaten"
+    );
+}
+
+#[test]
+fn a_run_stopped_part_way_keeps_the_line_it_stopped_on() {
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    app.snapshot.program.content = Some(std::sync::Arc::new(
+        "G0 X0\nG1 X10\nG1 X20\nM2\n".to_string(),
+    ));
+    app.snapshot.program.line_count = 4;
+    app.snapshot.task.running = true;
+    app.snapshot.task.interp = linc_core::model::InterpState::Reading;
+    app.snapshot.program.current_line = 2;
+    app.sync_program();
+
+    app.snapshot.task.running = false;
+    app.snapshot.task.interp = linc_core::model::InterpState::Idle;
+    app.sync_program();
+    assert_eq!(
+        app.program.selected_line, 2,
+        "a stop is answered by the line it stopped on, not by the top"
+    );
+    assert_eq!(app.program.completed_at, None);
+}
+
+#[test]
+fn an_estop_reaching_the_last_block_does_not_reset_the_cursor() {
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    app.snapshot.program.content = Some(std::sync::Arc::new(
+        "G0 X0\nG1 X10\nG1 X20\nM2\n".to_string(),
+    ));
+    app.snapshot.program.line_count = 4;
+    app.snapshot.task.running = true;
+    app.snapshot.task.interp = linc_core::model::InterpState::Reading;
+    app.snapshot.program.current_line = 4;
+    app.sync_program();
+
+    app.snapshot.machine.estop = true;
+    app.snapshot.task.running = false;
+    app.snapshot.task.interp = linc_core::model::InterpState::Idle;
+    app.sync_program();
+    assert_eq!(
+        app.program.selected_line, 4,
+        "an E-stop is not a finished program"
+    );
+    assert_eq!(app.program.completed_at, None);
+}
+
+#[test]
 fn a_manual_line_pick_survives_the_running_follow() {
     let (_dir, mut app) = make_app(PanelMode::Auto);
     app.snapshot.task.running = true;
