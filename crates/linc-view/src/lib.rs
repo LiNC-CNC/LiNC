@@ -4171,3 +4171,76 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod iso_projection_tests {
+    use super::*;
+
+    /// The isometric view must show three axes: X across, Y into the screen and
+    /// up, Z up. A camera with no elevation (pitch 0) collapses the XY plane to
+    /// a line and the part reads as a rotated front view.
+    #[test]
+    fn the_default_camera_shows_three_axes() {
+        let unit = 10.0;
+        // X runs right and slightly into the screen.
+        let (x0, y0) = view_xy(
+            [0.0, 0.0, 0.0],
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            false,
+        );
+        let (x1, y1) = view_xy(
+            [unit, 0.0, 0.0],
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            false,
+        );
+        // Y goes away from the viewer, so it moves up the screen as well as across.
+        // Z is vertical: it must move the point up the screen, and not across.
+        let (z0, z1) = view_xy(
+            [0.0, 0.0, unit],
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            false,
+        );
+        let (y2, y2y) = view_xy(
+            [0.0, unit, 0.0],
+            ViewMode::Iso3d,
+            DEFAULT_YAW,
+            DEFAULT_PITCH,
+            false,
+        );
+        assert!(x1 - x0 > 1.0, "X draws across the screen");
+        assert!(
+            y1 - y0 > 1.0,
+            "X also runs towards the viewer, down the screen"
+        );
+        assert!(y2 - x0 > 1.0, "Y draws across the screen too");
+        assert!(
+            y2y - y0 < -1.0,
+            "Y runs away from the viewer, up the screen"
+        );
+        assert!(z0.abs() < 1e-4, "Z must not move a point across the screen");
+        assert!(z1 < -1.0, "Z must move a point up the screen");
+    }
+
+    /// A flat camera is what a zero pitch produces: the test above would still
+    /// pass for X, so this one pins the elevation that makes a view isometric.
+    #[test]
+    fn a_flat_camera_is_not_isometric() {
+        let unit = 10.0;
+        let (_, flat_start) = view_xy([0.0, 0.0, 0.0], ViewMode::Iso3d, DEFAULT_YAW, 0.0, false);
+        let (_, flat_end) = view_xy([0.0, unit, 0.0], ViewMode::Iso3d, DEFAULT_YAW, 0.0, false);
+        assert!(
+            (flat_end - flat_start).abs() < 1e-4,
+            "with pitch 0 the Y axis no longer moves up the screen: that is the flat view"
+        );
+        assert!(
+            DEFAULT_PITCH > 0.3,
+            "the default camera keeps a real elevation"
+        );
+    }
+}

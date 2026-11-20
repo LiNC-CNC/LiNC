@@ -835,8 +835,10 @@ fn the_bottom_bar_readout_fits_the_minimum_window() {
     };
     // The left-hand machine fields and the read-only group, each at the
     // widest wording it can show at once: E-stop active, machine off, probe
-    // tripped, program protected, a program running with a DTG.
-    let left = measure(&["LN 1234/5678 100%", "HOMED", "DTG Z -123.456"]);
+    // tripped, program protected, a program running with its clock. A running
+    // program replaces the exact line count with the percentage and the clock,
+    // and the clock replaces the DTG field, so those are never drawn together.
+    let left = measure(&["100%  CYCLE 99:59:59  LEFT 99:59:59", "HOMED"]);
     let group = measure(&[
         "E-STOP ACTIVE",
         "MACHINE OFF",
@@ -2666,6 +2668,7 @@ fn a_run_stopped_part_way_keeps_the_line_it_stopped_on() {
     ));
     app.snapshot.program.line_count = 4;
     app.snapshot.task.running = true;
+    app.snapshot.program.running = true;
     app.snapshot.task.interp = linc_core::model::InterpState::Reading;
     app.snapshot.program.current_line = 2;
     app.sync_program();
@@ -7974,4 +7977,40 @@ fn recovery_names_the_gate_that_blocks_it() {
     // A different axis is not the tripped one.
     let reason = app.limit_recovery_block("Y").expect("Y is not on a limit");
     assert!(reason.contains("Y IS NOT ON A LIMIT"), "{reason}");
+}
+
+#[test]
+fn ctrl_f10_cycles_the_toolpath_view_on_the_pages_that_draw_one() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Machine);
+    let before = harness.app.program.graph_view;
+    harness.frame_with(&[(
+        egui::Key::F10,
+        egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+    )]);
+    assert_ne!(
+        harness.app.program.graph_view, before,
+        "Ctrl+F10 must cycle the toolpath view (event carries COMMAND)"
+    );
+}
+
+#[test]
+fn the_selected_line_follows_the_cut_so_the_graph_has_a_current_segment() {
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    app.snapshot.program.content = Some(std::sync::Arc::new(
+        "G0 X0\nG1 X10\nG1 X20\nM2\n".to_string(),
+    ));
+    app.snapshot.program.line_count = 4;
+    app.snapshot.task.running = true;
+    app.snapshot.program.running = true;
+    app.snapshot.task.interp = linc_core::model::InterpState::Reading;
+    app.snapshot.program.current_line = 2;
+    app.program.selected_line = 1;
+    app.sync_program();
+    assert_eq!(app.program.selected_line, 2, "follow drags the highlight");
+    assert_eq!(
+        app.snapshot.program.highlight_line(),
+        Some(2),
+        "the view receives the executing line"
+    );
 }
