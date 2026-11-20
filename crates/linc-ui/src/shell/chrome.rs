@@ -436,13 +436,19 @@ impl LincApp {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // Never claim OK on stale data: the controller may be latched
                 // while the last snapshot still says otherwise.
-                let (estop_text, estop_color) = if self.snapshot.meta.stale {
-                    ("E-STOP ?".to_string(), theme::WARNING)
-                } else if self.snapshot.machine.estop {
-                    ("E-STOP ACTIVE".to_string(), theme::ERROR)
-                } else {
-                    ("E-STOP OK".to_string(), theme::SUCCESS)
-                };
+                // With the cabinet switched off the E-stop chain has no power
+                // and the controller reads E-stop active with the mushroom
+                // released; `E-STOP ?` says the state is unknown instead of
+                // claiming the operator pressed it.
+                let cabinet_off = matches!(
+                    (self.snapshot.cabinet_on, self.snapshot.machine.on),
+                    (Some(false), false)
+                );
+                let (estop_text, estop_color) = crate::shell::status::estop_status_field(
+                    self.snapshot.machine.estop,
+                    cabinet_off,
+                    self.snapshot.meta.stale,
+                );
                 field(ui, estop_text, estop_color);
                 ui.add_space(16.0);
                 // Machine on/off sits immediately left of the E-stop state.

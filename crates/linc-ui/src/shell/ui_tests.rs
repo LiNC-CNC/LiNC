@@ -379,6 +379,36 @@ fn the_machine_field_is_red_when_the_machine_is_off() {
     );
 }
 
+/// The cabinet's E-stop chain is powered from the machine, so with the cabinet
+/// switched off the controller reads E-stop active with the mushroom released.
+/// The bar must not blame the operator for a power-off: it asks instead.
+#[test]
+fn the_estop_field_asks_when_the_cabinet_is_off() {
+    assert_eq!(
+        estop_status_field(true, false, false),
+        ("E-STOP ACTIVE".to_string(), theme::ERROR)
+    );
+    assert_eq!(
+        estop_status_field(false, false, false),
+        ("E-STOP OK".to_string(), theme::SUCCESS)
+    );
+    assert_eq!(
+        estop_status_field(true, true, false),
+        ("E-STOP ?".to_string(), theme::WARNING),
+        "an unpowered chain is not an E-stop the operator pressed"
+    );
+    assert_eq!(
+        estop_status_field(false, true, false),
+        ("E-STOP ?".to_string(), theme::WARNING),
+        "with the cabinet off the chain cannot be read either way"
+    );
+    assert_eq!(
+        estop_status_field(false, false, true),
+        ("E-STOP ?".to_string(), theme::WARNING),
+        "stale data asks instead of guessing"
+    );
+}
+
 /// MACHINE OFF alternates twice a second, bright then dim, so it reads as
 /// a fault rather than a steady field the operator's eye skips.
 #[test]

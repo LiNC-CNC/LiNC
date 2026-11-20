@@ -20,6 +20,29 @@ pub fn fps_step(previous: f32, dt: f32) -> f32 {
 /// A machine that is off is a fault, not a quiet state: it is painted in the
 /// error colour and the bar blinks it through [`blink_fault_color`], so a bar
 /// full of green does not hide it. Stale data claims neither, and asks.
+/// The E-stop field of the bottom bar.
+///
+/// The cabinet's E-stop chain is powered from the machine, so with the cabinet
+/// switched off LinuxCNC reads E-stop active even though nobody pressed the
+/// mushroom. Saying `E-STOP ACTIVE` there blames the operator for a power-off
+/// and hides the real state, which is unknown until the cabinet is powered
+/// again: `?` is what the bar can honestly claim.
+pub(super) fn estop_status_field(
+    active: bool,
+    cabinet_off: bool,
+    stale: bool,
+) -> (String, egui::Color32) {
+    if stale {
+        ("E-STOP ?".to_string(), theme::WARNING)
+    } else if cabinet_off {
+        ("E-STOP ?".to_string(), theme::WARNING)
+    } else if active {
+        ("E-STOP ACTIVE".to_string(), theme::ERROR)
+    } else {
+        ("E-STOP OK".to_string(), theme::SUCCESS)
+    }
+}
+
 pub(super) fn machine_status_field(on: bool, stale: bool) -> (String, egui::Color32) {
     if stale {
         ("MACHINE ?".to_string(), theme::WARNING)
