@@ -35,6 +35,7 @@ impl LincApp {
         }
 
         self.sync_program();
+        self.program.cycle.tick(&self.snapshot.program);
         self.sync_offsets_from_snapshot(false);
         self.sync_tools_from_snapshot(false);
         self.sync_probe();

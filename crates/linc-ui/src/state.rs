@@ -1275,6 +1275,124 @@ fn loop_value(value: f64) -> String {
     }
 }
 
+/// The wall-clock figures the program page cannot get from the controller:
+/// LinuxCNC publishes no elapsed or remaining program time, so the HMI times
+/// the run itself.
+///
+/// `elapsed` counts every frame the program is active, pauses included: that is
+/// the cycle time an operator reads back after the part. `active` counts only
+/// the frames that are actually running, which is what the remaining estimate
+/// is extrapolated from - a long pause must not inflate the estimate.
+#[derive(Clone, Debug, Default)]
+pub struct CycleClock {
+    loaded_at_ms: Option<u64>,
+    was_active: bool,
+    started: bool,
+    elapsed: Duration,
+    active: Duration,
+    last: Option<Instant>,
+    remaining_secs: Option<f64>,
+}
+
+impl CycleClock {
+    /// Longest estimate the bar will print. A handful of completed lines can
+    /// extrapolate to centuries on a load-time one-liner; the clamp keeps the
+    /// field a fixed width and stops a wild guess reading as a promise.
+    const MAX_REMAINING_SECS: f64 = 99.0 * 3600.0 + 59.0 * 60.0 + 59.0;
+    /// Below this much progress the line-based extrapolation is noise.
+    const MIN_PROGRESS: f64 = 0.02;
+    /// And below this much running time it has nothing to extrapolate from.
+    const MIN_ACTIVE: Duration = Duration::from_secs(2);
+
+    pub fn tick(&mut self, program: &linc_core::model::ProgramState) {
+        self.tick_at(program, Instant::now());
+    }
+
+    pub fn tick_at(&mut self, program: &linc_core::model::ProgramState, now: Instant) {
+        if program.line_count == 0 {
+            *self = Self::default();
+            return;
+        }
+        // A fresh load, or the controller reset the program back to line 0:
+        // either way the previous run's clock is not this run's.
+        let reloaded = self.loaded_at_ms != Some(program.loaded_at_ms);
+        let reset = reloaded || (!program.running && !program.paused && program.current_line == 0);
+        if reset {
+            *self = Self {
+                loaded_at_ms: Some(program.loaded_at_ms),
+                ..Self::default()
+            };
+        }
+
+        let active = program.running || program.paused;
+        if active && !self.was_active {
+            // Cycle start (or the first frame after LiNC attached mid-run).
+            self.started = true;
+            self.elapsed = Duration::ZERO;
+            self.active = Duration::ZERO;
+            self.remaining_secs = None;
+            self.last = Some(now);
+        } else if active {
+            if let Some(last) = self.last {
+                let dt = now.saturating_duration_since(last);
+                self.elapsed += dt;
+                if !program.paused {
+                    self.active += dt;
+                }
+            }
+            self.last = Some(now);
+        } else {
+            self.last = None;
+        }
+        self.was_active = active;
+
+        if active && !program.paused {
+            self.update_remaining(program);
+        } else if !active {
+            // A finished or stopped run keeps its cycle time; the estimate has
+            // no meaning without a run to extrapolate.
+            self.remaining_secs = None;
+        }
+    }
+
+    fn update_remaining(&mut self, program: &linc_core::model::ProgramState) {
+        let progress = program.progress as f64;
+        if progress >= 0.999 {
+            self.remaining_secs = Some(0.0);
+            return;
+        }
+        if progress < Self::MIN_PROGRESS || self.active < Self::MIN_ACTIVE {
+            self.remaining_secs = None;
+            return;
+        }
+        // Lines completed per second so far, applied to the lines left. The
+        // controller's progress is line-based, so this is the only rate it
+        // offers; the estimate is labelled, never used for anything but display.
+        let raw = (self.active.as_secs_f64() * (1.0 - progress) / progress)
+            .clamp(0.0, Self::MAX_REMAINING_SECS);
+        self.remaining_secs = Some(match self.remaining_secs {
+            Some(previous) => previous * 0.85 + raw * 0.15,
+            None => raw,
+        });
+    }
+
+    pub fn elapsed_ms(&self) -> u64 {
+        self.elapsed.as_millis() as u64
+    }
+
+    pub fn remaining_ms(&self) -> Option<u64> {
+        self.remaining_secs
+            .map(|seconds| (seconds * 1000.0).round() as u64)
+    }
+
+    /// Whether this loaded program has been run. Before the first cycle start
+    /// the bar keeps the line count; once there is a clock, that is the wider
+    /// and more useful claim.
+    pub fn started(&self) -> bool {
+        self.started
+    }
+}
+
 pub struct ProgramUi {
     pub editor: Editor,
     pub view: ProgramView,
@@ -1330,6 +1448,8 @@ pub struct ProgramUi {
     pub pending_load: bool,
     /// How the run has moved through the program's loops.
     pub loop_progress: LoopProgress,
+    /// Elapsed cycle time and the estimated time to program end.
+    pub cycle: CycleClock,
     /// Bumped whenever the preview is rebuilt, so loop counters for the old
     /// program cannot be read against the new one's loops.
     pub preview_generation: u64,
@@ -1342,6 +1462,7 @@ impl Default for ProgramUi {
             completed_at: None,
             pending_load: false,
             loop_progress: LoopProgress::default(),
+            cycle: CycleClock::default(),
             preview_generation: 0,
             editor: Editor::new(),
             view: ProgramView::Split,
@@ -3497,8 +3618,9 @@ mod trail_frame_tests {
 
 #[cfg(test)]
 mod loop_readout_tests {
-    use super::{LoopProgress, LoopReadout};
+    use super::{CycleClock, LoopProgress, LoopReadout};
     use linc_core::gcode::Preview;
+    use std::time::{Duration, Instant};
 
     fn plan(text: &str) -> Preview {
         let axes: Vec<String> = vec!["X".into(), "Y".into(), "Z".into()];
@@ -3746,5 +3868,98 @@ mod loop_readout_tests {
             vec![(0, 0)],
             "a rebuilt preview has not been run"
         );
+    }
+
+    fn cycle_program(loaded_at_ms: u64, progress: f32) -> linc_core::model::ProgramState {
+        linc_core::model::ProgramState {
+            loaded_at_ms,
+            line_count: 100,
+            current_line: 1,
+            progress,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_cycle_clock_counts_the_run_and_estimates_from_cutting_time() {
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.5);
+        program.running = true;
+        let t0 = Instant::now();
+        clock.tick_at(&program, t0);
+        clock.tick_at(&program, t0 + Duration::from_secs(10));
+        assert_eq!(clock.elapsed_ms(), 10_000);
+        assert_eq!(clock.remaining_ms(), Some(10_000));
+    }
+
+    #[test]
+    fn a_pause_holds_the_estimate_but_not_the_cycle_time() {
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.5);
+        program.running = true;
+        let t0 = Instant::now();
+        clock.tick_at(&program, t0);
+        clock.tick_at(&program, t0 + Duration::from_secs(10));
+        // Paused: wall time keeps counting, the cutting-rate estimate does not.
+        program.paused = true;
+        clock.tick_at(&program, t0 + Duration::from_secs(20));
+        assert_eq!(clock.elapsed_ms(), 20_000);
+        assert_eq!(clock.remaining_ms(), Some(10_000));
+    }
+
+    #[test]
+    fn a_finished_run_keeps_its_cycle_time_and_drops_the_estimate() {
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.5);
+        program.running = true;
+        let t0 = Instant::now();
+        clock.tick_at(&program, t0);
+        clock.tick_at(&program, t0 + Duration::from_secs(10));
+        program.running = false;
+        program.current_line = 100;
+        clock.tick_at(&program, t0 + Duration::from_secs(30));
+        assert_eq!(clock.elapsed_ms(), 10_000);
+        assert_eq!(clock.remaining_ms(), None);
+    }
+
+    #[test]
+    fn a_reload_or_a_reset_starts_a_fresh_cycle() {
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.5);
+        program.running = true;
+        let t0 = Instant::now();
+        clock.tick_at(&program, t0);
+        clock.tick_at(&program, t0 + Duration::from_secs(10));
+
+        // Reload: the loaded stamp moves and the previous run is gone.
+        program.loaded_at_ms = 8;
+        program.running = false;
+        program.current_line = 0;
+        clock.tick_at(&program, t0 + Duration::from_secs(11));
+        assert_eq!(clock.elapsed_ms(), 0);
+
+        // Reset of the same program: line 0 with no run clears it too.
+        program.running = true;
+        clock.tick_at(&program, t0 + Duration::from_secs(12));
+        clock.tick_at(&program, t0 + Duration::from_secs(15));
+        assert_eq!(clock.elapsed_ms(), 3_000);
+        program.running = false;
+        program.current_line = 0;
+        clock.tick_at(&program, t0 + Duration::from_secs(16));
+        assert_eq!(clock.elapsed_ms(), 0);
+    }
+
+    #[test]
+    fn no_loaded_program_has_no_clock() {
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.5);
+        program.running = true;
+        let t0 = Instant::now();
+        clock.tick_at(&program, t0);
+        clock.tick_at(&program, t0 + Duration::from_secs(5));
+        program.line_count = 0;
+        clock.tick_at(&program, t0 + Duration::from_secs(6));
+        assert_eq!(clock.elapsed_ms(), 0);
+        assert_eq!(clock.remaining_ms(), None);
     }
 }

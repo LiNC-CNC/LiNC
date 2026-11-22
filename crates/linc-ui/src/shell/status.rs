@@ -285,6 +285,28 @@ pub fn state_label(power: MachinePower) -> &'static str {
     power.label()
 }
 
+/// The bottom bar's program clock: elapsed cycle time, and the estimate to
+/// program end while the machine is cutting. `H:MM:SS`, not a clock time, so it
+/// cannot be mistaken for the time of day.
+fn format_cycle_time(ms: u64) -> String {
+    let seconds = ms / 1000;
+    format!(
+        "{}:{:02}:{:02}",
+        seconds / 3600,
+        (seconds / 60) % 60,
+        seconds % 60
+    )
+}
+
+fn cycle_field(elapsed_ms: u64, remaining_ms: Option<u64>) -> String {
+    let mut text = format!("CYCLE {}", format_cycle_time(elapsed_ms));
+    if let Some(remaining) = remaining_ms {
+        text.push_str("  LEFT ");
+        text.push_str(&format_cycle_time(remaining));
+    }
+    text
+}
+
 impl LincApp {
     pub fn is_sim(&self) -> bool {
         self.profile.is_sim() || self.snapshot.simulated
@@ -490,10 +512,22 @@ impl LincApp {
         if program.line_count > 0 {
             let line = program.executing_line().max(1);
             let percent = (program.progress.clamp(0.0, 1.0) * 100.0).round() as i32;
-            fields.push((
-                format!("LN {line}/{} {percent}%", program.line_count),
-                theme::MUTED,
-            ));
+            // Before the first cycle start the bar shows where the program is
+            // loaded to. Once the clock runs, the cycle time is the wider claim
+            // and the exact line gives way to the percentage: the listing still
+            // marks the executing line, and the bar must fit 1280 px.
+            let text = if self.program.cycle.started() {
+                format!(
+                    "{percent}%  {}",
+                    cycle_field(
+                        self.program.cycle.elapsed_ms(),
+                        self.program.cycle.remaining_ms()
+                    )
+                )
+            } else {
+                format!("LN {line}/{} {percent}%", program.line_count)
+            };
+            fields.push((text, theme::MUTED));
         }
         if let Some(field) = homing_field(&self.snapshot.machine.homed) {
             fields.push(field);
@@ -506,7 +540,11 @@ impl LincApp {
         if let Some(field) = tool_change_field(&self.snapshot.tool_change) {
             fields.push(field);
         }
-        if !self.shows_coordinate_status() {
+        // The bar has one program slot. A loaded program fills it with its
+        // clock, so the single moving-axis DTG field steps aside: the clock is
+        // the wider claim, and the jog screens already carry the DTG readout.
+        // Without a program the slot is quiet and the DTG is the useful field.
+        if program.line_count == 0 && !self.shows_coordinate_status() {
             if let Some((axis, dtg)) = moving_axis(&self.snapshot.positions.axes) {
                 fields.push((format!("DTG {axis} {dtg:+.3}"), theme::MUTED));
             }
@@ -533,6 +571,23 @@ impl LincApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cycle_time_reads_as_a_duration_not_a_clock() {
+        assert_eq!(format_cycle_time(0), "0:00:00");
+        assert_eq!(format_cycle_time(12_000), "0:00:12");
+        assert_eq!(format_cycle_time(3_723_000), "1:02:03");
+        assert_eq!(format_cycle_time(359_999_000), "99:59:59");
+    }
+
+    #[test]
+    fn the_cycle_field_drops_the_estimate_when_there_is_none() {
+        assert_eq!(cycle_field(12_000, None), "CYCLE 0:00:12");
+        assert_eq!(
+            cycle_field(12_000, Some(3_723_000)),
+            "CYCLE 0:00:12  LEFT 1:02:03"
+        );
+    }
 
     #[test]
     pub(super) fn the_program_state_word_reads_the_controller() {
