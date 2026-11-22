@@ -123,6 +123,9 @@ pub struct LincApp {
     pub(super) view: ViewState,
     pub(super) following: FollowError,
     pub(super) chrome: ChromeUi,
+    /// `linc.program-ok` as last written. `None` until the first write, so the
+    /// first frame publishes the level instead of assuming it.
+    pub(super) program_ok_sent: Option<bool>,
 }
 
 impl LincApp {
@@ -351,6 +354,7 @@ impl LincApp {
                 run_samples: linc_core::model::AxisMap::new(),
                 run_active: false,
             },
+            program_ok_sent: None,
             chrome: ChromeUi {
                 quit_requested: false,
                 last_snapshot_ms: now_ms(),

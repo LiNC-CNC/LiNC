@@ -1942,6 +1942,13 @@ impl MachineBackend for SimBackend {
                             self.snapshot.hal.net_safe = value;
                         }
                     }
+                    LincOutput::ProgramOk => {
+                        // Same for the program interlock: the level is what the
+                        // machine HAL would AND into cycle start.
+                        if let HalValue::Bit(value) = value {
+                            self.snapshot.hal.program_ok = value;
+                        }
+                    }
                 }
                 Ok(())
             }

@@ -9,6 +9,13 @@ net linc-status linc.status-display => cnc_panel.sseg_status
 net tool-changed linc.tool-change-confirm
 net linc-hmi-heartbeat linc.hmi-alive
 
+# The program interlock. A file with a syntax fault is not loaded into the
+# interpreter, and a program that is not loaded must not start, so the panel's
+# CYCLE START and RESUME are gated on this level. It is created by the HMI, which
+# is why the net lives here and not in the machine HAL; an unconnected input
+# reads FALSE, so the gate is closed until the HMI has looked at the program.
+net linc-program-ok linc.program-ok => and2.cycle_permit.in1 and2.resume_permit.in1
+
 # Cabinet machine-on switch, the same net the real machine's post-GUI file uses.
 # Without it `linc.machine-on` exists but is unconnected, reads FALSE, and makes
 # the recovery gate refuse with CABINET IS OFF.

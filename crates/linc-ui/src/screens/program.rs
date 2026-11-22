@@ -30,6 +30,25 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // to take the chord for its own purposes.
     let unload = ui.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::U));
 
+    // The fault keys walk the marks, wrapping. Page-local, like Ctrl+U: they
+    // belong to the file the page is showing, and they are consumed before any
+    // pane draws so a focused text edit or a header widget cannot take them. Two
+    // chords rather than F8 and Shift+F8: F8 is the OFFSETS page and the panel's
+    // keyboard has no Shift key.
+    let mut issue_step = 0isize;
+    let (next, previous) = (app.prefs.keymap.fault_next, app.prefs.keymap.fault_prev);
+    ui.input_mut(|input| {
+        if input.consume_key(next.modifiers, next.key) {
+            issue_step = 1;
+        }
+        if input.consume_key(previous.modifiers, previous.key) {
+            issue_step = -1;
+        }
+    });
+    if issue_step != 0 {
+        app.cycle_issue(issue_step);
+    }
+
     if !app.snapshot.probe.enabled && app.profile.variant == linc_core::model::MachineVariant::Lathe
     {
         // The lathe profile may disable the probe; Program is unaffected.
@@ -418,13 +437,26 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
         // One status line. The buffer's name and editability are in the header;
         // everything here is progress, so a wrapped row would only cost the
         // listing a line to say nothing twice.
-        let (status, status_color) = if let Some(error) = &app.program.preview.error {
-            (
-                format!("SYNTAX LN {}: {}", error.line, error.message),
+        // The fault list is what the operator walks, so the status names the one
+        // he is on and how many there are; the parser's fatal fault is the first
+        // entry when it stopped the drawing.
+        let issue_count = app.program.issues.len();
+        let (status, status_color) = match app.program.issues.get(app.program.issue_index) {
+            Some(issue) if issue_count > 1 => (
+                format!(
+                    "SYNTAX {}/{}  LN {}: {}",
+                    app.program.issue_index + 1,
+                    issue_count,
+                    issue.line,
+                    issue.message
+                ),
                 theme::ERROR,
-            )
-        } else {
-            ("PREVIEW VALID".to_string(), theme::SUCCESS)
+            ),
+            Some(issue) => (
+                format!("SYNTAX LN {}: {}", issue.line, issue.message),
+                theme::ERROR,
+            ),
+            None => ("PREVIEW VALID".to_string(), theme::SUCCESS),
         };
         // Inside a subroutine the controller reports a line of the routine's own
         // file and does not publish that file's name, so the preview names it.
@@ -472,6 +504,31 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                     .as_deref()
                     .map_or(0.0, |text| theme::measure(ui, text, 9.0) + 10.0);
                 let room = (ui.available_width() - chip_room).max(80.0);
+                // The buttons sit left of the message (right-to-left layout puts
+                // the last widget added furthest left), so the row still reads
+                // "< 2/5  SYNTAX ..." when the message is cut short.
+                if issue_count > 1 {
+                    if ui
+                        .small_button(RichText::new("\u{25b6}").size(theme::font_size(9.0)))
+                        .on_hover_text(format!(
+                            "next fault ({})",
+                            app.prefs.keymap.fault_next.label()
+                        ))
+                        .clicked()
+                    {
+                        app.cycle_issue(1);
+                    }
+                    if ui
+                        .small_button(RichText::new("\u{25c0}").size(theme::font_size(9.0)))
+                        .on_hover_text(format!(
+                            "previous fault ({})",
+                            app.prefs.keymap.fault_prev.label()
+                        ))
+                        .clicked()
+                    {
+                        app.cycle_issue(-1);
+                    }
+                }
                 let fitted = fit_text(ui, &status, room);
                 let response = ui.label(
                     RichText::new(fitted.clone())
@@ -533,7 +590,8 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
     let current_line = app.program.selected_line;
     let search = app.program.search_needle.clone();
     let matches = app.program.search_matches.clone();
-    let syntax_error_line = app.program.preview.error.as_ref().map(|error| error.line);
+    let issues = app.program.issues.clone();
+    let current_issue = (app.program.issue_index < issues.len()).then_some(app.program.issue_index);
     let line_count = app.program.editor.line_count();
     let desired_rows = line_count.max(12);
     let gutter_font = FontId::monospace(editor_font());
@@ -638,7 +696,11 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                 // the old scale makes epaint warn during tessellation.
                 let key: GalleyKey = (
                     app.program.editor.revision,
-                    syntax_error_line,
+                    issues
+                        .iter()
+                        .map(|issue| issue.line)
+                        .collect::<Vec<usize>>(),
+                    current_issue,
                     search.clone(),
                     matches.clone(),
                     buffer.as_str().len(),
@@ -654,7 +716,8 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                         return galley;
                     }
                 }
-                let mut job = highlight_job(buffer.as_str(), syntax_error_line, &search, &matches);
+                let mut job =
+                    highlight_job(buffer.as_str(), &issues, current_issue, &search, &matches);
                 job.wrap.max_width = wrap_width;
                 let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
                 ui.ctx()
@@ -736,6 +799,8 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             let rows = &output.galley.rows;
             let clip = ui.clip_rect();
             let painter = ui.painter_at(clip);
+            let fault_lines: std::collections::BTreeSet<usize> =
+                issues.iter().map(|issue| issue.line).collect();
             for (line, start) in starts.iter().enumerate() {
                 let Some(placed) = rows.get(*start) else {
                     continue;
@@ -744,12 +809,50 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                 if y + line_height() < clip.top() || y > clip.bottom() {
                     continue;
                 }
+                let colour = if fault_lines.contains(&(line + 1)) {
+                    theme::ERROR
+                } else {
+                    theme::LINE_NUMBER
+                };
                 painter.text(
                     egui::pos2(number_right, y),
                     egui::Align2::RIGHT_TOP,
                     (line + 1).to_string(),
                     gutter_font.clone(),
-                    theme::LINE_NUMBER,
+                    colour,
+                );
+            }
+            // A bar on the gutter's left edge for every line holding a fault: the
+            // number says which line, the bar says the file has one at a glance,
+            // and the one the operator is on is drawn wider so F8 visibly moves.
+            let bar_left = number_right - gutter_width + 1.0;
+            for line in &fault_lines {
+                if *line == 0 || *line > starts.len() {
+                    continue;
+                }
+                let (top, bottom) = line_span(&output.galley, output.galley_pos.y, &starts, *line);
+                let band = egui::Rect::from_min_max(
+                    egui::pos2(bar_left, top),
+                    egui::pos2(bar_left + 3.0, bottom.max(top + line_height())),
+                )
+                .intersect(clip);
+                if band.width() <= 0.0 || band.height() <= 0.0 {
+                    continue;
+                }
+                let current_fault = issues
+                    .get(app.program.issue_index)
+                    .is_some_and(|issue| issue.line == *line);
+                painter.rect_filled(
+                    if current_fault {
+                        egui::Rect::from_min_max(
+                            band.min - egui::vec2(1.0, 0.0),
+                            band.max + egui::vec2(1.0, 0.0),
+                        )
+                    } else {
+                        band
+                    },
+                    egui::CornerRadius::same(1),
+                    theme::ERROR,
                 );
             }
             // The current line, styled like the tool table's selected row: a
@@ -847,7 +950,20 @@ fn line_span(galley: &egui::Galley, galley_top: f32, starts: &[usize], line: usi
 
 /// Cache key for the editor galley: editor revision, highlight inputs, wrap
 /// width and buffer length.
-type GalleyKey = (u64, Option<usize>, String, Vec<usize>, usize, u32, u32);
+/// Everything the laid-out buffer depends on. The fault list enters as the
+/// lines it marks and the one the operator is on: a rebuild that changes a
+/// message without changing a line still changes the editor revision, which is
+/// already the first element.
+type GalleyKey = (
+    u64,
+    Vec<usize>,
+    Option<usize>,
+    String,
+    Vec<usize>,
+    usize,
+    u32,
+    u32,
+);
 
 /// First galley row of each logical line, derived from whether the row ended
 /// with a newline. Wrapped rows continue the same logical line.
@@ -943,18 +1059,48 @@ mod tests {
     }
 
     #[test]
-    fn the_error_line_is_underlaid_in_dim_red() {
-        let job = highlight_job("G0 X0\nG1 X\n", Some(2), "", &[]);
+    fn every_fault_line_is_underlaid_in_red() {
+        let text = "G0 X0\nG1 X\nG1 X10 X20 F100\nM2\n";
+        let issues = linc_core::lint::lint_program(text);
+        assert_eq!(issues.len(), 2, "{issues:?}");
+        let job = highlight_job(text, &issues, Some(0), "", &[]);
         let first = job.text.find("G0 X0").expect("the first line lays out");
-        let second = job.text.find("G1 X").expect("the error line lays out");
+        let second = job.text.find("G1 X\n").expect("the first fault lays out");
+        let third = job.text.find("G1 X10").expect("the second fault lays out");
         assert_eq!(
             job.format_at_byte(egui::text::ByteIndex(first)).background,
-            Color32::TRANSPARENT
+            Color32::TRANSPARENT,
+            "a clean line stays unpainted"
         );
         assert_eq!(
             job.format_at_byte(egui::text::ByteIndex(second)).background,
+            theme::tint(theme::ERROR, 0x55),
+            "the fault the operator is on carries the stronger wash"
+        );
+        assert_eq!(
+            job.format_at_byte(egui::text::ByteIndex(third)).background,
             theme::tint(theme::ERROR, 0x2b),
-            "the rejected line carries a dim red wash behind its glyphs"
+            "a fault further down the file stays marked"
+        );
+    }
+
+    #[test]
+    fn the_word_at_fault_is_underlined_not_the_whole_block() {
+        let text = "G0 X0\nG1 X10 X20 F100\nM2\n";
+        let issues = linc_core::lint::lint_program(text);
+        let job = highlight_job(text, &issues, Some(0), "", &[]);
+        // The second `X` word is the duplicate; the first one is correct.
+        let duplicate = job.text.rfind("X20").expect("the duplicate word lays out");
+        let first_word = job.text.find("X10").expect("the first word lays out");
+        assert_ne!(
+            job.format_at_byte(egui::text::ByteIndex(duplicate))
+                .underline,
+            egui::Stroke::NONE
+        );
+        assert_eq!(
+            job.format_at_byte(egui::text::ByteIndex(first_word))
+                .underline,
+            egui::Stroke::NONE
         );
     }
 
@@ -997,7 +1143,8 @@ mod tests {
 
 fn highlight_job(
     text: &str,
-    error_line: Option<usize>,
+    issues: &[linc_core::lint::LintIssue],
+    current: Option<usize>,
     search: &str,
     matches: &[usize],
 ) -> LayoutJob {
@@ -1013,11 +1160,23 @@ fn highlight_job(
     for (index, line) in lines.iter().enumerate() {
         let line_no = index + 1;
         let mut format = base.clone();
-        if let Some(error) = error_line {
-            if error == line_no {
-                // Behind the glyphs, so the text keeps its syntax colours: a
-                // dim transparent red wash marks the line the parser rejected.
-                format.background = theme::tint(theme::ERROR, 0x2b);
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        for (position, issue) in issues.iter().enumerate() {
+            if issue.line != line_no {
+                continue;
+            }
+            // Behind the glyphs, so the text keeps its syntax colours: a dim
+            // transparent red wash marks every line that holds a fault, and the
+            // fault the operator is on gets a stronger one so cycling is
+            // visible without reading the counter.
+            let alpha = if Some(position) == current {
+                0x55
+            } else {
+                0x2b
+            };
+            format.background = theme::tint(theme::ERROR, alpha);
+            if let Some(span) = issue.span {
+                spans.push(span);
             }
         }
         if !search.is_empty() && matches.contains(&line_no) {
@@ -1028,7 +1187,7 @@ fn highlight_job(
         // before it. epaint still emits a row for an empty paragraph, so the
         // line keeps its height and its number without a placeholder character.
         if !line.is_empty() {
-            append_gcode_line(&mut job, line, &format);
+            append_gcode_line(&mut job, line, &format, &spans);
         }
         if index + 1 < lines.len() {
             job.append("\n", 0.0, format.clone());
@@ -1039,12 +1198,32 @@ fn highlight_job(
 
 /// Append one G-code line in highlighted runs, gaps included: every token plus
 /// the source text between and after them, so the laid-out job is the line
-/// character for character. `format` supplies the font and any background.
-fn append_gcode_line(job: &mut LayoutJob, line: &str, format: &TextFormat) {
+/// character for character. `format` supplies the font and any background, and
+/// every run inside `spans` is underlined in red: the word at fault, not the
+/// whole block.
+fn append_gcode_line(
+    job: &mut LayoutJob,
+    line: &str,
+    format: &TextFormat,
+    spans: &[(usize, usize)],
+) {
+    let mut cuts: Vec<usize> = spans
+        .iter()
+        .flat_map(|(start, end)| [*start, *end])
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
     let mut cursor = 0usize;
     for token in lex_line(line) {
         if token.start > cursor {
-            job.append(&line[cursor..token.start], 0.0, format.clone());
+            push_run(
+                job,
+                &line[cursor..token.start],
+                cursor,
+                format,
+                spans,
+                &cuts,
+            );
         }
         let mut token_format = format.clone();
         token_format.color = token_color(token.kind);
@@ -1052,11 +1231,54 @@ fn append_gcode_line(job: &mut LayoutJob, line: &str, format: &TextFormat) {
         if token.kind == TokenKind::Comment {
             token_format.color = theme::COMMENT;
         }
-        job.append(&token.display(), 0.0, token_format);
+        // `display()` uppercases G/M/axis words. That keeps the byte length, so
+        // the token's own source offsets still map onto it; if a future display
+        // transform ever changes the length, the run is painted whole rather
+        // than sliced at an offset that no longer means anything.
+        let shown = token.display();
+        if shown.len() == token.end - token.start {
+            push_run(job, &shown, token.start, &token_format, spans, &cuts);
+        } else {
+            push_run(job, &shown, token.start, &token_format, &[], &[]);
+        }
         cursor = token.end;
     }
     if cursor < line.len() {
-        job.append(&line[cursor..], 0.0, format.clone());
+        push_run(job, &line[cursor..], cursor, format, spans, &cuts);
+    }
+}
+
+/// Append the source text that starts at `base`, split at the span boundaries
+/// falling inside it, underlining the pieces that sit inside a fault span.
+fn push_run(
+    job: &mut LayoutJob,
+    text: &str,
+    base: usize,
+    format: &TextFormat,
+    spans: &[(usize, usize)],
+    cuts: &[usize],
+) {
+    if text.is_empty() {
+        return;
+    }
+    let end = base + text.len();
+    let mut boundaries = vec![base];
+    boundaries.extend(cuts.iter().copied().filter(|cut| *cut > base && *cut < end));
+    boundaries.push(end);
+    for pair in boundaries.windows(2) {
+        let (start, stop) = (pair[0], pair[1]);
+        if start >= stop
+            || !text.is_char_boundary(start - base)
+            || !text.is_char_boundary(stop - base)
+        {
+            continue;
+        }
+        let mut run = format.clone();
+        if spans.iter().any(|(a, b)| start >= *a && stop <= *b) {
+            run.underline = egui::Stroke::new(1.5, theme::ERROR);
+            run.background = theme::tint(theme::ERROR, 0x4d);
+        }
+        job.append(&text[start - base..stop - base], 0.0, run);
     }
 }
 
@@ -1075,6 +1297,7 @@ pub(crate) fn line_job(line: &str, size: f32) -> LayoutJob {
             italics: false,
             ..Default::default()
         },
+        &[],
     );
     job
 }
@@ -1102,5 +1325,5 @@ fn token_color(kind: TokenKind) -> Color32 {
 /// Exposed for tests.
 pub fn layout_for_test(text: &str, current: usize) -> LayoutJob {
     let _ = current;
-    highlight_job(text, None, "", &[])
+    highlight_job(text, &[], None, "", &[])
 }

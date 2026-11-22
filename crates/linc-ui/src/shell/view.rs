@@ -49,6 +49,11 @@ impl LincApp {
         if text.is_empty() {
             self.program.preview = Preview::empty();
             self.program.last_valid_preview = Preview::empty();
+            self.program.issues.clear();
+            self.program.issue_index = 0;
+            // An empty buffer is not a program to run: the interlock closes here
+            // too, not only on the next frame that rebuilds a preview.
+            self.sync_program_ok();
             return;
         }
         let axes = self.axes();
@@ -77,6 +82,107 @@ impl LincApp {
         }
         self.program.preview = preview;
         self.program.preview_generation = self.program.preview_generation.wrapping_add(1);
+        self.sync_issues();
+        self.sync_program_ok();
+    }
+
+    /// Take the fault list the preview just built, keeping the operator's place
+    /// in it when that place still exists: an edit above the fault shifts its
+    /// line but must not lose the marker the operator was working on.
+    pub(super) fn sync_issues(&mut self) {
+        let previous = self.program.issues.get(self.program.issue_index).cloned();
+        self.program.issues = self.program.preview.issues.clone();
+        // The controller's own verdict is one more fault to walk when it names a
+        // line: the operator must be able to reach the block the machine refused,
+        // and it may be a block the block-level checks accept.
+        if let Some(check) = &self.program.machine_check {
+            let line = check.marked_line().or_else(|| {
+                check
+                    .message
+                    .as_deref()
+                    .and_then(linc_core::verify::line_from_message)
+            });
+            if let (linc_core::verify::CheckOutcome::Refused, Some(line), Some(message)) =
+                (check.outcome, line, check.message.clone())
+            {
+                if !self.program.issues.iter().any(|issue| issue.line == line) {
+                    self.program.issues.push(linc_core::lint::LintIssue {
+                        line,
+                        span: None,
+                        message: format!("controller: {message}"),
+                    });
+                    self.program.issues.sort_by_key(|issue| issue.line);
+                }
+            }
+        }
+        if self.program.issues.is_empty() {
+            self.program.issue_index = 0;
+            return;
+        }
+        // Same fault, same line: an edit elsewhere below it changes nothing.
+        // Same fault, moved: an edit above it shifted the line, and the operator
+        // is still looking at the fault he chose, not at whatever now occupies
+        // its old line number. Otherwise the index only has to stay in range.
+        let kept = previous.as_ref().and_then(|previous| {
+            self.program
+                .issues
+                .iter()
+                .position(|issue| issue.line == previous.line && issue.message == previous.message)
+                .or_else(|| {
+                    self.program
+                        .issues
+                        .iter()
+                        .position(|issue| issue.message == previous.message)
+                })
+        });
+        self.program.issue_index =
+            kept.unwrap_or(self.program.issue_index.min(self.program.issues.len() - 1));
+    }
+
+    /// Whether the interpreter holds exactly the program on screen, with no fault
+    /// in it: the condition the machine HAL needs to allow cycle start.
+    pub(super) fn program_ready(&self) -> bool {
+        let loaded = self
+            .program
+            .loaded_path
+            .as_deref()
+            .zip(self.snapshot.program.path.as_deref())
+            .is_some_and(|(shown, loaded)| shown == loaded);
+        loaded && !self.program.editor.dirty && self.program.issues.is_empty()
+    }
+
+    /// Publish the program interlock when it changes. Called after anything that
+    /// can move it: a preview rebuild, a load, a save, an unload or an edit.
+    pub(super) fn sync_program_ok(&mut self) {
+        let ready = self.program_ready();
+        if self.program_ok_sent == Some(ready) {
+            return;
+        }
+        self.program_ok_sent = Some(ready);
+        self.send(linc_core::command::MachineCommand::SetHalOutput {
+            output: linc_core::command::LincOutput::ProgramOk,
+            value: linc_core::command::HalValue::Bit(ready),
+        });
+    }
+
+    /// Move to the next or previous fault and put the editor on it. Unlike a
+    /// plain jump, this moves the caret as well: the text cursor feeds
+    /// `selected_line` back every frame while the editor has focus.
+    pub fn cycle_issue(&mut self, step: isize) {
+        let count = self.program.issues.len();
+        if count == 0 {
+            return;
+        }
+        let current = self.program.issue_index.min(count - 1) as isize;
+        let next = (current + step).rem_euclid(count as isize) as usize;
+        self.program.issue_index = next;
+        let line = self.program.issues[next].line.max(1);
+        self.program.selected_line = line;
+        self.program.cursor_line = Some(line);
+        self.program.code_scroll_to_line = Some(line);
+        // The operator has taken the cursor; do not drag it back to the running
+        // line until the next run starts.
+        self.program.follow_current = false;
     }
 
     /// The work offset the preview is drawn with, in machine coordinates: the

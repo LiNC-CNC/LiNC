@@ -12,7 +12,7 @@ commands (MDI, probe, tool change, program/offset writes). Three binaries:
 
 ```bash
 cargo build --release                       # all three binaries
-cargo test --workspace                      # 584 tests today
+cargo test --workspace                      # 1145 tests today
 python3 scripts/mcp-smoke.py                # phase 3+4 acceptance, real binaries
 ./target/release/linc --config configs/sim.toml --check-config
 ./target/release/linc --config configs/baiermill-pb.toml --check-config
@@ -58,6 +58,23 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
   allowlisted paths only; there is no JSONPath and no regex. Crash records land in `$XDG_STATE_HOME/linc/crash-<role>-<pid>.json`
   (each binary installs a panic hook); `linc_get_crash_records` reads them without the HMI.
 
+## Program syntax checks
+
+Three layers, in the order they run:
+
+- `linc-core::lint` — every block on its own, all faults at once, each with the
+  byte span of the word at fault. No modal state, no parameters.
+- `linc-core::gcode` preview — the first fatal fault, with a line number, because
+  the drawing cannot continue past it. Its line joins the lint's list.
+- `linc-core::verify` — the controller's own interpreter through `rs274 -g`, on
+  load, which knows what one block cannot. It reports one fault, mostly without a
+  line number (it echoes the block), and is killed at `program.verify_timeout_ms`.
+
+A file the checks refuse is not loaded, so the panel's CYCLE START has nothing to
+run; `linc.program-ok` closes the HAL side of the same gate. CYCLE START itself is
+a HAL edge into `halui.program.run` and never passes through LiNC — that is why
+the pin exists at all.
+
 ## Crate map
 
 - `linc-core` — profile/INI loader, model, commands, backend trait, G-code lexer/preview, editor, probe, tool table, preferences, sim backend. Leaf: third-party deps only.
@@ -76,9 +93,11 @@ LINC_SIM_IPC="${XDG_RUNTIME_DIR:-/tmp}/linc/panel-sim" ./target/release/linc --c
 - `CONFIGURATION.md` — every profile key, merge rules, enums, validation.
 - `configs/base.toml` — live defaults for keys, pages, allowed outputs, safety.
 - The machine INI — authoritative for axes, travel, units, velocities, tool table, ATC and `PROGRAM_PREFIX`. Never duplicate those in TOML.
-- Code and tests decide current behaviour when prose drifts. `LincOutput::ALLOWED` and `configs/base.toml` list six outputs (`hmi-alive`,
-  `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`, `machine-off`); SPEC §5/§11, CONFIGURATION §1/§8 keep the same list. Follow
-  the code; fix the docs.
+- Code and tests decide current behaviour when prose drifts. `LincOutput::ALLOWED` and `configs/base.toml` list eight outputs (`hmi-alive`,
+  `tool-change-confirm`, `status-display`, `jog-increment`, `jog-speed`, `machine-off`, `net-safe`, `program-ok`); SPEC §5/§11, CONFIGURATION
+  §1/§8 keep the same list. Follow the code; fix the docs.
+- Run `rs274` one at a time. Two instances started at the same moment crash with `SIGBUS`; `linc_core::verify` serialises them behind a process-wide
+  lock, and a crash is reported as `Crashed`, never as "no faults".
 - `docs/solutions/` — documented solutions to past problems (bugs, best practices, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`); check it when working in a documented area.
 
 ## Hard invariants

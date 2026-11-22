@@ -2799,6 +2799,155 @@ fn protect_unknown_fails_closed_in_the_ui() {
     assert!(app.overlay.modal.is_none());
 }
 
+/// Every fault in the buffer reaches the state, and F8 walks them in file order
+/// with the caret, wrapping at the ends. The line is what the editor scrolls to
+/// and what the red band follows, so the assertion is on the cursor line.
+#[test]
+fn the_issue_list_walks_with_f8() {
+    let (_dir, mut app) = make_app(PanelMode::Edit);
+    app.program
+        .editor
+        .replace_text("G0 X0 Y0\nG1 X\nG1 X10 X20 F100\nM1234\nM2\n".into());
+    app.refresh_preview();
+    assert_eq!(
+        app.program
+            .issues
+            .iter()
+            .map(|issue| issue.line)
+            .collect::<Vec<_>>(),
+        vec![2, 3, 4],
+        "{:?}",
+        app.program.issues
+    );
+    assert_eq!(app.program.issue_index, 0);
+    app.cycle_issue(1);
+    assert_eq!(app.program.selected_line, 3);
+    assert_eq!(app.program.cursor_line, Some(3));
+    assert_eq!(app.program.code_scroll_to_line, Some(3));
+    app.cycle_issue(1);
+    assert_eq!(app.program.selected_line, 4);
+    // Past the last fault the walk wraps to the first rather than sticking.
+    app.cycle_issue(1);
+    assert_eq!(app.program.selected_line, 2);
+    app.cycle_issue(-1);
+    assert_eq!(app.program.selected_line, 4);
+}
+
+/// A repair that removes a fault keeps the operator's place when that place is
+/// still a fault, and drops it to the first one when it is not.
+#[test]
+fn the_issue_index_survives_a_rebuild() {
+    let (_dir, mut app) = make_app(PanelMode::Edit);
+    app.program
+        .editor
+        .replace_text("G0 X0 Y0\nG1 X\nG123\nM2\n".into());
+    app.refresh_preview();
+    app.cycle_issue(1);
+    assert_eq!(app.program.selected_line, 3);
+    // An edit above the fault shifts both lines down by one.
+    app.program
+        .editor
+        .replace_text("(note)\nG0 X0 Y0\nG1 X\nG123\nM2\n".into());
+    app.refresh_preview();
+    assert_eq!(app.program.selected_line, 3);
+    assert_eq!(app.program.issue_index, 1);
+    assert_eq!(app.program.issues[1].line, 4);
+    // The chosen fault is repaired: the index falls back inside the list.
+    app.program
+        .editor
+        .replace_text("(note)\nG0 X0 Y0\nG1 X\nG123\nM2\n".replace("G123", "G1 X1 F100"));
+    app.refresh_preview();
+    assert_eq!(app.program.issues.len(), 1);
+    assert_eq!(app.program.issue_index, 0);
+}
+
+/// The load gate: a file with a syntax fault is never handed to the
+/// interpreter, so the panel's CYCLE START has nothing to run. It still opens in
+/// the editor - the operator has to be able to fix it where the fault is marked.
+#[test]
+fn a_file_with_a_syntax_fault_is_not_loaded_into_the_interpreter() {
+    let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+    let path = harness._dir.path().join("gcode").join("broken.ngc");
+    std::fs::write(&path, "G0 X0 Y0\nG1 X\nM2\n").unwrap();
+    harness.sent.borrow_mut().clear();
+    harness.app.load_program(path.clone());
+    assert!(
+        !harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::LoadProgram { .. })),
+        "the broken file reached the interpreter: {:?}",
+        harness.sent_debug()
+    );
+    assert!(
+        !harness.app.program.pending_load,
+        "a refused load must not wait for a backend verdict"
+    );
+    // The buffer is open on the file, the fault is marked, and the interlock
+    // stays shut.
+    // Three blocks plus the empty line after the final newline.
+    assert_eq!(harness.app.program.editor.line_count(), 4);
+    assert_eq!(
+        harness
+            .app
+            .program
+            .issues
+            .iter()
+            .map(|issue| issue.line)
+            .collect::<Vec<_>>(),
+        vec![2]
+    );
+    assert!(!harness.app.program_ready());
+    assert_eq!(
+        harness.app.program_ok_sent,
+        Some(false),
+        "the interlock must be held shut for a refused file"
+    );
+    assert!(
+        !harness
+            .sent
+            .borrow()
+            .iter()
+            .filter_map(|command| match command {
+                MachineCommand::SetHalOutput { output, value } => Some((*output, *value)),
+                _ => None,
+            })
+            .any(|(output, value)| output == linc_core::command::LincOutput::ProgramOk
+                && value == linc_core::command::HalValue::Bit(true)),
+        "the interlock was opened for a file the check refused"
+    );
+}
+
+/// A clean file loads, and the interlock follows the loaded program rather than
+/// the editor buffer alone.
+#[test]
+fn a_clean_file_loads_and_opens_the_interlock() {
+    let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+    let path = harness._dir.path().join("gcode").join("good.ngc");
+    std::fs::write(&path, "G0 X0 Y0\nG1 X10 F300\nM2\n").unwrap();
+    harness.sent.borrow_mut().clear();
+    harness.app.load_program(path.clone());
+    assert!(
+        harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::LoadProgram { .. })),
+        "a clean file was refused: {:?}",
+        harness.sent_debug()
+    );
+    // The interpreter confirms the load on the next poll; until then the buffer
+    // is not the loaded program and the interlock stays shut.
+    harness.app.poll_backend();
+    harness.app.sync_issues();
+    assert!(
+        harness.app.program.issues.is_empty(),
+        "{:?}",
+        harness.app.program.issues
+    );
+}
+
 #[test]
 fn editor_preview_updates_only_after_valid_parse() {
     let (_dir, mut app) = make_app(PanelMode::Edit);

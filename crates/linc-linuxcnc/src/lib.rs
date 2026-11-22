@@ -1825,7 +1825,8 @@ impl NmlBackend {
                     LincOutput::HmiAlive
                     | LincOutput::StatusDisplay
                     | LincOutput::MachineOff
-                    | LincOutput::NetworkSafe => {}
+                    | LincOutput::NetworkSafe
+                    | LincOutput::ProgramOk => {}
                 }
                 Ok(())
             }

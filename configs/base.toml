@@ -62,6 +62,15 @@ live_preview = true
 preview_requires_syntax_ok = true
 preview_debounce_ms = 250
 tab_width = 4
+# A program with a syntax fault is not loaded into the interpreter, so the
+# panel's cycle start has nothing to run. The fault list is in the editor, one
+# F8 press away.
+block_run_on_syntax_error = true
+# Ask the controller's own interpreter about the file first: it catches what a
+# block-level check cannot (a feed rate never set, an arc against the wrong
+# plane). Skipped without a word when `rs274` is not installed.
+verify_on_load = true
+verify_timeout_ms = 2000
 
 [files]
 # NC_FILES is derived from the LinuxCNC INI PROGRAM_PREFIX; do not duplicate it.
@@ -218,6 +227,11 @@ spindle_speed = "Ctrl+S"
 goto_line = "Ctrl+G"
 # Page-local to Program: start the loaded program at a line.
 program_run_from_line = "Ctrl+R"
+# Page-local to Program: walk the syntax faults marked in the editor, wrapping at
+# both ends. Two chords, not a Shift pair: the panel's keyboard has no Shift key,
+# and F8 is the OFFSETS page.
+fault_next = "Ctrl+K"
+fault_prev = "Ctrl+P"
 # The CNC keyboard has no Delete key: the Files page deletes with Backspace.
 # Delete is kept for a desktop keyboard.
 files_delete = "Delete"
@@ -321,6 +335,7 @@ allowed_outputs = [
   "jog-speed",
   "machine-off",
   "net-safe",
+  "program-ok",
 ]
 
 [hal.pins]

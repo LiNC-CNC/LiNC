@@ -405,6 +405,10 @@ impl LincApp {
             return;
         }
         self.send(linc_core::command::MachineCommand::UnloadProgram);
+        // Nothing loaded means nothing to start: drop the interlock now rather
+        // than when the controller's answer arrives.
+        self.program.machine_check = None;
+        self.sync_program_ok();
         // The command is queued, so the outcome is not known here: the controller
         // may refuse or keep the file, and this toast used to promise success
         // either way. The `NET` metric and the program name show what happened.

@@ -79,10 +79,17 @@ pub enum LincOutput {
     /// pass through LiNC's command set. `true` when the profile does not manage
     /// the link, so a machine without `[network]` keeps moving.
     NetworkSafe,
+    /// The buffer on screen is the program the interpreter holds, it holds no
+    /// syntax fault, and it has not been edited since. The machine HAL ANDs this
+    /// into cycle start, the way it ANDs `net-safe`: the panel's CYCLE START
+    /// reaches `halui.program.run` without passing through LiNC, so this pin is
+    /// the only thing that can stop a broken file from starting. Low while a
+    /// file is refused, dirty, or not the loaded one, and after an unload.
+    ProgramOk,
 }
 
 impl LincOutput {
-    pub const ALLOWED: [LincOutput; 7] = [
+    pub const ALLOWED: [LincOutput; 8] = [
         LincOutput::HmiAlive,
         LincOutput::ToolChangeConfirm,
         LincOutput::StatusDisplay,
@@ -90,6 +97,7 @@ impl LincOutput {
         LincOutput::JogSpeed,
         LincOutput::MachineOff,
         LincOutput::NetworkSafe,
+        LincOutput::ProgramOk,
     ];
 
     pub fn pin_name(self) -> &'static str {
@@ -101,6 +109,7 @@ impl LincOutput {
             Self::JogSpeed => "linc.jog-speed",
             Self::MachineOff => "linc.machine-off",
             Self::NetworkSafe => "linc.net-safe",
+            Self::ProgramOk => "linc.program-ok",
         }
     }
 
@@ -113,6 +122,7 @@ impl LincOutput {
             Self::JogSpeed => "jog-speed",
             Self::MachineOff => "machine-off",
             Self::NetworkSafe => "net-safe",
+            Self::ProgramOk => "program-ok",
         }
     }
 
@@ -125,6 +135,7 @@ impl LincOutput {
             "jog-speed" | "linc.jog-speed" => Some(Self::JogSpeed),
             "machine-off" | "linc.machine-off" => Some(Self::MachineOff),
             "net-safe" | "linc.net-safe" => Some(Self::NetworkSafe),
+            "program-ok" | "linc.program-ok" => Some(Self::ProgramOk),
             _ => None,
         }
     }
@@ -152,6 +163,7 @@ impl HalValue {
                 | (HalValue::Float(_), LincOutput::JogSpeed)
                 | (HalValue::Bit(_), LincOutput::MachineOff)
                 | (HalValue::Bit(_), LincOutput::NetworkSafe)
+                | (HalValue::Bit(_), LincOutput::ProgramOk)
         )
     }
 }
@@ -672,7 +684,7 @@ mod tests {
 
     #[test]
     fn only_declared_hal_outputs_are_representable() {
-        assert_eq!(LincOutput::ALLOWED.len(), 7);
+        assert_eq!(LincOutput::ALLOWED.len(), 8);
         assert!(LincOutput::from_name("linc.hmi-alive").is_some());
         assert!(LincOutput::from_name("linc.status-display").is_some());
         assert!(LincOutput::from_name("linc.tool-change-confirm").is_some());

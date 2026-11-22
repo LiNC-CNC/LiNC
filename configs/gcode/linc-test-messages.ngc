@@ -1,5 +1,6 @@
 (LiNC message-reporting test - messages, not motion)
-(Every (MSG,) and (DEBUG,) line posts a controller message;)
+(Every MSG and DEBUG line posts a controller message: parentheses inside a)
+(comment would nest, which the interpreter refuses, so they are left out.)
 (the GUI must show each one with its severity and time.)
 %
 O2001

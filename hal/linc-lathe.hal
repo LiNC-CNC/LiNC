@@ -23,10 +23,6 @@ net lathe-mode-auto cnc_panel.mode_auto => halui.mode.auto
 net lathe-mode-mdi cnc_panel.mode_mdi => halui.mode.mdi
 net lathe-mode-jog cnc_panel.mode_jog => halui.mode.manual
 
-# Program cycle: CYCLE START runs the loaded program, CYCLE STOP pauses it.
-net lathe-cycle-start cnc_panel.cycle_start => halui.program.run
-net lathe-cycle-stop cnc_panel.cycle_stop => halui.program.pause
-
 # Jogging: the lathe has X and Z axes. Use halui's axis (teleop) jog inputs:
 # the joint-jog inputs do not move this trivkins XZ machine, while the axis
 # inputs do (verified against the running simulator).
@@ -41,7 +37,7 @@ net lathe-jog-zn cnc_panel.jog_zn => halui.axis.z.minus
 # the change is acknowledged. The gate sits on the request, so a key pressed
 # during a change does nothing then and nothing afterwards.
 loadrt not names=not.tool_changing
-loadrt and2 names=and2.spindle0_cw_change,and2.spindle0_ccw_change,and2.spindle0_sp_change,and2.spindle1_cw_change,and2.spindle1_ccw_change,and2.spindle1_sp_change
+loadrt and2 names=and2.spindle0_cw_change,and2.spindle0_ccw_change,and2.spindle0_sp_change,and2.spindle1_cw_change,and2.spindle1_ccw_change,and2.spindle1_sp_change,and2.cycle_permit
 addf not.tool_changing servo-thread
 addf and2.spindle0_cw_change servo-thread
 addf and2.spindle0_ccw_change servo-thread
@@ -49,6 +45,16 @@ addf and2.spindle0_sp_change servo-thread
 addf and2.spindle1_cw_change servo-thread
 addf and2.spindle1_ccw_change servo-thread
 addf and2.spindle1_sp_change servo-thread
+
+# Program cycle: CYCLE START runs the loaded program, CYCLE STOP pauses it.
+# The run goes through the program interlock, wired to `linc.program-ok` in
+# `linc-lathe-postgui.hal`: a file with a syntax fault is not loaded, and a
+# program that is not loaded must not start. The gate is named above, in the
+# `loadrt and2` list: HAL resolves a net against the instances that already
+# exist, so the net cannot come before it.
+net lathe-cycle-start cnc_panel.cycle_start => and2.cycle_permit.in0
+net lathe-cycle-permit and2.cycle_permit.out => halui.program.run
+net lathe-cycle-stop cnc_panel.cycle_stop => halui.program.pause
 
 net tool-change-request => not.tool_changing.in
 net not-tool-changing <= not.tool_changing.out

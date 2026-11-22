@@ -1448,6 +1448,16 @@ pub struct ProgramUi {
     pub pending_load: bool,
     /// How the run has moved through the program's loops.
     pub loop_progress: LoopProgress,
+    /// Every block-level fault in the buffer, in file order: the list the error
+    /// keys walk and the editor marks in red. Rebuilt with the preview, so it is
+    /// the same text the graph was drawn from.
+    pub issues: Vec<linc_core::lint::LintIssue>,
+    /// Which of [ProgramUi::issues] the operator is on. Kept across rebuilds so
+    /// typing above the fault does not throw the selection away.
+    pub issue_index: usize,
+    /// What the controller's own interpreter last said about this buffer. The
+    /// load gate fills it; the name panel shows it as the machine's verdict.
+    pub machine_check: Option<linc_core::verify::MachineCheck>,
     /// Elapsed cycle time and the estimated time to program end.
     pub cycle: CycleClock,
     /// Bumped whenever the preview is rebuilt, so loop counters for the old
@@ -1491,6 +1501,9 @@ impl Default for ProgramUi {
             code_scroll_to_line: None,
             preview_offsets_seen: 0,
             preview_offsets_rows: Vec::new(),
+            issues: Vec::new(),
+            issue_index: 0,
+            machine_check: None,
             external_change: false,
         }
     }
@@ -2773,6 +2786,9 @@ pub struct Keymap {
     pub goto_line: Binding,
     /// Page-local to Program: start the loaded program at the current line.
     pub program_run_from_line: Binding,
+    /// Page-local to Program: walk the syntax faults, wrapping at both ends.
+    pub fault_next: Binding,
+    pub fault_prev: Binding,
     pub files_delete: Binding,
     pub tools: Binding,
     pub offsets: Binding,
@@ -2928,6 +2944,8 @@ impl Keymap {
                 &mut rejected,
             ),
             goto_line: binding(&keys.goto_line, Binding::new(Key::G, ctrl), &mut rejected),
+            fault_next: binding(&keys.fault_next, Binding::new(Key::K, ctrl), &mut rejected),
+            fault_prev: binding(&keys.fault_prev, Binding::new(Key::P, ctrl), &mut rejected),
             program_run_from_line: binding(
                 &keys.program_run_from_line,
                 Binding::new(Key::R, ctrl),

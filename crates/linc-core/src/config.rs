@@ -200,6 +200,18 @@ pub struct ProgramConfig {
     pub preview_requires_syntax_ok: bool,
     pub preview_debounce_ms: u64,
     pub tab_width: u8,
+    /// A program that holds a syntax fault is not loaded into the interpreter,
+    /// so the panel's cycle start has nothing to run. The alternative is letting
+    /// the machine refuse it after the operator has pressed the key, which is a
+    /// fault the operator could have fixed on the screen.
+    pub block_run_on_syntax_error: bool,
+    /// Ask the controller's own interpreter (`rs274`) about the file before it is
+    /// loaded: it knows what a block-level check cannot, such as a feed rate that
+    /// was never set.
+    pub verify_on_load: bool,
+    /// How long that check may take. A program can loop without moving, so the
+    /// child is killed at this deadline and the load is allowed with a warning.
+    pub verify_timeout_ms: u64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -474,6 +486,11 @@ pub struct KeysConfig {
     /// Page-local to Program: jump to a line number.
     pub goto_line: String,
     pub program_run_from_line: String,
+    /// Page-local to Program: walk the syntax faults marked in the editor,
+    /// wrapping at both ends. Two chords rather than a Shift pair: the panel's
+    /// keyboard has no Shift key, and F8 is the OFFSETS page.
+    pub fault_next: String,
+    pub fault_prev: String,
     pub files_delete: String,
     pub tools: String,
     pub offsets: String,
@@ -543,6 +560,8 @@ impl KeysConfig {
             spindle_speed: "Ctrl+S".into(),
             goto_line: "Ctrl+G".into(),
             program_run_from_line: "Ctrl+R".into(),
+            fault_next: "Ctrl+K".into(),
+            fault_prev: "Ctrl+P".into(),
             files_delete: "Delete".into(),
             tools: "F7".into(),
             offsets: "F8".into(),
@@ -1524,6 +1543,11 @@ fn validate(config: &Config, ini: &MachineIni, profile_dir: &Path) -> Result<(),
     if !config.program.preview_requires_syntax_ok {
         return Err(ConfigError::Invalid(
             "program.preview_requires_syntax_ok must be true".into(),
+        ));
+    }
+    if config.program.verify_timeout_ms == 0 || config.program.verify_timeout_ms > 60_000 {
+        return Err(ConfigError::Invalid(
+            "program.verify_timeout_ms must be between 1 and 60000".into(),
         ));
     }
     for view in &config.program.views {

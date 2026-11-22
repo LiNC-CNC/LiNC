@@ -738,6 +738,11 @@ pub struct Preview {
     pub line_count: usize,
     pub line_bounds: BTreeMap<usize, (usize, usize)>,
     pub error: Option<SyntaxIssue>,
+    /// Every block-level fault in the file, in file order, with the byte span of
+    /// the offending word where the check knew it. [Preview::error] is the fault
+    /// that stopped the drawing; this list is what the operator walks with the
+    /// error keys. It is gathered by [crate::lint] plus that fatal fault.
+    pub issues: Vec<crate::lint::LintIssue>,
     pub modal: ModalSummary,
     pub tools: Vec<u16>,
     pub program_number: Option<String>,
@@ -975,6 +980,7 @@ impl Preview {
             line_count: 0,
             line_bounds: BTreeMap::new(),
             error: None,
+            issues: Vec::new(),
             modal: ModalSummary {
                 gcodes: vec!["G0".into()],
                 wcs: "G54".into(),
@@ -5534,6 +5540,24 @@ pub fn parse_preview_full(
     preview.line_count = total_lines;
     if preview.error.is_none() {
         preview.error = error;
+    }
+    // Every block-level fault the file holds, in file order: the operator walks
+    // the list, so the first fault must not be the only one known. The parser's
+    // own verdict joins it when the same line does not already carry it, because
+    // the parser knows something no single block can.
+    preview.issues = crate::lint::lint_program(text);
+    if let Some(fatal) = &preview.error {
+        // One entry per line from the parser: the lint already named this line
+        // with the offending word's span, and two rows for one fault would cost
+        // the operator an extra F8 press.
+        if !preview.issues.iter().any(|issue| issue.line == fatal.line) {
+            preview.issues.push(crate::lint::LintIssue {
+                line: fatal.line,
+                span: None,
+                message: fatal.message.clone(),
+            });
+            preview.issues.sort_by_key(|issue| issue.line);
+        }
     }
     // A flag the UI can show instead of drawing a partial path as if it were
     // the whole program: a skipped construct, a limit, or a block that could

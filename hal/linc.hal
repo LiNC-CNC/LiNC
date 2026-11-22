@@ -16,7 +16,7 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint,and2.spindle_cw_change,and2.spindle_ccw_change,and2.spindle_sp_change,and2.jog-teleop-homed-xy,and2.jog-teleop-homed-all,and2.jog-teleop,and2.coolant-off,and2.lube-off
+loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.cycle_permit,and2.resume_permit,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint,and2.spindle_cw_change,and2.spindle_ccw_change,and2.spindle_sp_change,and2.jog-teleop-homed-xy,and2.jog-teleop-homed-all,and2.jog-teleop,and2.coolant-off,and2.lube-off
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset, or2.machine_off, or2.probe_sim3d) are created here and wired
@@ -159,9 +159,18 @@ net is-paused halui.program.is-paused => not.paused.in and2.cycle_resume.in0
 net not-paused not.paused.out => and2.cycle_gate.in1
 net cycle-gate and2.cycle_gate.out => and2.cycle_run.in0
 net cycle-start cnc_panel.cycle_start => and2.cycle_run.in1 and2.cycle_resume.in1
-net cycle-run and2.cycle_run.out => halui.program.run
+# The program interlock sits between the panel key and halui: `linc.program-ok`
+# is high only while the interpreter holds the program on screen and that
+# program holds no syntax fault. It is wired in the post-GUI file because the
+# pin exists only once the HMI has started; an unconnected input reads false, so
+# cycle start is dead until the HMI says the program is fit to run. Both cycle
+# start and resume pass through it: resuming a program that has become invalid
+# is the same fault as starting one.
+net cycle-run and2.cycle_run.out => and2.cycle_permit.in0
+net cycle-permit and2.cycle_permit.out => halui.program.run
 
-net cycle-resume and2.cycle_resume.out => halui.program.resume
+net cycle-resume and2.cycle_resume.out => and2.resume_permit.in0
+net resume-permit and2.resume_permit.out => halui.program.resume
 
 # linc-panel normalizes the panel bit: cnc_panel.cycle_stop is TRUE only while
 # the key is pressed (the hardware key itself is normally closed). halui pauses

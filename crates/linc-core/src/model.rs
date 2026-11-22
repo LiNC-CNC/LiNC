@@ -1442,6 +1442,11 @@ pub struct HalOutputs {
     /// that does not supervise the link.
     #[serde(default)]
     pub net_safe: bool,
+    /// `linc.program-ok`: the level the HMI last published for the program
+    /// interlock. True only while the interpreter holds the program on screen
+    /// and that program holds no syntax fault.
+    #[serde(default)]
+    pub program_ok: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

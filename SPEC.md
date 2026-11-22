@@ -211,8 +211,8 @@ Panel ownership rules:
 - LiNC **may write declared HAL outputs** through its `linc` HAL component.
   The allowlist is `linc.hmi-alive`, `linc.tool-change-confirm`,
   `linc.status-display`, `linc.jog-increment`, `linc.jog-speed`,
-  `linc.machine-off` and `linc.net-safe`. It never writes arbitrary
-  `cnc_panel.*` or machine-motion pins.
+  `linc.machine-off`, `linc.net-safe` and `linc.program-ok`. It never writes
+  arbitrary `cnc_panel.*` or machine-motion pins.
 - The panel driver is modular: a `PanelDriver` trait plus a capabilities
   descriptor (buttons, LEDs, displays, mode encoding, override encoding,
   pendant support) lets future panel types and transports replace the panel
@@ -313,8 +313,8 @@ cnc_panel.* HAL pins <--------------------------> linc-panel
 - `linc`: Rust `egui` application and machine backend. Owns no motion hardware.
   Loads the `linc` HAL component and writes only its declared outputs:
   `linc.hmi-alive`, `linc.tool-change-confirm`, `linc.status-display`,
-  `linc.jog-increment`, `linc.jog-speed`, `linc.machine-off` and
-  `linc.net-safe`.
+  `linc.jog-increment`, `linc.jog-speed`, `linc.machine-off`, `linc.net-safe`
+  and `linc.program-ok`.
 - `linuxcnc`: task/motion/IO. Authoritative machine state.
 - HAL glue: standard `halui`, the `linc` component, and `linc-panel`.
 
@@ -896,6 +896,34 @@ Program rules:
   replace the graph only if it succeeds. On failure, keep the last valid graph,
   underlay the offending line in a dim transparent red and show a syntax error;
   never move the machine.
+- Every block-level fault is marked at once, not only the one that stopped the
+  drawing: `linc-core::lint` reads each block on its own (nested or unclosed
+  comment, unknown word letter, a word with no value, two words with the same
+  letter, a number that is not a number, G/M out of range, negative feed or
+  speed, an `N` word that is not first, unbalanced brackets) and the preview's
+  own fatal fault joins the list. Each fault carries the byte span of the word at
+  fault, which is underlined in red; its line is washed red, its gutter number is
+  red and a red bar marks it in the gutter. The fault the operator is on carries
+  a stronger wash.
+- **Ctrl+K** and **Ctrl+P** (`fault_next`, `fault_prev`) walk the fault list,
+  wrapping at both ends, and move the caret and the scroll to the fault's line;
+  the status row shows `n/total` and the same two steps as clickable arrows. Not
+  F8/Shift+F8: F8 is the OFFSETS page and the panel's keyboard has no Shift. The operator's place survives a
+  rebuild: a repair that moves or removes a fault keeps him on the same fault
+  while it still exists, and falls back into range when it does not.
+- A program with a fault is **not loaded** into the interpreter while
+  `program.block_run_on_syntax_error` is true: the file still opens in the
+  editor, the faults are marked, and the controller never gets the program, so
+  the panel's CYCLE START has nothing to run. This is the only place LiNC can
+  hold the gate - CYCLE START is a HAL edge straight into `halui.program.run` -
+  and `linc.program-ok` closes the HAL side of it for the panel's key as well.
+- With `program.verify_on_load`, the controller's own interpreter reads the file
+  first (`rs274 -g`, the machine INI, a temporary copy of the buffer, killed at
+  `program.verify_timeout_ms`). It catches what one block cannot decide - a feed
+  rate never set, an arc against the wrong plane, a tool the table lacks - and its
+  refusal blocks the load with its own words. Its message carries no line number
+  except for o-word label faults, so the block it echoes is matched back against
+  the file; a missing `rs274` skips the check instead of failing the load.
 - While running, the editor is read-only and auto-scrolls to the current line,
   centring its whole wrapped block rather than its first row. The MAIN program
   card does the same, measured in the rows the lines really take, so wrapped
@@ -1933,7 +1961,8 @@ HAL pins is still open.
 - HAL outputs: `hmi-alive` 2 Hz heartbeat, `status-display` on WCS change or
   5 Hz, `tool-change-confirm` edge-driven only, `machine-off` on the rising and
   falling edge of a latched probe trip, `net-safe` on every change of the
-  external-link interlock.
+  external-link interlock, `program-ok` on every change of the program
+  interlock.
 - Cache text layout and visible-line tokens.
 - Event log in a ring buffer; persist asynchronously, not on every event.
 
@@ -1943,8 +1972,8 @@ HAL pins is still open.
 - A software E-stop button is forbidden.
 - LiNC may write only the declared `linc.*` HAL outputs
   (`hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`,
-  `jog-speed`, `machine-off`, `net-safe`). It never writes arbitrary HAL pins or
-  machine motion/spindle/coolant/cycle pins.
+  `jog-speed`, `machine-off`, `net-safe`, `program-ok`). It never writes
+  arbitrary HAL pins or machine motion/spindle/coolant/cycle pins.
 - Validate machine ON, homed, idle, program protect and no active program
   before MDI, probe, tool-change and program/offset/tool writes.
 - MDI, probe and tool-change commands use Probe Basic `issue_mdi` semantics:
@@ -2220,7 +2249,7 @@ For the future implementation:
     unknown/stale or extended offsets.
 34. Implement the `linc` HAL component and typed output allowlist:
     `hmi-alive`, `tool-change-confirm`, `status-display`, `jog-increment`,
-    `jog-speed`, `machine-off`, `net-safe`. Verify ownership,
+    `jog-speed`, `machine-off`, `net-safe`, `program-ok`. Verify ownership,
     startup/shutdown, heartbeat expiry and that no arbitrary pin writes exist.
 35. Rename or alias the existing branded panel HAL component/pins to
     `cnc_panel` and update the machine HAL, or provide compatibility nets.

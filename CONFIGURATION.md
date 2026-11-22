@@ -119,7 +119,17 @@ after the GUI has created the `linc.*` component and wires
 `linc.machine-off` into the machine's machine-off request.
 `linc-pendant.hal` is real-machine only and wires jog/handwheel inputs.
 
-`allowed_outputs` is the whole writable surface. The sixth key, `machine-off`,
+`allowed_outputs` is the whole writable surface. The eighth key, `program-ok`,
+is the program interlock: `linc.program-ok` is high only while the interpreter
+holds the program on screen, that program holds no syntax fault and the buffer
+has not been edited since. The machine HAL ANDs it into cycle start and resume
+(`and2.cycle_permit` in `hal/linc.hal`, `hal/linc-lathe.hal` and
+`hal/baiermill-pb-postgui.hal`, netted from the post-GUI files), because the
+panel's CYCLE START reaches `halui.program.run` without passing through LiNC.
+It starts low and is written on every change, so a machine whose HMI is not
+running cannot start a program at all.
+
+The sixth key, `machine-off`,
 is the `linc.machine-off` bit. It is true for as long as a probe trip is
 latched and false once it is reset, and it must reach `halui.machine.off`.
 That pin takes one signal, so the simulation ORs it with the panel's POWER OFF
@@ -745,7 +755,7 @@ The bindings do not change: the panel's navigation keys already send `F5` to
 | `[mill]` | optional `max_axes` |
 | `[lathe]` | optional `turret_stations`, `power_turret`, `live_tooling`, `live_tool_max_rpm`, `c_axis`, `y_axis`, `sub_spindle` |
 | `[ui]` | `theme`, `start_page`, `window_title`, `logo`, `scale`, `axis_order`, `pages`, `servo_load`, `second_card`, `window_mode`, `decorations`, `dro_position`, `keyboard` |
-| `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width` |
+| `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width`, `block_run_on_syntax_error`, `verify_on_load`, `verify_timeout_ms` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running`, `show_parent_above_root` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter` |
 | `[tools]` | `changer`, `atc_pockets`, `manual_confirm` |
@@ -755,7 +765,7 @@ The bindings do not change: the panel's navigation keys already send `F5` to
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `save_preamble`, `save_postamble` |
 | `[toolpath]` | `show_grid`, `show_live_trail`, `trail_max_points`, `clear_trail_action`, `show_program_bounds`, `show_machine_bounds`, `show_stock`, `stock_alpha`, `bounds_mode` (preference), `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `tool_number`, `spindle_speed_up`, `spindle_speed_down`, `spindle_speed`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds`, `remaining`, `toggle_lathe_mirror`, `toggle_lathe_diameter`, `limit_recovery` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `tool_number`, `spindle_speed_up`, `spindle_speed_down`, `spindle_speed`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds`, `remaining`, `toggle_lathe_mirror`, `toggle_lathe_diameter`, `limit_recovery`, `fault_next`, `fault_prev` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_execution`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |
@@ -961,6 +971,33 @@ connection = "OpenWrt"
 settle_ms = 1500
 ```
 
+### `[program]` syntax checking
+
+Two checks run on a program, and both of them can stop it from reaching the
+interpreter. The first is LiNC's own: `linc-core::lint` reads every block on its
+own and reports each fault with the byte span of the offending word (nested or
+unclosed comment, unknown word letter, a word with no value, two words with the
+same letter, a number that is not a number, G/M out of range, negative feed or
+speed, an `N` word that is not first, unbalanced brackets). The second is the
+controller's: `rs274 -g` reads the file through the same interpreter the machine
+uses, with that machine's INI, so it knows what one block cannot - a feed rate
+never set, an arc against the wrong plane, a tool the table does not carry.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `block_run_on_syntax_error` | `true` | A file the checks refuse is not loaded into the interpreter. It still opens in the editor with every fault marked, because that is where the operator fixes it. The panel's CYCLE START has nothing to run once the load was refused. |
+| `verify_on_load` | `true` | Ask `rs274` about the file before loading it. Costs about 40 ms plus the read; skipped without a word when `rs274` is not installed (`MACHINE CHECK UNAVAILABLE`). |
+| `verify_timeout_ms` | `2000` | How long the interpreter may take, 1-60000. A program can loop without moving, so the child is killed at the deadline and the load goes ahead with a warning: a timeout is not a verdict on the file. |
+
+`--check-config` rejects a timeout outside that range. The check runs on the
+loading thread, before the load command is sent, so a refused file never reaches
+the backend.
+
+Every fault the editor knows about - the lint's, the preview's own fatal one and
+the interpreter's, when it named a line - is marked: the line is washed red, its
+gutter number is red, a red bar sits in the gutter and the word at fault is
+underlined. `fault_next` (`Ctrl+K`) and `fault_prev` (`Ctrl+P`) walk them.
+
 ### `[files]`
 
 The two panes of the FILE screen: removable USB media and NC_FILES. NC_FILES
@@ -1066,6 +1103,18 @@ A pan or zoom stops the auto-fit: while it is on, the view is refitted every
 frame and would undo the press. The hover scope is what keeps these chords from
 taking `Ctrl+Left`/`Ctrl+Right` (region focus) and `Ctrl+Up`/`Ctrl+Down` (line
 moves in the G-code editor and the MDI buffer) away from those controls.
+
+### `[keys]` fault-walking bindings
+
+Page-local to Program. The page marks every block-level fault in the editor; the
+two chords walk them, wrapping at both ends, and move the caret and the scroll to
+the fault's line. Both are plain Ctrl chords because the panel's keyboard has no
+Shift key, and neither is F8, which is the OFFSETS page.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `fault_next` | `Ctrl+K` | Next fault. |
+| `fault_prev` | `Ctrl+P` | Previous fault. |
 
 ### `[keys]` lathe view bindings
 

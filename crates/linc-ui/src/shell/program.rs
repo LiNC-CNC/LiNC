@@ -1,6 +1,8 @@
 //! The program editor's commands: load, save, line jumps, run-from-line, and
 //! the dirty-buffer bookkeeping.
 
+use std::path::Path;
+
 use super::*;
 
 impl LincApp {
@@ -107,6 +109,15 @@ impl LincApp {
     }
 
     pub fn load_program(&mut self, path: PathBuf) {
+        // The gate sits here, not on cycle start: the panel's CYCLE START is a
+        // HAL edge straight into `halui.program.run`, and LiNC is not in that
+        // path. What LiNC owns is the load, and an interpreter with no program
+        // has nothing to start. A file the check refuses still opens in the
+        // editor - the operator has to be able to fix it where it is shown.
+        if let Some(refusal) = self.syntax_refusal(&path) {
+            self.refuse_load(path, refusal);
+            return;
+        }
         self.send(MachineCommand::LoadProgram {
             path,
             expected_revision: None,
@@ -115,6 +126,88 @@ impl LincApp {
         // Files and shows the error. The navigation is committed in
         // `poll_backend` when the backend confirms the load.
         self.program.pending_load = true;
+    }
+
+    /// Why this file must not be loaded, if it must not.
+    ///
+    /// Two checks, cheapest first: the block-level lint always runs, and the
+    /// controller's own interpreter joins it when `program.verify_on_load` is
+    /// set. A machine without `rs274` installed answers `Unavailable`, which is
+    /// not a refusal - the machine itself will still have the last word at run
+    /// time.
+    fn syntax_refusal(&mut self, path: &Path) -> Option<String> {
+        if !self.profile.config.program.block_run_on_syntax_error {
+            return None;
+        }
+        let Ok(text) = std::fs::read_to_string(path) else {
+            // Unreadable is the backend's error to report, with its own words.
+            return None;
+        };
+        if let Some(issue) = linc_core::lint::lint_program(&text).into_iter().next() {
+            return Some(format!("NOT LOADED  LN {}: {}", issue.line, issue.message));
+        }
+        // The block checks are not the whole story: the preview's own fatal fault
+        // is a semantic one (`arc missing valid I/J/K or R`, a polar word against
+        // the wrong plane, a G76 in the wrong plane) that no single block decides.
+        let axes = self.axes();
+        let preview = linc_core::gcode::parse_preview(&text, &axes, None, self.tool_tip());
+        if let Some(error) = &preview.error {
+            return Some(format!(
+                "NOT LOADED  LN {}: {}",
+                error.line, error.message
+            ));
+        }
+        if !self.profile.config.program.verify_on_load {
+            return None;
+        }
+        let timeout = std::time::Duration::from_millis(
+            self.profile.config.program.verify_timeout_ms.max(1),
+        );
+        let check = linc_core::verify::check_program(
+            Some(self.profile.machine_ini_path.as_path()),
+            Some(self.profile.machine_ini.tool_table.as_path()),
+            &text,
+            timeout,
+        );
+        self.program.machine_check = Some(check.clone());
+        match check.outcome {
+            linc_core::verify::CheckOutcome::Refused => {
+                let place = match check.line {
+                    Some(line) => format!("LN {line}"),
+                    None => check
+                        .message
+                        .as_deref()
+                        .and_then(linc_core::verify::line_from_message)
+                        .map_or_else(|| "MACHINE".to_string(), |line| format!("LN {line}")),
+                };
+                Some(format!(
+                    "NOT LOADED  {place}: {}",
+                    check.message.as_deref().unwrap_or("the interpreter refused it")
+                ))
+            }
+            // Ok, Timeout and Unavailable all let the load through.
+            _ => None,
+        }
+    }
+
+    /// Show the refused file in the editor, mark its faults and say why the
+    /// interpreter does not have it.
+    fn refuse_load(&mut self, path: PathBuf, reason: String) {
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        self.program.editor.set_loaded(path.clone(), text);
+        self.program.loaded_path = Some(path);
+        self.program.pending_load = false;
+        self.refresh_preview();
+        self.sync_issues();
+        self.program.issue_index = 0;
+        if let Some(line) = self.program.issues.first().map(|issue| issue.line) {
+            self.program.selected_line = line;
+            self.program.cursor_line = Some(line);
+            self.program.code_scroll_to_line = Some(line);
+        }
+        self.set_page(Page::Program);
+        self.toast_for(reason, theme::ERROR, 12);
+        self.sync_program_ok();
     }
 
     /// A successful load always returns to Program in SPLIT, fitted and not
@@ -148,6 +241,11 @@ impl LincApp {
         self.program.code_scroll_to_line = Some(1);
         self.program.completed_at = None;
         self.set_page(Page::Program);
+        // The interpreter holds the file and the buffer is clean: the interlock
+        // may open, and saying so here keeps it from waiting for the next edit.
+        self.program.machine_check = None;
+        self.sync_issues();
+        self.sync_program_ok();
     }
 
     pub fn cycle_program_view(&mut self) {
@@ -217,6 +315,10 @@ impl LincApp {
         } else if !self.program_protected() {
             self.toast("save queued", theme::ACCENT);
         }
+        // The file on disk is now the buffer, so the interlock may open - and the
+        // controller's verdict was about the old text, so it no longer stands.
+        self.program.machine_check = None;
+        self.sync_program_ok();
     }
 
     /// Drop the editor buffer's unsaved changes: the loaded program is the
@@ -252,6 +354,11 @@ impl LincApp {
     }
 
     pub fn mark_editor_changed(&mut self) {
+        // The interpreter's verdict was about the text before this keystroke.
+        // Keeping it would leave a stale red line under a block that is already
+        // fixed, and a stale "the machine refused it" beside a repaired file.
+        self.program.machine_check = None;
+        self.sync_program_ok();
         if !self.profile.config.program.live_preview {
             return;
         }
