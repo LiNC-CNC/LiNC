@@ -456,11 +456,17 @@ fn text_width(ui: &Ui, text: &str, font: &FontId) -> f32 {
 /// A value card: the frame, the title row, and the rect the rows below may use.
 ///
 /// The title is painted rather than laid out. A laid-out row's height depends on
-/// the enclosing layout's minimums — one line of text was taking 38 px of a
-/// 108 px card — and a card that paints a block of lines needs that height to be
-/// the number it was told, so the rows can be measured against the body instead
-/// of against the column the card sits in.
-pub fn value_card(ui: &mut Ui, height: f32, title: &str, badge: Option<&str>) -> egui::Rect {
+/// the enclosing layout's minimums — one line of text was taking 38 px, which put
+/// 14 px of blank card above the title and ate a third of a small card — and a
+/// card that paints a block of lines needs that height to be the number it was
+/// told, so the rows can be measured against the body instead of against the
+/// column the card sits in.
+pub fn value_card(
+    ui: &mut Ui,
+    height: f32,
+    title: &str,
+    badge: Option<(&str, egui::Color32)>,
+) -> egui::Rect {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let painter = ui.painter_at(rect.expand(1.0));
@@ -479,13 +485,13 @@ pub fn value_card(ui: &mut Ui, height: f32, title: &str, badge: Option<&str>) ->
         egui::FontId::proportional(theme::font_size(12.0)),
         theme::MUTED,
     );
-    if let Some(badge) = badge {
+    if let Some((badge, color)) = badge {
         painter.text(
             inner.right_top(),
             egui::Align2::RIGHT_TOP,
             badge,
             egui::FontId::monospace(theme::font_size(9.0)),
-            theme::MUTED,
+            color,
         );
     }
     egui::Rect::from_min_max(

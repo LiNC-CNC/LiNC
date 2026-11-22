@@ -342,31 +342,17 @@ fn coordinate_matrix(app: &LincApp, ui: &mut Ui, width: f32, height: f32) {
 
 /// One card of the matrix: a title, an optional badge at its right end (the
 /// active WCS, the loaded tool) and the lines under it.
+///
+/// The title is painted by [`common::value_card`], not laid out in a row: a
+/// laid-out title sat 14 px below the card's own margin, and that blank band
+/// was the first thing the eye met inside every card.
 fn matrix_card(ui: &mut Ui, cell: Vec2, title: &str, badge: Option<String>, lines: &[CoordLine]) {
     ui.allocate_ui_with_layout(cell, egui::Layout::top_down(egui::Align::Min), |ui| {
         ui.set_min_width(cell.x);
         ui.set_max_width(cell.x);
-        ui.set_min_height(cell.y);
-        ui.set_max_height(cell.y);
-        theme::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                theme::section_header(ui, title);
-                if let Some(badge) = badge {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(badge)
-                                .monospace()
-                                .size(theme::font_size(11.0))
-                                .color(theme::ACCENT),
-                        );
-                    });
-                }
-            });
-            let free = (ui.max_rect().bottom() - ui.cursor().top()).max(0.0);
-            let width = ui.available_width();
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(width, free), egui::Sense::hover());
-            paint_coordinate_lines(ui, rect, lines);
-        });
+        let badge = badge.as_deref().map(|badge| (badge, theme::ACCENT));
+        let body = common::value_card(ui, cell.y, title, badge);
+        paint_coordinate_lines(ui, body, lines);
     });
 }
 

@@ -2634,6 +2634,34 @@ fn the_alternate_main_dashboard_replaces_the_toolpath_with_four_cards() {
         );
     }
 
+    // The card title sits at the card's own margin. It used to be laid out in a
+    // row, which put another 14 px of blank card above it and was the first
+    // thing the eye met inside every pane.
+    let output = harness.frame_full(Vec::new());
+    let painted = painted_text(&output);
+    let cards = painted_cards(&output);
+    for title in [
+        "WORK COORDINATES",
+        "MACHINE COORDINATES",
+        "DISTANCE TO GO",
+        "TOOL LENGTH OFFSET",
+    ] {
+        let (_, text) = painted
+            .iter()
+            .find(|(label, _)| label == title)
+            .unwrap_or_else(|| panic!("{title} is painted"));
+        let card = cards
+            .iter()
+            .find(|card| card.contains(text.center()))
+            .unwrap_or_else(|| panic!("{title} sits in a card"));
+        assert!(
+            text.top() - card.top() <= theme::CARD_MARGIN + 1.0,
+            "{title} sits at the card's margin, not under a laid-out row: \
+             {:.1} px below its top",
+            text.top() - card.top()
+        );
+    }
+
     // The default dashboard comes back on the next press.
     harness.app.request_mode_page();
     let back = texts(&mut harness);

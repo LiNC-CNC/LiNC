@@ -187,7 +187,7 @@ pub fn tlo_card(app: &LincApp, ui: &mut Ui, height: f32) {
     );
     let rows = lengths.rows(&app.snapshot);
     let badge = format!("T{}", lengths.tool);
-    let body = common::value_card(ui, height, "TLO", Some(&badge));
+    let body = common::value_card(ui, height, "TLO", Some((&badge, theme::MUTED)));
     common::paint_value_rows(ui, body, &rows);
 }
 
