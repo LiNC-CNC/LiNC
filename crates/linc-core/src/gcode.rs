@@ -576,24 +576,31 @@ pub struct ArcSpec {
 }
 
 impl ArcSpec {
+    /// The angle the arc turns through, in radians, always positive.
+    ///
+    /// A full turn is stored as a whole TAU, whose remainder is zero, so it is
+    /// read before the sweep wraps.
+    pub fn sweep(&self) -> f64 {
+        const TAU: f64 = std::f64::consts::TAU;
+        let travel = if self.clockwise {
+            self.start_angle - self.end_angle
+        } else {
+            self.end_angle - self.start_angle
+        };
+        if travel >= TAU - 1e-9 {
+            TAU
+        } else {
+            travel.rem_euclid(TAU)
+        }
+    }
+
     /// The quarter turns the sweep passes through. An arc is not bounded by its
     /// two ends: a full circle starts and ends on the same point, so the ends
     /// alone say it is round in neither axis.
     pub fn extent_points(&self) -> Vec<[f64; 3]> {
         const TAU: f64 = std::f64::consts::TAU;
         let (u, v) = self.plane.axes();
-        let travel = if self.clockwise {
-            self.start_angle - self.end_angle
-        } else {
-            self.end_angle - self.start_angle
-        };
-        // A full turn is stored as a whole TAU, whose remainder is zero, so it
-        // is read before the sweep wraps.
-        let sweep = if travel >= TAU - 1e-9 {
-            TAU
-        } else {
-            travel.rem_euclid(TAU)
-        };
+        let sweep = self.sweep();
         let mut points = Vec::with_capacity(4);
         for turn in 0..4 {
             let angle = turn as f64 * std::f64::consts::FRAC_PI_2;
@@ -622,6 +629,52 @@ pub struct PathSegment {
     pub line: usize,
     pub arc: Option<ArcSpec>,
     pub tool: Option<u16>,
+}
+
+impl PathSegment {
+    /// How far the tool travels on this move, in machine units. An arc's length
+    /// is its sweep along the radius, not the chord between its ends, so a full
+    /// circle is not zero.
+    pub fn length(&self) -> f64 {
+        if let Some(arc) = &self.arc {
+            return arc.radius * arc.sweep();
+        }
+        let delta = [
+            self.end[0] - self.start[0],
+            self.end[1] - self.start[1],
+            self.end[2] - self.start[2],
+        ];
+        (delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]).sqrt()
+    }
+
+    /// Where along the move the tip is, 0.0 at the start and 1.0 at the end. A
+    /// tip that is not on the move - a restart, a jog, a move the planner has
+    /// not reached - is clamped, so the answer is always a usable fraction.
+    pub fn fraction_at(&self, tip: [f64; 3]) -> f64 {
+        if let Some(arc) = &self.arc {
+            let (u, v) = arc.plane.axes();
+            let angle = (tip[v] - arc.center[v]).atan2(tip[u] - arc.center[u]);
+            let sweep = arc.sweep();
+            if sweep <= 1e-12 {
+                return 0.0;
+            }
+            let turned = if arc.clockwise {
+                arc.start_angle - angle
+            } else {
+                angle - arc.start_angle
+            };
+            return (turned.rem_euclid(std::f64::consts::TAU) / sweep).clamp(0.0, 1.0);
+        }
+        let length = self.length();
+        if length <= 1e-12 {
+            return 0.0;
+        }
+        let mut along = 0.0;
+        for axis in 0..3 {
+            along += (tip[axis] - self.start[axis]) * (self.end[axis] - self.start[axis]);
+        }
+        (along / (length * length)).clamp(0.0, 1.0)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -775,6 +828,28 @@ pub struct Preview {
     /// loop". A nested program re-enters the same few stacks, so the table
     /// stays small while every segment still names its whole nest.
     pub loop_stacks: Vec<Vec<(u32, u32)>>,
+    /// What a block's own words say about how long it takes, keyed by line. Only
+    /// blocks with something to say are listed. See [BlockTiming].
+    pub line_timing: BTreeMap<usize, BlockTiming>,
+}
+
+/// How long a block takes, as far as its own words can say.
+///
+/// The blocks are walked twice: once to plan them, once to draw them, and the
+/// drawn geometry is what makes a move long. So this carries only the modal
+/// statement - the rate the `F` word sets and the holds that do not move at all
+/// - and leaves lengths and machine limits to `crate::cycletime`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BlockTiming {
+    /// Feed rate in machine units per minute: `F` under G94, and `F` times the
+    /// spindle speed under G95. Zero when the block cuts at no programmed rate,
+    /// and on a rapid, whose rate the machine's axis limits set.
+    pub feed: f64,
+    /// `G93`: seconds the whole block takes, whatever its length. `F` is the
+    /// inverse of the minutes, so it names the time rather than a speed.
+    pub fixed: f64,
+    /// `G4`: seconds the block holds before the next move.
+    pub hold: f64,
 }
 
 /// A loop the program runs, as the preview saw it.
@@ -1001,6 +1076,7 @@ impl Preview {
             loops: Vec::new(),
             segment_loop: Vec::new(),
             loop_stacks: vec![Vec::new()],
+            line_timing: BTreeMap::new(),
         }
     }
 
@@ -4519,6 +4595,10 @@ pub fn parse_preview_full(
     let mut tool: Option<u16> = None;
     let mut wcs = "G54".to_string();
     let mut units = "G21".to_string();
+    // G93/G94/G95: how the F word is read, modal like the units. G94 is the
+    // start-up state: a feed in program units per minute.
+    let mut inverse_time = false;
+    let mut units_per_rev = false;
     // G7 lathe diameter mode: the interpreter halves every X word before it
     // becomes a machine position, so a preview that draws the word as written
     // puts the whole path at twice the X the machine goes to. G8 (radius, the
@@ -4599,6 +4679,9 @@ pub fn parse_preview_full(
         // is a curve, not the straight line to its end point.
         let mut cubic_spline = false;
         let mut quadratic_spline = false;
+        // Set by a G4 in this block: it holds for its P seconds and moves
+        // nothing, which is time no other word on the line accounts for.
+        let mut dwell = false;
 
         // Modal words.
         for token in &tokens {
@@ -4636,6 +4719,17 @@ pub fn parse_preview_full(
                         absolute = true;
                     } else if value == 91.0 {
                         absolute = false;
+                    } else if value == 93.0 {
+                        inverse_time = true;
+                        units_per_rev = false;
+                    } else if value == 94.0 {
+                        inverse_time = false;
+                        units_per_rev = false;
+                    } else if value == 95.0 {
+                        inverse_time = false;
+                        units_per_rev = true;
+                    } else if value == 4.0 {
+                        dwell = true;
                     } else if value == 7.0 {
                         lathe_diameter = true;
                     } else if value == 8.0 {
@@ -4811,6 +4905,62 @@ pub fn parse_preview_full(
         }
         if let Some(value) = word_value(&tokens, 's') {
             speed = Some(value);
+        }
+        let block_timing = {
+            // What this block's own words say about its duration, read after
+            // its own F and S so a word on this line applies to it. The move
+            // lengths are not known here and the machine's limits are not
+            // known at all, so this records the rate and the holds only;
+            // `crate::cycletime` turns it into seconds. A block whose words say
+            // nothing (no F, no G4) is left out: `BlockTiming::default()` is
+            // what a missing entry means.
+            let feed_program = feed.unwrap_or(0.0);
+            let mut timing = BlockTiming::default();
+            if dwell {
+                timing.hold = word_value(&tokens, 'p').unwrap_or(0.0).max(0.0);
+            }
+            if inverse_time {
+                // G93: F is the inverse of the minutes the block takes, so it
+                // names the block's whole time and its length does not enter.
+                timing.fixed = if feed_program > 1e-9 {
+                    60.0 / feed_program
+                } else {
+                    0.0
+                };
+            } else if units_per_rev {
+                // G95: F is in program units per spindle revolution, so the
+                // rate also needs the speed. A block that turns the spindle
+                // before it names a speed has a feed of zero here, and the
+                // measured calibration covers it.
+                timing.feed = feed_program * unit_scale * speed.unwrap_or(0.0);
+            } else {
+                timing.feed = feed_program * unit_scale;
+            }
+            if timing != BlockTiming::default() {
+                preview.line_timing.insert(line_no, timing);
+            }
+            timing
+        };
+        if dwell {
+            // A G4 holds without moving. Keeping it in the drawn path as a
+            // zero-length move is what puts the hold in the plan's order, so a
+            // loop that dwells every pass is planned every pass; a `G4 P0`
+            // moves and holds nothing, so it draws nothing.
+            if block_timing.hold > 0.0 {
+                push_cycle_segment(
+                    &mut preview,
+                    position,
+                    position,
+                    SegmentKind::Feed,
+                    line_no,
+                    tool,
+                    pass,
+                );
+                preview
+                    .line_bounds
+                    .insert(line_no, (line_start_segment, preview.segments.len()));
+            }
+            continue;
         }
         if let Some(value) = word_int(&tokens, 't') {
             if value > 0 {
@@ -6873,6 +7023,47 @@ mod tests {
             (ends(&preview)[0] - 30.0).abs() < 1e-9,
             "{:?}",
             ends(&preview)
+        );
+    }
+
+    #[test]
+    fn a_move_knows_its_length_and_where_along_it_the_tool_is() {
+        let preview = parse_preview(
+            "G21 G90\nG1 X40 Y0 F100\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        let segment = &preview.segments[0];
+        assert!((segment.length() - 40.0).abs() < 1e-9, "{segment:?}");
+        assert!((segment.fraction_at([10.0, 0.0, 0.0]) - 0.25).abs() < 1e-9);
+        // A tip off the move is clamped rather than extrapolated.
+        assert_eq!(segment.fraction_at([-5.0, 0.0, 0.0]), 0.0);
+        assert_eq!(segment.fraction_at([90.0, 0.0, 0.0]), 1.0);
+    }
+
+    #[test]
+    fn an_arc_is_as_long_as_its_sweep_and_knows_its_angle() {
+        // A half circle of radius 20: 62.83 mm round, not 40 mm across.
+        let preview = parse_preview(
+            "G21 G90 G17\nG0 X20 Y0\nG3 X-20 Y0 I-20 J0 F100\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        let arc = preview
+            .segments
+            .iter()
+            .find(|segment| segment.arc.is_some())
+            .expect("an arc");
+        assert!(
+            (arc.length() - std::f64::consts::PI * 20.0).abs() < 1e-6,
+            "{arc:?}"
+        );
+        // The quarter point of a counter-clockwise half turn from (20,0).
+        assert!(
+            (arc.fraction_at([0.0, 20.0, 0.0]) - 0.5).abs() < 1e-6,
+            "{arc:?}"
         );
     }
 

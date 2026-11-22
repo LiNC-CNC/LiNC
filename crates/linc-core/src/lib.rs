@@ -3,6 +3,7 @@
 pub mod backend;
 pub mod command;
 pub mod config;
+pub mod cycletime;
 pub mod diag;
 pub mod editor;
 pub mod faults;

@@ -126,6 +126,10 @@ pub struct LincApp {
     /// `linc.program-ok` as last written. `None` until the first write, so the
     /// first frame publishes the level instead of assuming it.
     pub(super) program_ok_sent: Option<bool>,
+    /// Where the cycle-time calibration is written: what the last run of a
+    /// program measured, so the next run of the same program can predict
+    /// itself.
+    pub(super) cycle_store: linc_core::cycletime::CycleStore,
 }
 
 impl LincApp {
@@ -228,6 +232,7 @@ impl LincApp {
         // once before the first machine action. The full text is in the
         // manual; the dialog carries the substance and the two answers.
         let safety_gate = !preferences.safety_notice_accepted();
+        let cycle_store_path = linc_core::cycletime::store_path(&profile.preferences_path);
         let mut app = Self {
             snapshot: snapshot.clone(),
             graph_style,
@@ -372,6 +377,7 @@ impl LincApp {
             },
             profile,
             backend,
+            cycle_store: linc_core::cycletime::CycleStore::load(cycle_store_path),
         };
         // Restore the remembered view state. Only UI presentation is restored;
         // no machine data ever comes from preferences.

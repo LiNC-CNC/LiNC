@@ -217,6 +217,42 @@ fn make_app(mode: PanelMode) -> (tempfile::TempDir, LincApp) {
     (dir, app)
 }
 
+/// The whole path the estimate takes: the controller's program becomes the
+/// preview, the preview becomes the plan, and the bar prints what is left.
+#[test]
+fn the_status_bar_promises_the_plan_a_running_program_bit_into() {
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    // Two 60 mm cuts at 600 mm/min: six seconds each, and the fixture's machine
+    // has no axis velocity, so the feed is what decides the time.
+    let text = "G21 G90\nG1 X60 F600\nG1 X120 F600\nM2\n";
+    app.snapshot.program = ProgramState {
+        content: Some(std::sync::Arc::new(text.to_string())),
+        line_count: text.lines().count(),
+        revision: 9,
+        running: true,
+        current_line: 2,
+        ..Default::default()
+    };
+    app.snapshot.task.running = true;
+    // The controller's own program load, which is what rebuilds the preview.
+    app.sync_program();
+    app.tick_cycle_time();
+
+    assert_eq!(
+        app.program.cycle.remaining_ms(),
+        Some(12_000),
+        "both cuts at their planned six seconds"
+    );
+    let fields: Vec<String> = app
+        .status_fields()
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    let bar = fields.join(" | ");
+    assert!(bar.contains("CYCLE 0:00:00"), "{bar}");
+    assert!(bar.contains("LEFT ~0:00:12"), "{bar}");
+}
+
 /// A fresh installation has no acceptance in its preferences file, so the shell
 /// must ask before it does anything, and a page key must not get past it.
 #[test]
@@ -838,7 +874,7 @@ fn the_bottom_bar_readout_fits_the_minimum_window() {
     // tripped, program protected, a program running with its clock. A running
     // program replaces the exact line count with the percentage and the clock,
     // and the clock replaces the DTG field, so those are never drawn together.
-    let left = measure(&["100%  CYCLE 99:59:59  LEFT 99:59:59", "HOMED"]);
+    let left = measure(&["100%  CYCLE 99:59:59  LEFT ~99:59:59", "HOMED"]);
     let group = measure(&[
         "E-STOP ACTIVE",
         "MACHINE OFF",

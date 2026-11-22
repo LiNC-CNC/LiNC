@@ -7,6 +7,9 @@ use std::time::{Duration, Instant};
 use linc_core::backend::BackendHandle;
 use linc_core::command::{BackendEvent, MachineCommand, MachineError};
 use linc_core::config::Profile;
+use linc_core::cycletime::{
+    line_start, move_key, CycleStore, Learned, MoveSeconds, Overrides, Plan, ProgramKey,
+};
 use linc_core::editor::Editor;
 use linc_core::gcode::Preview;
 use linc_core::help::HelpBundle;
@@ -1283,6 +1286,13 @@ fn loop_value(value: f64) -> String {
 /// the cycle time an operator reads back after the part. `active` counts only
 /// the frames that are actually running, which is what the remaining estimate
 /// is extrapolated from - a long pause must not inflate the estimate.
+///
+/// The estimate itself comes from the preview: every move's own length and feed
+/// give the seconds it should take (see [`linc_core::cycletime`]), and the run
+/// measures each finished move against that plan, so a program that has been cut
+/// once predicts its own second run, and a loop body predicts its own next pass.
+/// The controller's line-based progress is the fallback for a program whose
+/// preview is missing or was edited while it runs.
 #[derive(Clone, Debug, Default)]
 pub struct CycleClock {
     loaded_at_ms: Option<u64>,
@@ -1292,6 +1302,44 @@ pub struct CycleClock {
     active: Duration,
     last: Option<Instant>,
     remaining_secs: Option<f64>,
+    /// Planned seconds per move of the program being run.
+    plan: Plan,
+    /// Measured seconds against planned seconds, per move.
+    learned: Learned,
+    /// The program the plan and the measurements belong to.
+    program: Option<ProgramKey>,
+    /// The program revision the key was taken from.
+    key_revision: Option<u64>,
+    /// The preview generation the plan was built from.
+    generation: u64,
+    /// The move the cut has reached, how far into it, and the running time the
+    /// clock had reached when it got there.
+    cursor: usize,
+    frac: f64,
+    mark: Duration,
+}
+
+/// Everything the cycle clock reads from one snapshot.
+///
+/// The estimate needs three things the program state does not carry: the drawn
+/// path, the move the toolpath has already followed to, and the machine's axis
+/// limits. Bundling them keeps the tick's signature readable and lets the
+/// estimate be tested without a backend.
+pub struct CycleInput<'a> {
+    pub program: &'a linc_core::model::ProgramState,
+    pub preview: &'a Preview,
+    /// The move the cut has reached in the preview's unrolled order.
+    pub cursor: usize,
+    /// The live tool tip, for how far into the current move the cut is.
+    pub tip: Option<[f64; 3]>,
+    pub rates: &'a linc_core::ini::MachineIni,
+    /// The overrides the run is cutting at: a knob turned mid-run moves the
+    /// estimate at once instead of waiting for the run to learn it.
+    pub overrides: Overrides,
+    pub generation: u64,
+    /// The preview still describes the program the controller is running: an
+    /// edited buffer has a preview of text that is not on the machine.
+    pub preview_matches: bool,
 }
 
 impl CycleClock {
@@ -1303,26 +1351,52 @@ impl CycleClock {
     const MIN_PROGRESS: f64 = 0.02;
     /// And below this much running time it has nothing to extrapolate from.
     const MIN_ACTIVE: Duration = Duration::from_secs(2);
+    /// A stretch of the run worth measuring: one measurement needs enough
+    /// planned time behind it that a poll's jitter cannot dominate it.
+    const MIN_PLANNED: f64 = 0.5;
+    /// What a measured stretch may say about the plan before it stops being a
+    /// rate at all. Cornering and ramping put a move between one and three times
+    /// its length and feed; a tool change, a probe or the operator's hand puts it
+    /// tens of times over. Those are events, not rates: learning them as a
+    /// multiplier would inflate the whole estimate by the event's share of one
+    /// move, which is exactly the wild swing a modelled estimate is meant to
+    /// replace.
+    const RATE_BAND: std::ops::RangeInclusive<f64> = 0.3..=4.0;
 
-    pub fn tick(&mut self, program: &linc_core::model::ProgramState) {
-        self.tick_at(program, Instant::now());
+    pub fn tick(&mut self, input: &CycleInput, store: &mut CycleStore) {
+        self.tick_at(input, store, Instant::now());
     }
 
-    pub fn tick_at(&mut self, program: &linc_core::model::ProgramState, now: Instant) {
+    pub fn tick_at(&mut self, input: &CycleInput, store: &mut CycleStore, now: Instant) {
+        let program = input.program;
         if program.line_count == 0 {
             *self = Self::default();
             return;
         }
         // A fresh load, or the controller reset the program back to line 0:
-        // either way the previous run's clock is not this run's.
+        // either way the previous run's clock is not this run's. The plan and
+        // the measurements outlive it: a re-run of the same program is what
+        // they were measured for.
         let reloaded = self.loaded_at_ms != Some(program.loaded_at_ms);
         let reset = reloaded || (!program.running && !program.paused && program.current_line == 0);
         if reset {
+            let plan = std::mem::take(&mut self.plan);
+            let learned = std::mem::take(&mut self.learned);
+            let program_key = self.program;
+            let key_revision = self.key_revision;
+            let generation = self.generation;
             *self = Self {
                 loaded_at_ms: Some(program.loaded_at_ms),
+                plan,
+                learned,
+                program: program_key,
+                key_revision,
+                generation,
                 ..Self::default()
             };
         }
+
+        self.sync_plan(input, store);
 
         let active = program.running || program.paused;
         if active && !self.was_active {
@@ -1332,6 +1406,9 @@ impl CycleClock {
             self.active = Duration::ZERO;
             self.remaining_secs = None;
             self.last = Some(now);
+            self.cursor = input.cursor;
+            self.frac = 0.0;
+            self.mark = Duration::ZERO;
         } else if active {
             if let Some(last) = self.last {
                 let dt = now.saturating_duration_since(last);
@@ -1344,18 +1421,118 @@ impl CycleClock {
         } else {
             self.last = None;
         }
-        self.was_active = active;
 
         if active && !program.paused {
-            self.update_remaining(program);
+            self.update(input);
         } else if !active {
             // A finished or stopped run keeps its cycle time; the estimate has
-            // no meaning without a run to extrapolate.
+            // no meaning without a run to extrapolate. The run that just ended
+            // is the one worth remembering.
             self.remaining_secs = None;
+            if self.was_active {
+                if let Some(key) = self.program {
+                    store.write(key, &self.learned);
+                }
+            }
+        }
+        self.was_active = active;
+    }
+
+    /// Rebuild the plan when the preview was rebuilt, and reload the
+    /// measurements when the program changed.
+    fn sync_plan(&mut self, input: &CycleInput, store: &mut CycleStore) {
+        if input.generation != self.generation {
+            self.generation = input.generation;
+            self.plan = Plan::from_preview(input.preview, input.rates);
+            self.cursor = self.cursor.min(self.plan.len().saturating_sub(1));
+            self.frac = 0.0;
+        }
+        // Hashing the program is what names its calibration, and a program is
+        // megabytes, so it happens on a new revision and not on every frame.
+        if self.key_revision == Some(input.program.revision) {
+            return;
+        }
+        self.key_revision = Some(input.program.revision);
+        match input.program.content.as_deref() {
+            Some(text) => {
+                let key = ProgramKey::of(text);
+                self.program = Some(key);
+                self.learned = store.read(key).unwrap_or_default();
+            }
+            None => {
+                self.program = None;
+                self.learned.clear();
+            }
         }
     }
 
-    fn update_remaining(&mut self, program: &linc_core::model::ProgramState) {
+    fn update(&mut self, input: &CycleInput) {
+        if self.plan.is_empty() || !input.preview_matches {
+            self.update_line_rate(input.program);
+            return;
+        }
+        // The toolpath has already followed the cut through the preview's
+        // unrolled order, so its cursor is the one to trust. A controller that
+        // reports no motion line (the simulator does not) leaves the cursor at
+        // zero, and the block being cut names the move instead.
+        let target = if input.cursor > 0 {
+            input.cursor
+        } else {
+            line_start(input.preview, input.program.executing_line()).unwrap_or(0)
+        }
+        .min(self.plan.len().saturating_sub(1));
+        let frac = match (input.tip, input.preview.segments.get(target)) {
+            (Some(tip), Some(segment)) => segment.fraction_at(tip),
+            _ => self.frac,
+        };
+        // The cut moves forward. A cursor behind where it was is a restart the
+        // clock has already reset for, or the line-based fallback disagreeing
+        // with the loop-aware one; neither may walk the estimate backwards.
+        let target = target.max(self.cursor);
+        let overrides = input.overrides;
+        // The stretch is measured against the plan *at the overrides it ran at*,
+        // so what is learned is the machine's own shortfall - cornering, ramps,
+        // a tool change - and never a knob the operator can turn.
+        let planned = (self.plan.parts_at(target, frac)
+            - self.plan.parts_at(self.cursor, self.frac))
+        .scaled(overrides);
+        let actual = self.active.saturating_sub(self.mark).as_secs_f64();
+        if planned >= Self::MIN_PLANNED && planned.is_finite() {
+            let observed = actual / planned;
+            if Self::RATE_BAND.contains(&observed) {
+                let mut index = self.cursor;
+                while index <= target {
+                    if let Some(key) = move_key(input.preview, index) {
+                        // A poll can span several moves; it knows their total and
+                        // not their shares, so the whole stretch is measured once.
+                        self.learned.observe(key, observed);
+                    }
+                    index += 1;
+                }
+            }
+            self.mark = self.active;
+        }
+        self.cursor = target;
+        self.frac = frac;
+
+        let recent = self.learned.recent();
+        let left = self.plan.parts_total() - self.plan.parts_at(self.cursor, self.frac);
+        let left = MoveSeconds {
+            rapid: left.rapid.max(0.0),
+            feed: left.feed.max(0.0),
+            hold: left.hold.max(0.0),
+        };
+        let correction =
+            self.learned
+                .tail_correction(input.preview, &self.plan, self.cursor, overrides);
+        self.remaining_secs = Some(
+            (recent * left.scaled(overrides) + correction).clamp(0.0, Self::MAX_REMAINING_SECS),
+        );
+    }
+
+    /// The estimate for a program with no usable preview: the controller's
+    /// line-based progress, extrapolated at the rate the run has kept so far.
+    fn update_line_rate(&mut self, program: &linc_core::model::ProgramState) {
         let progress = program.progress as f64;
         if progress >= 0.999 {
             self.remaining_secs = Some(0.0);
@@ -1365,9 +1542,6 @@ impl CycleClock {
             self.remaining_secs = None;
             return;
         }
-        // Lines completed per second so far, applied to the lines left. The
-        // controller's progress is line-based, so this is the only rate it
-        // offers; the estimate is labelled, never used for anything but display.
         let raw = (self.active.as_secs_f64() * (1.0 - progress) / progress)
             .clamp(0.0, Self::MAX_REMAINING_SECS);
         self.remaining_secs = Some(match self.remaining_secs {
@@ -3636,7 +3810,8 @@ mod trail_frame_tests {
 
 #[cfg(test)]
 mod loop_readout_tests {
-    use super::{CycleClock, LoopProgress, LoopReadout};
+    use super::{CycleClock, CycleInput, LoopProgress, LoopReadout};
+    use linc_core::cycletime::{CycleStore, Overrides};
     use linc_core::gcode::Preview;
     use std::time::{Duration, Instant};
 
@@ -3887,7 +4062,6 @@ mod loop_readout_tests {
             "a rebuilt preview has not been run"
         );
     }
-
     fn cycle_program(loaded_at_ms: u64, progress: f32) -> linc_core::model::ProgramState {
         linc_core::model::ProgramState {
             loaded_at_ms,
@@ -3898,86 +4072,509 @@ mod loop_readout_tests {
         }
     }
 
+    /// A store with no file behind it: nothing is read back and a write is
+    /// refused, which is what a test wants unless it is about the file.
+    fn no_store() -> CycleStore {
+        CycleStore::load(Default::default())
+    }
+
+    /// One frame of the clock at `cursor`, with no machine limits (so a feed
+    /// move's own feed decides its time) and no tool tip (so a move is measured
+    /// as whole moves completed).
+    fn tick(
+        clock: &mut CycleClock,
+        store: &mut CycleStore,
+        program: &linc_core::model::ProgramState,
+        preview: &Preview,
+        cursor: usize,
+        at: Instant,
+    ) {
+        tick_with(
+            clock,
+            store,
+            program,
+            preview,
+            cursor,
+            Overrides::default(),
+            at,
+        );
+    }
+
+    /// One frame with the overrides the run is cutting at.
+    fn tick_with(
+        clock: &mut CycleClock,
+        store: &mut CycleStore,
+        program: &linc_core::model::ProgramState,
+        preview: &Preview,
+        cursor: usize,
+        overrides: Overrides,
+        at: Instant,
+    ) {
+        let rates = linc_core::ini::MachineIni::default();
+        let input = CycleInput {
+            program,
+            preview,
+            cursor,
+            tip: None,
+            rates: &rates,
+            overrides,
+            generation: 1,
+            preview_matches: true,
+        };
+        clock.tick_at(&input, store, at);
+    }
+
+    /// One frame from a preview of a buffer the controller is not running.
+    fn tick_edited(
+        clock: &mut CycleClock,
+        store: &mut CycleStore,
+        program: &linc_core::model::ProgramState,
+        preview: &Preview,
+        at: Instant,
+    ) {
+        let rates = linc_core::ini::MachineIni::default();
+        let input = CycleInput {
+            program,
+            preview,
+            cursor: 0,
+            tip: None,
+            rates: &rates,
+            overrides: Overrides::default(),
+            generation: 1,
+            preview_matches: false,
+        };
+        clock.tick_at(&input, store, at);
+    }
+
     #[test]
     fn the_cycle_clock_counts_the_run_and_estimates_from_cutting_time() {
+        let preview = Preview::empty();
+        let mut store = no_store();
         let mut clock = CycleClock::default();
         let mut program = cycle_program(7, 0.5);
         program.running = true;
         let t0 = Instant::now();
-        clock.tick_at(&program, t0);
-        clock.tick_at(&program, t0 + Duration::from_secs(10));
+        tick(&mut clock, &mut store, &program, &preview, 0, t0);
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(10),
+        );
         assert_eq!(clock.elapsed_ms(), 10_000);
         assert_eq!(clock.remaining_ms(), Some(10_000));
     }
 
     #[test]
     fn a_pause_holds_the_estimate_but_not_the_cycle_time() {
+        let preview = Preview::empty();
+        let mut store = no_store();
         let mut clock = CycleClock::default();
         let mut program = cycle_program(7, 0.5);
         program.running = true;
         let t0 = Instant::now();
-        clock.tick_at(&program, t0);
-        clock.tick_at(&program, t0 + Duration::from_secs(10));
+        tick(&mut clock, &mut store, &program, &preview, 0, t0);
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(10),
+        );
         // Paused: wall time keeps counting, the cutting-rate estimate does not.
         program.paused = true;
-        clock.tick_at(&program, t0 + Duration::from_secs(20));
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(20),
+        );
         assert_eq!(clock.elapsed_ms(), 20_000);
         assert_eq!(clock.remaining_ms(), Some(10_000));
     }
 
     #[test]
     fn a_finished_run_keeps_its_cycle_time_and_drops_the_estimate() {
+        let preview = Preview::empty();
+        let mut store = no_store();
         let mut clock = CycleClock::default();
         let mut program = cycle_program(7, 0.5);
         program.running = true;
         let t0 = Instant::now();
-        clock.tick_at(&program, t0);
-        clock.tick_at(&program, t0 + Duration::from_secs(10));
+        tick(&mut clock, &mut store, &program, &preview, 0, t0);
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(10),
+        );
         program.running = false;
         program.current_line = 100;
-        clock.tick_at(&program, t0 + Duration::from_secs(30));
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(30),
+        );
         assert_eq!(clock.elapsed_ms(), 10_000);
         assert_eq!(clock.remaining_ms(), None);
     }
 
     #[test]
     fn a_reload_or_a_reset_starts_a_fresh_cycle() {
+        let preview = Preview::empty();
+        let mut store = no_store();
         let mut clock = CycleClock::default();
         let mut program = cycle_program(7, 0.5);
         program.running = true;
         let t0 = Instant::now();
-        clock.tick_at(&program, t0);
-        clock.tick_at(&program, t0 + Duration::from_secs(10));
+        tick(&mut clock, &mut store, &program, &preview, 0, t0);
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(10),
+        );
 
         // Reload: the loaded stamp moves and the previous run is gone.
         program.loaded_at_ms = 8;
         program.running = false;
         program.current_line = 0;
-        clock.tick_at(&program, t0 + Duration::from_secs(11));
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(11),
+        );
         assert_eq!(clock.elapsed_ms(), 0);
 
         // Reset of the same program: line 0 with no run clears it too.
         program.running = true;
-        clock.tick_at(&program, t0 + Duration::from_secs(12));
-        clock.tick_at(&program, t0 + Duration::from_secs(15));
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(12),
+        );
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(15),
+        );
         assert_eq!(clock.elapsed_ms(), 3_000);
         program.running = false;
         program.current_line = 0;
-        clock.tick_at(&program, t0 + Duration::from_secs(16));
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(16),
+        );
         assert_eq!(clock.elapsed_ms(), 0);
     }
 
     #[test]
     fn no_loaded_program_has_no_clock() {
+        let preview = Preview::empty();
+        let mut store = no_store();
         let mut clock = CycleClock::default();
         let mut program = cycle_program(7, 0.5);
         program.running = true;
         let t0 = Instant::now();
-        clock.tick_at(&program, t0);
-        clock.tick_at(&program, t0 + Duration::from_secs(5));
+        tick(&mut clock, &mut store, &program, &preview, 0, t0);
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(5),
+        );
         program.line_count = 0;
-        clock.tick_at(&program, t0 + Duration::from_secs(6));
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(6),
+        );
         assert_eq!(clock.elapsed_ms(), 0);
         assert_eq!(clock.remaining_ms(), None);
+    }
+
+    /// Two 60 mm feed moves at 600 mm/min: the plan says 6 s each.
+    fn cycle_two_moves() -> Preview {
+        plan("G21 G90\nG1 X60 F600\nG1 X120 F600\nM2\n")
+    }
+
+    #[test]
+    fn the_plan_predicts_a_run_before_anything_is_measured() {
+        let preview = cycle_two_moves();
+        let mut store = no_store();
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.0);
+        program.running = true;
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            Instant::now(),
+        );
+        assert_eq!(
+            clock.remaining_ms(),
+            Some(12_000),
+            "the plan knows what the moves cost before the run starts"
+        );
+    }
+
+    #[test]
+    fn a_run_slower_than_the_plan_lengthens_the_estimate() {
+        let preview = cycle_two_moves();
+        let mut store = no_store();
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.0);
+        program.running = true;
+        let t0 = Instant::now();
+        tick(&mut clock, &mut store, &program, &preview, 0, t0);
+        // The first 6 s move took 12 s, and the cut has reached the second.
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            1,
+            t0 + Duration::from_secs(12),
+        );
+        assert_eq!(
+            clock.remaining_ms(),
+            Some(12_000),
+            "half speed means the move left needs twice its planned 6 s"
+        );
+    }
+
+    #[test]
+    fn the_estimate_follows_the_feed_override() {
+        let preview = cycle_two_moves();
+        let mut store = no_store();
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.0);
+        program.running = true;
+        let overrides = Overrides {
+            feed: 0.5,
+            rapid: 1.0,
+        };
+        tick_with(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            overrides,
+            Instant::now(),
+        );
+        assert_eq!(
+            clock.remaining_ms(),
+            Some(24_000),
+            "half feed takes twice the planned 12 s"
+        );
+
+        // The operator turns the knob to 100 % mid-run: the estimate follows at
+        // once, without waiting for a move to be measured.
+        tick_with(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            Overrides::default(),
+            Instant::now(),
+        );
+        assert_eq!(clock.remaining_ms(), Some(12_000));
+    }
+
+    #[test]
+    fn a_rapid_override_scales_the_rapids_in_the_estimate() {
+        // A 120 mm rapid at the default fallback rate, then a 60 mm cut.
+        let preview = plan("G21 G90\nG0 X120\nG1 X180 F600\nM2\n");
+        let mut store = no_store();
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.0);
+        program.running = true;
+        let overrides = Overrides {
+            feed: 1.0,
+            rapid: 0.25,
+        };
+        tick_with(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            Overrides::default(),
+            Instant::now(),
+        );
+        let nominal = clock.remaining_ms().expect("an estimate") as f64 / 1000.0;
+        let rapid = nominal - 6.0;
+        assert!(rapid > 0.0, "the rapid is part of the estimate");
+
+        tick_with(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            overrides,
+            Instant::now(),
+        );
+        // The rapid's own seconds are quartered; the cut's 6 s are not touched.
+        let quartered = clock.remaining_ms().expect("an estimate") as f64 / 1000.0 - 6.0;
+        assert!(
+            (quartered - rapid * 4.0).abs() < 0.001,
+            "quarter rapid override quarters the rapid: {quartered} s of {rapid} s",
+        );
+    }
+
+    #[test]
+    fn an_override_is_not_learned_as_a_slow_cut() {
+        let preview = cycle_two_moves();
+        let mut store = no_store();
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.0);
+        program.running = true;
+        let overrides = Overrides {
+            feed: 0.5,
+            rapid: 1.0,
+        };
+        let t0 = Instant::now();
+        tick_with(&mut clock, &mut store, &program, &preview, 0, overrides, t0);
+        // At half feed the first 6 s move legitimately takes 12 s, and the
+        // estimate must still say the second move needs twice its plan - not
+        // four times, which is what learning the override as a rate would do.
+        tick_with(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            1,
+            overrides,
+            t0 + Duration::from_secs(12),
+        );
+        assert_eq!(clock.remaining_ms(), Some(12_000));
+    }
+
+    #[test]
+    fn a_second_run_starts_from_what_the_first_one_measured() {
+        let preview = cycle_two_moves();
+        let text = "G21 G90\nG1 X60 F600\nG1 X120 F600\nM2\n";
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = CycleStore::load(dir.path().join("t.cycletime.toml"));
+
+        let mut program = cycle_program(7, 0.0);
+        program.running = true;
+        program.content = Some(std::sync::Arc::new(text.to_string()));
+        program.revision = 1;
+        let t0 = Instant::now();
+        let mut clock = CycleClock::default();
+        tick(&mut clock, &mut store, &program, &preview, 0, t0);
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            1,
+            t0 + Duration::from_secs(12),
+        );
+        // The run ends, which is when the measurements are written.
+        program.running = false;
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            1,
+            t0 + Duration::from_secs(13),
+        );
+
+        // A fresh session reads the calibration back and knows the moves are
+        // twice their planned cost before the second run has cut anything.
+        let mut second = CycleClock::default();
+        program.running = true;
+        tick(
+            &mut second,
+            &mut store,
+            &program,
+            &preview,
+            0,
+            t0 + Duration::from_secs(20),
+        );
+        assert_eq!(second.remaining_ms(), Some(24_000));
+    }
+
+    #[test]
+    fn an_event_far_slower_than_any_cut_is_not_learned_as_a_rate() {
+        let preview = cycle_two_moves();
+        let mut store = no_store();
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.0);
+        program.running = true;
+        let t0 = Instant::now();
+        tick(&mut clock, &mut store, &program, &preview, 0, t0);
+        // A 6 s move that took 60 s is a tool change or a pause, not a slow
+        // cut: the estimate keeps the plan instead of learning a tenfold rate.
+        tick(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            1,
+            t0 + Duration::from_secs(60),
+        );
+        assert_eq!(clock.remaining_ms(), Some(6_000));
+    }
+
+    #[test]
+    fn an_edited_buffer_falls_back_to_the_line_rate() {
+        let preview = cycle_two_moves();
+        let mut store = no_store();
+        let mut clock = CycleClock::default();
+        let mut program = cycle_program(7, 0.5);
+        program.running = true;
+        let t0 = Instant::now();
+        tick_edited(&mut clock, &mut store, &program, &preview, t0);
+        tick_edited(
+            &mut clock,
+            &mut store,
+            &program,
+            &preview,
+            t0 + Duration::from_secs(10),
+        );
+        assert_eq!(
+            clock.remaining_ms(),
+            Some(10_000),
+            "the preview is of text the machine is not running"
+        );
     }
 }
