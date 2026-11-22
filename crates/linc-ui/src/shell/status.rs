@@ -287,7 +287,9 @@ pub fn state_label(power: MachinePower) -> &'static str {
 
 /// The bottom bar's program clock: elapsed cycle time, and the estimate to
 /// program end while the machine is cutting. `H:MM:SS`, not a clock time, so it
-/// cannot be mistaken for the time of day.
+/// cannot be mistaken for the time of day, and the estimate carries a `~`:
+/// it is a model of the moves left, measured against the run so far, not the
+/// controller's own count.
 fn format_cycle_time(ms: u64) -> String {
     let seconds = ms / 1000;
     format!(
@@ -301,7 +303,7 @@ fn format_cycle_time(ms: u64) -> String {
 fn cycle_field(elapsed_ms: u64, remaining_ms: Option<u64>) -> String {
     let mut text = format!("CYCLE {}", format_cycle_time(elapsed_ms));
     if let Some(remaining) = remaining_ms {
-        text.push_str("  LEFT ");
+        text.push_str("  LEFT ~");
         text.push_str(&format_cycle_time(remaining));
     }
     text
@@ -585,7 +587,7 @@ mod tests {
         assert_eq!(cycle_field(12_000, None), "CYCLE 0:00:12");
         assert_eq!(
             cycle_field(12_000, Some(3_723_000)),
-            "CYCLE 0:00:12  LEFT 1:02:03"
+            "CYCLE 0:00:12  LEFT ~1:02:03"
         );
     }
 

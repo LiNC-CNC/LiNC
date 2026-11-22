@@ -35,7 +35,6 @@ impl LincApp {
         }
 
         self.sync_program();
-        self.program.cycle.tick(&self.snapshot.program);
         self.sync_offsets_from_snapshot(false);
         self.sync_tools_from_snapshot(false);
         self.sync_probe();
@@ -45,10 +44,36 @@ impl LincApp {
         }
         self.tick_preview();
         self.tick_loops();
+        self.tick_cycle_time();
         self.tick_limit_recovery();
         self.overlay
             .toasts
             .retain(|toast| toast.until > Instant::now());
+    }
+
+    /// Time the run and estimate how much of it is left. The bottom bar's CYCLE
+    /// and LEFT fields read this, and so does nothing else: a wrong estimate
+    /// costs the operator a glance, never a move.
+    pub(super) fn tick_cycle_time(&mut self) {
+        let input = CycleInput {
+            program: &self.snapshot.program,
+            preview: &self.program.preview,
+            // The toolpath has already followed the cut through the preview's
+            // unrolled order, so the estimate reads the same cursor the loop
+            // readout does rather than looking for the cut a second time.
+            cursor: self.program.loop_progress.cursor,
+            tip: self.snapshot.tool_tip,
+            rates: &self.profile.machine_ini,
+            // Read fresh every frame: the feed and rapid override the planner is
+            // applying are part of how long the moves left will take, and the
+            // operator can turn them at any moment.
+            overrides: linc_core::cycletime::Overrides::from_feed_state(&self.snapshot.feed),
+            generation: self.program.preview_generation,
+            // An edited buffer is a preview of text the controller is not
+            // running, and its timing is not the program's.
+            preview_matches: !self.program.editor.dirty,
+        };
+        self.program.cycle.tick(&input, &mut self.cycle_store);
     }
 
     pub(super) fn sync_program(&mut self) {
