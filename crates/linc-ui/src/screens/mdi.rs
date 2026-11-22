@@ -91,9 +91,12 @@ pub fn pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
         // is what paints the red part, and the input's border and Enter's gate
         // read the same segments.
         overlay(app);
-        let beyond = app
-            .machine_bounds()
-            .and_then(|limits| app.mdi.overlay.as_ref().and_then(|cache| excess(&cache.segments, limits)));
+        let beyond = app.machine_bounds().and_then(|limits| {
+            app.mdi
+                .overlay
+                .as_ref()
+                .and_then(|cache| excess(&cache.segments, limits))
+        });
         let response = highlighted_input(app, ui, band.input, beyond);
         if app.profile.config.mdi.auto_focus && app.mdi.focus && !app.overlay_open() {
             // One-shot: the pane asks for the keyboard when it appears or when
@@ -500,7 +503,8 @@ fn excess(segments: &[PathSegment], limits: Bounds3) -> Option<String> {
     if !any {
         return None;
     }
-    let axis = (0..3).find(|&axis| low[axis] < limits.min[axis] || high[axis] > limits.max[axis])?;
+    let axis =
+        (0..3).find(|&axis| low[axis] < limits.min[axis] || high[axis] > limits.max[axis])?;
     let limit = if low[axis] < limits.min[axis] {
         limits.min[axis]
     } else {
@@ -882,7 +886,11 @@ mod tests {
         // A block longer than the room keeps the listing's minimum and is
         // clipped in its own slot.
         let huge = band_layout(card, 26.0, 3, 5000.0);
-        assert!(huge.listing.height() > LISTING_MIN - 3.0, "{:?}", huge.listing);
+        assert!(
+            huge.listing.height() > LISTING_MIN - 3.0,
+            "{:?}",
+            huge.listing
+        );
         assert!(huge.input.bottom() <= huge.strip.top());
     }
 

@@ -69,8 +69,8 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 fn homing_readout(app: &LincApp, rows: &[linc_core::homing::HomeAxisRow]) -> Vec<LiveAxisRow> {
     rows.iter()
         .map(|row| {
-            let (work, machine, _) = common::axis_display(app, &row.name)
-                .unwrap_or((row.position, row.position, 0.0));
+            let (work, machine, _) =
+                common::axis_display(app, &row.name).unwrap_or((row.position, row.position, 0.0));
             LiveAxisRow {
                 name: row.name.clone(),
                 work,
@@ -104,4 +104,3 @@ fn status_color(status: AxisHomeStatus) -> egui::Color32 {
         AxisHomeStatus::Unknown | AxisHomeStatus::NotConfigured => theme::MUTED,
     }
 }
-
