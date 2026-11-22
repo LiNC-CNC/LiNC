@@ -22,7 +22,7 @@ fn fixture() -> (tempfile::TempDir, Profile) {
     .unwrap();
     std::fs::write(
         root.join("probe_basic.ini"),
-        "[EMC]\nMACHINE = Test\n[DISPLAY]\nPROGRAM_PREFIX = gcode\nTOOL_TABLE_COLUMNS = TZDR\n[KINS]\nJOINTS = 3\nKINEMATICS = trivkins coordinates=XYZ\n[TRAJ]\nCOORDINATES = XYZ\nLINEAR_UNITS = mm\nSPINDLES = 1\n[EMCIO]\nTOOL_TABLE = tool.tbl\n[AXIS_X]\nMIN_LIMIT = -372\nMAX_LIMIT = 5\n[AXIS_Y]\nMIN_LIMIT = -346\nMAX_LIMIT = 4\n[AXIS_Z]\nMIN_LIMIT = -253\nMAX_LIMIT = 19\n",
+        "[EMC]\nMACHINE = Test\n[DISPLAY]\nPROGRAM_PREFIX = gcode\nTOOL_TABLE_COLUMNS = TXYZDR\n[KINS]\nJOINTS = 3\nKINEMATICS = trivkins coordinates=XYZ\n[TRAJ]\nCOORDINATES = XYZ\nLINEAR_UNITS = mm\nSPINDLES = 1\n[EMCIO]\nTOOL_TABLE = tool.tbl\n[AXIS_X]\nMIN_LIMIT = -372\nMAX_LIMIT = 5\n[AXIS_Y]\nMIN_LIMIT = -346\nMAX_LIMIT = 4\n[AXIS_Z]\nMIN_LIMIT = -253\nMAX_LIMIT = 19\n",
     )
     .unwrap();
     std::fs::write(
@@ -1081,13 +1081,41 @@ fn the_cut_card_takes_the_servo_cards_slot_without_load_feedback() {
             "{label} is on the card: {texts:?}"
         );
     }
+    // The pair takes the meters' slot: TLO ends where the meters ended and reads
+    // at the same top line, and CUT is narrower than the half the meters used to
+    // take. The strip itself is as tall as TLO's own rows ask for.
+    let tlo = card_of(&output, "TLO");
     assert!(
-        (cut.left() - servo.left()).abs() <= 1.0
-            && (cut.right() - servo.right()).abs() <= 1.0
-            && (cut.top() - servo.top()).abs() <= 1.0
-            && (cut.bottom() - servo.bottom()).abs() <= 1.0,
-        "the cut card takes the meters' slot exactly: {cut:?} vs {servo:?}"
+        (tlo.bottom() - servo.bottom()).abs() <= 4.0 && tlo.top() <= servo.top() + 1.0,
+        "the strip keeps the meters' bottom edge and grows for TLO's rows: {tlo:?} vs {servo:?}"
     );
+    assert!(
+        (tlo.right() - servo.right()).abs() <= 1.0,
+        "the pair ends where the meters ended: {tlo:?} vs {servo:?}"
+    );
+    assert!(
+        cut.width() < servo.width() * 0.75 && (tlo.left() - cut.right()) <= 9.0,
+        "CUT is narrower and TLO sits beside it: {cut:?} {tlo:?}"
+    );
+    // TLO shows the loaded tool's offsets, one row per configured axis plus the
+    // radius. The fixture's table has no X or Y word, so those rows say so
+    // rather than showing a zero the controller would add anyway. Every row has
+    // to land inside the card: a fourth line must not spill over the strip the
+    // meters set.
+    for label in ["TLO", "T1"] {
+        assert!(
+            texts.iter().any(|text| text == label),
+            "{label} is on the TLO card: {texts:?}"
+        );
+    }
+    for label in ["X", "Y", "Z", "RAD"] {
+        assert!(
+            painted_text(&output)
+                .into_iter()
+                .any(|(text, rect)| text == label && tlo.contains(rect.center())),
+            "{label} is drawn inside the TLO card: {tlo:?}"
+        );
+    }
 
     // `[ui] second_card = "load"` keeps the meters where the machine has none:
     // the card says so instead of standing empty.
@@ -2526,6 +2554,146 @@ fn main_opens_the_page_the_panel_mode_owns() {
     app.set_page(Page::Tools);
     app.request_mode_page();
     assert_eq!(app.nav.page, Page::Machine);
+}
+
+/// The alternate MAIN dashboard replaces the axis readouts and the toolpath
+/// with the four coordinate cards. The rest of MAIN — the feed strip and the
+/// program or MDI card — stays where it was.
+#[test]
+fn the_alternate_main_dashboard_replaces_the_toolpath_with_four_cards() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    assert_eq!(harness.app.nav.page, Page::Machine);
+    let texts = |harness: &mut ProbeHarness| -> Vec<String> {
+        painted_text(&harness.frame_full(Vec::new()))
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect()
+    };
+    let default = texts(&mut harness);
+    assert!(
+        default.iter().any(|text| text == "TOOLPATH"),
+        "the default dashboard draws the toolpath: {default:?}"
+    );
+
+    // A machine with no load feedback puts CUT in the strip, which brings the
+    // small TLO card with it.
+    harness.app.profile.config.ui.servo_load.clear();
+    harness.frame(&[]);
+    let default = texts(&mut harness);
+    assert!(
+        default.iter().any(|text| text == "TLO"),
+        "the default dashboard's strip carries the small TLO card: {default:?}"
+    );
+
+    harness.app.request_mode_page();
+    assert_eq!(harness.app.main_view, MainView::Coordinates);
+    let matrix = texts(&mut harness);
+    for title in [
+        "WORK COORDINATES",
+        "MACHINE COORDINATES",
+        "DISTANCE TO GO",
+        "TOOL LENGTH OFFSET",
+    ] {
+        assert!(
+            matrix.iter().any(|text| text == title),
+            "{title} is on the matrix: {matrix:?}"
+        );
+    }
+    assert!(
+        !matrix.iter().any(|text| text == "TOOLPATH"),
+        "the matrix takes the toolpath's place: {matrix:?}"
+    );
+    // The active work coordinate system names the WORK card, and the feed strip
+    // under the matrix is still the run's own.
+    assert!(
+        matrix.iter().any(|text| text == "G54"),
+        "the active WCS is on the card: {matrix:?}"
+    );
+    assert!(
+        matrix.iter().any(|text| text == "FEED / SPINDLE"),
+        "the feed strip stays: {matrix:?}"
+    );
+    // The matrix's own TOOL LENGTH OFFSET card is the readout here, so the strip
+    // does not repeat it in a second, smaller card.
+    assert!(
+        !matrix.iter().any(|text| text == "TLO"),
+        "the strip's small TLO card is gone: {matrix:?}"
+    );
+    // CUT gets the half the meters take, because it no longer shares with TLO.
+    assert!(
+        matrix.iter().any(|text| text == "CUT"),
+        "CUT is still in the strip: {matrix:?}"
+    );
+    // Every configured axis is listed on the coordinate cards. Three cards list
+    // one axis letter per line, so each letter is painted several times.
+    for axis in ["X", "Y", "Z"] {
+        let count = matrix.iter().filter(|text| *text == axis).count();
+        assert!(
+            count >= 3,
+            "{axis} is read on every card it belongs to: {matrix:?}"
+        );
+    }
+
+    // The default dashboard comes back on the next press.
+    harness.app.request_mode_page();
+    let back = texts(&mut harness);
+    assert!(
+        back.iter().any(|text| text == "TOOLPATH"),
+        "the toolpath is back: {back:?}"
+    );
+}
+
+/// MAIN on MAIN walks the two dashboards in the modes whose screen MAIN is.
+/// Everywhere else a press only opens MAIN, and the alternate view is not
+/// offered at all.
+#[test]
+fn main_walks_the_two_dashboards_only_where_the_dashboard_lives() {
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    assert_eq!(app.nav.page, Page::Machine);
+    assert_eq!(app.main_view, MainView::Dashboard);
+    app.request_mode_page();
+    assert_eq!(
+        app.main_view,
+        MainView::Coordinates,
+        "the second press shows the matrix"
+    );
+    app.request_mode_page();
+    assert_eq!(app.main_view, MainView::Dashboard, "and the third is back");
+    // The MAIN row in the sidebar carries the same cycle as the key.
+    app.request_nav_page(Page::Machine);
+    assert_eq!(app.main_view, MainView::Coordinates);
+    // A press from another page opens MAIN in the default view, not in the one
+    // it was last left in.
+    app.set_page(Page::Tools);
+    app.request_mode_page();
+    assert_eq!(app.nav.page, Page::Machine);
+    assert_eq!(app.main_view, MainView::Dashboard);
+
+    // MDI has the same pair: its screen is MAIN too.
+    switch_mode(&mut app, PanelMode::Mdi);
+    app.request_mode_page();
+    assert_eq!(app.main_view, MainView::Coordinates);
+
+    // JOG has its own page, and the alternate dashboard would be a guess on a
+    // screen that is not the run's.
+    switch_mode(&mut app, PanelMode::Jog);
+    app.set_page(Page::Machine);
+    assert_eq!(app.main_view, MainView::Dashboard);
+    app.request_nav_page(Page::Machine);
+    assert_eq!(app.main_view, MainView::Dashboard, "no cycle in JOG");
+
+    // Leaving AUTO or MDI drops the alternate view rather than keeping it for
+    // the next visit.
+    switch_mode(&mut app, PanelMode::Auto);
+    app.request_mode_page();
+    assert_eq!(app.main_view, MainView::Coordinates);
+    switch_mode(&mut app, PanelMode::Edit);
+    switch_mode(&mut app, PanelMode::Auto);
+    assert_eq!(
+        app.main_view,
+        MainView::Dashboard,
+        "a trip through EDIT forgets the matrix"
+    );
 }
 
 /// The panel moves the mode itself, so leaving EDIT is the last chance to
@@ -4504,21 +4672,124 @@ fn a_tools_search_with_no_hits_says_so() {
     );
 }
 
-/// Editing the mill's OFFSET cell must write the Z the table loader reads back.
+/// The offsets the table shows are the ones its INI declares. A profile whose
+/// tool table names only Z gets no X or Y column, and the TLO card stops listing
+/// those rows too: an offset the file does not carry is one the controller will
+/// not apply.
+#[test]
+fn the_tool_offset_columns_follow_the_ini() {
+    fn card_of(
+        painted: &[(String, egui::Rect)],
+        output: &egui::FullOutput,
+        label: &str,
+    ) -> egui::Rect {
+        let (_, text) = painted
+            .iter()
+            .find(|(text, _)| text == label)
+            .unwrap_or_else(|| panic!("{label} is painted"));
+        painted_cards(output)
+            .into_iter()
+            .find(|card| card.contains(text.center()))
+            .unwrap_or_else(|| panic!("{label} sits in a card"))
+    }
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Machine);
+    // No load feedback, so the strip is FEED / CUT / TLO.
+    harness.app.profile.config.ui.servo_load.clear();
+
+    // The fixture declares TXYZDR, so the card lists all three offsets.
+    harness.frame(&[]);
+    let output = harness.frame_full(Vec::new());
+    let tlo = card_of(&painted_text(&output), &output, "TLO");
+    for label in ["X", "Y", "Z", "RAD"] {
+        assert!(
+            painted_text(&output)
+                .iter()
+                .any(|(text, rect)| text == label && tlo.contains(rect.center())),
+            "{label} is on the TLO card"
+        );
+    }
+
+    // A table that names only Z has no X or Y offset to show.
+    harness.app.profile.machine_ini.tool_table_columns = "TZDR".into();
+    harness.frame(&[]);
+    let output = harness.frame_full(Vec::new());
+    let painted = painted_text(&output);
+    let tlo = card_of(&painted, &output, "TLO");
+    let on_card = |label: &str| {
+        painted
+            .iter()
+            .any(|(text, rect)| text == label && tlo.contains(rect.center()))
+    };
+    assert!(on_card("Z") && on_card("RAD"), "the Z and radius rows stay");
+    assert!(!on_card("X") && !on_card("Y"), "no X or Y row on the card");
+
+    // The tools page drops the same two columns.
+    harness.app.set_page(Page::Tools);
+    harness.frame(&[]);
+    let output = harness.frame_full(Vec::new());
+    let painted = painted_text(&output);
+    let heading_row = painted
+        .iter()
+        .find(|(text, _)| text == "DESCRIPTION")
+        .map(|(_, rect)| rect.center().y)
+        .expect("the description heading is painted");
+    let heads = |label: &str| {
+        painted
+            .iter()
+            .any(|(text, rect)| text == label && (rect.center().y - heading_row).abs() < 2.0)
+    };
+    assert!(heads("Z") && heads("Ø"), "the remaining columns are there");
+    assert!(
+        !heads("X") && !heads("Y"),
+        "the table shows only the offsets the INI declares"
+    );
+}
+
+/// The mill table heads the tool offsets the controller applies: X, Y and Z
+/// stand over the columns that write the `X`, `Y` and `Z` words, and the old
+/// OFFSET heading is gone.
+#[test]
+fn the_mill_tool_table_heads_its_offsets_x_y_and_z() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    let texts = painted_text(&harness.frame_full(Vec::new()));
+    // The axis DRO row above the table paints the same letters, so a heading is
+    // one painted on the table's own header line: the line DESCRIPTION sits on.
+    let heading_row = texts
+        .iter()
+        .find(|(text, _)| text == "DESCRIPTION")
+        .map(|(_, rect)| rect.center().y)
+        .expect("the description heading is painted");
+    let heads = |label: &str| {
+        texts
+            .iter()
+            .any(|(text, rect)| text == label && (rect.center().y - heading_row).abs() < 2.0)
+    };
+    for label in ["T", "TYPE", "X", "Y", "Z", "Ø", "DESCRIPTION"] {
+        assert!(heads(label), "{label} heads a column: {texts:?}");
+    }
+    assert!(
+        !texts.iter().any(|(text, _)| text == "OFFSET"),
+        "the mill table no longer calls the length an offset: {texts:?}"
+    );
+}
+
+/// Editing the mill's Z cell must write the Z the table loader reads back.
 /// The row carries the length in two places — `length` and `values["Z"]` — and
 /// the file is written from the values map, so a cell that updated only `length`
 /// saved the old Z and the row reverted on the next reload.
 #[test]
-fn editing_the_offset_cell_writes_the_z_the_table_reads() {
+fn editing_the_z_cell_writes_the_z_the_table_reads() {
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
     harness.app.set_page(Page::Tools);
     harness.frame(&[]);
     harness.sent.borrow_mut().clear();
 
-    // The fixture's T1 is Z-56: OFFSET is column 2 on a mill (T, TYPE, OFFSET, Ø,
-    // DESCRIPTION).
+    // The fixture's T1 is Z-56. The mill table is T, TYPE, X, Y, Z, Ø,
+    // DESCRIPTION, so the length cell is column 4.
     harness.app.tools.selected_row = 0;
-    harness.app.tools.selected_column = 2;
+    harness.app.tools.selected_column = 4;
     harness.frame(&[egui::Key::Enter]);
     assert!(harness.app.tools.editing, "Enter opens the cell editor");
     harness.app.tools.edit_buffer = "-50".into();
@@ -4535,6 +4806,38 @@ fn editing_the_offset_cell_writes_the_z_the_table_reads() {
         Some(-50.0),
         "the Z the tool table file and G43 read"
     );
+}
+
+/// The mill table carries X and Y tool offsets, which G43 applies on the same
+/// axes: a value typed into the Y cell has to reach the values map the file is
+/// written from, or the offset exists only on screen.
+#[test]
+fn editing_the_y_cell_writes_the_y_the_table_reads() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.set_page(Page::Tools);
+    harness.frame(&[]);
+    harness.sent.borrow_mut().clear();
+
+    // Y is column 3 (T, TYPE, X, Y, Z, Ø, DESCRIPTION).
+    harness.app.tools.selected_row = 0;
+    harness.app.tools.selected_column = 3;
+    harness.frame(&[egui::Key::Enter]);
+    assert!(harness.app.tools.editing, "Enter opens the cell editor");
+    // The cell starts empty: the fixture's rows carry no Y word.
+    assert_eq!(harness.app.tools.edit_buffer, "");
+    harness.app.tools.edit_buffer = "-3.25".into();
+    harness.frame(&[egui::Key::Enter]);
+
+    let sent = harness.sent.borrow();
+    let row = match sent.as_slice() {
+        [MachineCommand::SetToolTableRow { row, .. }] => row.clone(),
+        other => panic!("expected one tool-table write: {other:?}"),
+    };
+    assert_eq!(row.geometry.values.get("Y").copied(), Some(-3.25));
+    // The other offsets are untouched: the loop writes X, Y, I and J, and an
+    // emptied cell must not drop a value the row already had.
+    assert_eq!(row.geometry.length, Some(-56.0));
+    assert_eq!(row.geometry.diameter, Some(6.0));
 }
 
 /// `Z` asks where the tool is and writes the in-spindle tool's offset so the

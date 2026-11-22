@@ -6,6 +6,7 @@ use linc_view::ViewMode;
 
 use crate::screens::common;
 use crate::shell::LincApp;
+use crate::state::MainView;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
@@ -20,8 +21,13 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 }
 
 fn mill(app: &mut LincApp, ui: &mut Ui) {
-    common::axis_cards(app, ui);
-    ui.add_space(6.0);
+    // The alternate dashboard is the coordinate matrix: it replaces the axis
+    // readouts and the toolpath, and every other card stays where it was.
+    let alternate = alternate_active(app);
+    if !alternate {
+        common::axis_cards(app, ui);
+        ui.add_space(6.0);
+    }
 
     let available = ui.available_width();
     let page_height = (ui.ctx().input(|input| input.viewport_rect().bottom())
@@ -30,7 +36,7 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
         .max(200.0);
     // The bottom cards are sized to their contents, not to a fixed strip: the
     // graph gets every pixel the feed/servo rows do not need.
-    let bottom_height = bottom_cards_height(app);
+    let bottom_height = bottom_cards_height(app, alternate);
     let graph_height = (page_height - bottom_height - 6.0).max(200.0);
     let graph_width = (available * 0.70).max(480.0);
     let right_width = (available - graph_width - 8.0).max(280.0);
@@ -39,11 +45,15 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
             Vec2::new(graph_width, page_height),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                ui.allocate_ui_with_layout(
-                    Vec2::new(graph_width, graph_height),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| graph_panel(app, ui, graph_height),
-                );
+                if alternate {
+                    coordinate_matrix(app, ui, graph_width, graph_height);
+                } else {
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(graph_width, graph_height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| graph_panel(app, ui, graph_height),
+                    );
+                }
                 ui.add_space(6.0);
                 // The square key swaps the feed/servo pair for the
                 // following-error traces: one row of cards, one subject.
@@ -66,8 +76,19 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                         &app.profile.config.ui.second_card,
                         !app.servo_load_rows().is_empty(),
                     );
-                    let cards = if second.is_some() { 2.0 } else { 1.0 };
-                    let card_width = bottom_row_card_width(graph_width, cards, 180.0);
+                    // CUT does not need half the strip: it carries three short
+                    // rows, so it shares the second slot with TLO and the pair
+                    // reads at a glance without the width the meters want. The
+                    // alternate dashboard already shows those offsets in its own
+                    // card, so its strip keeps CUT at the half the meters use.
+                    let with_tlo = second == Some(Second::Cut) && !alternate;
+                    let cards = match second {
+                        None => 1.0,
+                        Some(Second::Load) => 2.0,
+                        Some(Second::Cut) if with_tlo => 3.0,
+                        Some(Second::Cut) => 2.0,
+                    };
+                    let card_width = bottom_row_card_width(graph_width, cards, 150.0);
                     ui.horizontal_top(|ui| {
                         // The explicit gap below is the whole gap: the default
                         // item spacing would add 8 more per card and push the
@@ -88,6 +109,19 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                             second.id(),
                             |app, ui, _h| second.draw(app, ui, bottom_height),
                         );
+                        if with_tlo {
+                            ui.add_space(8.0);
+                            bottom_card(
+                                app,
+                                ui,
+                                card_width,
+                                bottom_height,
+                                "tlo",
+                                |app, ui, _h| {
+                                    crate::screens::tlo::tlo_card(app, ui, bottom_height);
+                                },
+                            );
+                        }
                     });
                 }
             },
@@ -155,9 +189,14 @@ fn second_card(policy: &str, has_load: bool) -> Option<Second> {
 
 /// Height that just holds the bottom row: the feed/spindle block needs a fixed
 /// body, and every servo row adds its meter height above the card's title and
-/// margins. A machine with no load rows falls back to the CUT card, which fits
-/// the feed block's own height, so the strip does not grow for it.
-fn bottom_cards_height(app: &LincApp) -> f32 {
+/// margins. A machine with no load rows draws the CUT card, which fits the feed
+/// block's own height — until TLO joins it, since that card carries a row per
+/// offset the tool table declares and has its own height to ask for.
+///
+/// The alternate dashboard has no TLO in the strip: its own `TOOL LENGTH
+/// OFFSET` card already carries the same readout, so the strip stays the feed
+/// block's height there.
+fn bottom_cards_height(app: &LincApp, alternate: bool) -> f32 {
     const FEED: f32 = 100.0;
     // Three rows and room to read them; the rows divide whatever is left after
     // the card's own header, so a shorter strip is not clipped.
@@ -166,7 +205,19 @@ fn bottom_cards_height(app: &LincApp) -> f32 {
         return FOLLOWING;
     }
     let rows = app.servo_load_rows().len();
-    FEED.max(common::servo_load_card_height(rows))
+    let mut height = FEED.max(common::servo_load_card_height(rows));
+    let second = second_card(&app.profile.config.ui.second_card, rows > 0);
+    // The lathe keeps the feed/CUT pair: TLO is the mill's, so its rows do not
+    // grow the lathe's strip.
+    if !alternate && second == Some(Second::Cut) && app.profile.variant != MachineVariant::Lathe {
+        let lengths = crate::screens::tlo::read(
+            &app.snapshot,
+            &app.profile.machine_ini.tool_offset_columns(),
+            app.profile.variant,
+        );
+        height = height.max(crate::screens::tlo::card_height(lengths.line_count()));
+    }
+    height
 }
 
 /// Width of one bottom card so that `cards` cards and the 8 px gaps between
@@ -193,6 +244,171 @@ fn bottom_card(
             add(app, ui, height);
         },
     );
+}
+
+/// True when the alternate dashboard is both asked for and offered: the
+/// operator pressed MAIN on MAIN, and the mode is one whose screen MAIN is.
+fn alternate_active(app: &LincApp) -> bool {
+    app.main_view == MainView::Coordinates && app.main_alternate_available()
+}
+
+/// One line of a matrix card: the axis name and the figure beside it.
+struct CoordLine {
+    label: String,
+    value: String,
+    /// An axis with no number to show is dimmed rather than dropped.
+    muted: bool,
+}
+
+/// The alternate dashboard: four coordinate cards in the place the axis
+/// readouts and the toolpath take on the default one.
+fn coordinate_matrix(app: &LincApp, ui: &mut Ui, width: f32, height: f32) {
+    const GAP: f32 = 8.0;
+    let cell = Vec2::new(
+        ((width - GAP) / 2.0).max(160.0),
+        ((height - GAP) / 2.0).max(120.0),
+    );
+    let axes = app.axes();
+    let diameter = app.reads_x_as_diameter();
+    // One read of the snapshot for all four cards, so the matrix cannot show two
+    // different frames.
+    let positions: Vec<(f64, f64, f64)> = axes
+        .iter()
+        .map(|axis| common::axis_display(app, axis).unwrap_or((0.0, 0.0, 0.0)))
+        .collect();
+    // Every axis name carries the lathe's DIA mark, as it does on the DROs the
+    // matrix replaces.
+    let labels: Vec<String> = axes
+        .iter()
+        .map(|axis| common::dro_axis_label(axis, diameter))
+        .collect();
+    let rows_of = |pick: fn(&(f64, f64, f64)) -> f64| -> Vec<CoordLine> {
+        positions
+            .iter()
+            .zip(labels.iter())
+            .map(|(position, label)| CoordLine {
+                label: label.clone(),
+                value: theme::format_position(pick(position), 3),
+                muted: false,
+            })
+            .collect()
+    };
+    // The X of a lathe is already a diameter on the DRO row; the distance to go
+    // is a distance, so it is never doubled.
+    let work = rows_of(|position| position.0);
+    let machine = rows_of(|position| position.1);
+    let to_go = rows_of(|position| position.2);
+    let lengths = crate::screens::tlo::read(
+        &app.snapshot,
+        &app.profile.machine_ini.tool_offset_columns(),
+        app.profile.variant,
+    );
+    let tool: Vec<CoordLine> = lengths
+        .lines(&app.snapshot)
+        .into_iter()
+        .map(|(label, value, muted)| CoordLine {
+            label,
+            value,
+            muted,
+        })
+        .collect();
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        ui.horizontal_top(|ui| {
+            matrix_card(
+                ui,
+                cell,
+                "WORK COORDINATES",
+                Some(app.active_wcs_label()),
+                &work,
+            );
+            ui.add_space(GAP);
+            matrix_card(ui, cell, "MACHINE COORDINATES", None, &machine);
+        });
+        ui.add_space(GAP);
+        ui.horizontal_top(|ui| {
+            matrix_card(ui, cell, "DISTANCE TO GO", None, &to_go);
+            ui.add_space(GAP);
+            matrix_card(
+                ui,
+                cell,
+                "TOOL LENGTH OFFSET",
+                Some(format!("T{}", lengths.tool)),
+                &tool,
+            );
+        });
+    });
+}
+
+/// One card of the matrix: a title, an optional badge at its right end (the
+/// active WCS, the loaded tool) and the lines under it.
+fn matrix_card(ui: &mut Ui, cell: Vec2, title: &str, badge: Option<String>, lines: &[CoordLine]) {
+    ui.allocate_ui_with_layout(cell, egui::Layout::top_down(egui::Align::Min), |ui| {
+        ui.set_min_width(cell.x);
+        ui.set_max_width(cell.x);
+        ui.set_min_height(cell.y);
+        ui.set_max_height(cell.y);
+        theme::card(ui, |ui| {
+            ui.horizontal(|ui| {
+                theme::section_header(ui, title);
+                if let Some(badge) = badge {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(badge)
+                                .monospace()
+                                .size(theme::font_size(11.0))
+                                .color(theme::ACCENT),
+                        );
+                    });
+                }
+            });
+            let free = (ui.max_rect().bottom() - ui.cursor().top()).max(0.0);
+            let width = ui.available_width();
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(width, free), egui::Sense::hover());
+            paint_coordinate_lines(ui, rect, lines);
+        });
+    });
+}
+
+/// Paint the lines of a matrix card: the axis name in the DRO's label colour at
+/// the left inset, its figure at the right edge.
+fn paint_coordinate_lines(ui: &Ui, rect: egui::Rect, lines: &[CoordLine]) {
+    if lines.is_empty() {
+        return;
+    }
+    let font = egui::FontId::monospace(theme::font_size(line_base(lines.len(), rect.height())));
+    let row = rect.height() / lines.len() as f32;
+    let painter = ui.painter_at(rect);
+    for (index, line) in lines.iter().enumerate() {
+        let y = rect.top() + (index as f32 + 0.5) * row;
+        painter.text(
+            egui::pos2(rect.left(), y),
+            egui::Align2::LEFT_CENTER,
+            &line.label,
+            font.clone(),
+            theme::C3,
+        );
+        painter.text(
+            egui::pos2(rect.right(), y),
+            egui::Align2::RIGHT_CENTER,
+            &line.value,
+            font.clone(),
+            if line.muted { theme::MUTED } else { theme::FG },
+        );
+    }
+}
+
+/// Base type size for a matrix card's lines: the largest on the ramp whose row
+/// still holds the DRO line's air, so a five-axis machine stays readable and a
+/// three-axis one gets the big figures the matrix exists for.
+fn line_base(rows: usize, height: f32) -> f32 {
+    // Bases on the type ramp, largest first.
+    const CANDIDATES: [f32; 5] = [30.0, 26.0, 22.0, 18.0, 16.0];
+    let per_row = height / rows.max(1) as f32;
+    CANDIDATES
+        .into_iter()
+        .find(|base| theme::font_size(*base) * 1.45 <= per_row)
+        .unwrap_or(CANDIDATES[CANDIDATES.len() - 1])
 }
 
 fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
@@ -453,7 +669,7 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
 
 #[cfg(test)]
 mod tests {
-    use super::{bottom_row_card_width, second_card, Second};
+    use super::{bottom_row_card_width, line_base, second_card, Second};
 
     #[test]
     fn second_card_follows_the_policy_then_the_machine() {
@@ -486,5 +702,21 @@ mod tests {
                 "{cards} cards of {width} span {total}, expected {expected}"
             );
         }
+    }
+
+    /// The matrix card's figures are the DRO size, chosen from the room the rows
+    /// have: a three-axis card gets the biggest on the ramp, a five-axis one
+    /// steps down rather than painting over the card's edge.
+    #[test]
+    fn the_matrix_lines_shrink_to_fit_their_card() {
+        // A three-axis card has room for the largest figure.
+        assert_eq!(line_base(3, 190.0), 30.0);
+        // A five-axis one has to step down, and still gets a size.
+        assert!(line_base(5, 190.0) < line_base(3, 190.0));
+        // A card too short for any candidate keeps the smallest: the lines are
+        // still painted rather than dropped.
+        assert_eq!(line_base(5, 40.0), 16.0);
+        // A machine that reports no axes still has a size to paint at.
+        assert_eq!(line_base(0, 190.0), line_base(1, 190.0));
     }
 }

@@ -110,6 +110,9 @@ pub struct LincApp {
     pub files: FilesUi,
     pub manual: ManualUi,
     pub design_scale: f32,
+    /// Which MAIN dashboard is in front. The alternate one exists only in AUTO
+    /// and MDI; every other mode draws the default one whatever this says.
+    pub main_view: MainView,
     pub(super) nav: NavUi,
     pub(super) diagnostics: DiagnosticsUi,
     pub(super) overlay: OverlayUi,
@@ -260,6 +263,7 @@ impl LincApp {
                 ..Default::default()
             },
             design_scale: configured_scale,
+            main_view: MainView::default(),
             diag_bus: None,
             fps: 0.0,
             nav: NavUi {

@@ -338,6 +338,162 @@ pub fn modal_text(key: &str, value: &str) -> String {
     }
 }
 
+/// One line of a value card: a label at the left, an optional lead figure, and
+/// the value with its units at the right.
+///
+/// The CUT card and the TLO card are both this shape — a short list of numbers
+/// read at a glance — and one painter keeps them from drifting into different
+/// type sizes and column rules.
+pub struct ValueRow {
+    pub label: String,
+    /// A figure that qualifies the value, drawn in the label's face ahead of it
+    /// (CUT's rate in force). Dropped whole when it would touch the label: a
+    /// truncated number is worse than no number.
+    pub lead: Option<String>,
+    pub value: String,
+    pub units: String,
+    /// A value that is not the number it stands beside — a rapid's commanded
+    /// rate, an offset the table does not carry — is painted dimmer than one
+    /// that is.
+    pub muted: bool,
+}
+
+impl ValueRow {
+    pub fn new(
+        label: impl Into<String>,
+        value: impl Into<String>,
+        units: impl Into<String>,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            lead: None,
+            value: value.into(),
+            units: units.into(),
+            muted: false,
+        }
+    }
+}
+
+/// Height of one row in a value card, before the display's own text scale.
+pub const VALUE_ROW_HEIGHT: f32 = 16.0;
+/// Height the title row of a value card takes, measured from the card's inner
+/// top edge.
+pub const CARD_HEADER_HEIGHT: f32 = 20.0;
+
+/// Paint [`ValueRow`]s into `rect`, one per row, the block centred in it.
+pub fn paint_value_rows(ui: &Ui, rect: egui::Rect, rows: &[ValueRow]) {
+    let label_font = FontId::monospace(theme::font_size(9.0));
+    let value_font = FontId::monospace(theme::font_size(11.0));
+    // The row is as tall as its own text at the current zoom, never less than
+    // the meter height beside it, so a scaled-up display does not stack the
+    // rows into each other.
+    let row_height = ui
+        .fonts_mut(|fonts| fonts.row_height(&value_font))
+        .max(VALUE_ROW_HEIGHT);
+    // Centre the block: the card is as tall as the feed block beside it, and a
+    // short card stacked under its title would otherwise leave its slack as one
+    // gap at the bottom.
+    let lead = ((rect.height() - rows.len() as f32 * row_height) / 2.0).max(0.0);
+    let painter = ui.painter_at(rect);
+    for (index, row) in rows.iter().enumerate() {
+        let y = rect.top() + lead + (index as f32 + 0.5) * row_height;
+        painter.text(
+            egui::pos2(rect.left(), y),
+            egui::Align2::LEFT_CENTER,
+            &row.label,
+            label_font.clone(),
+            theme::MUTED,
+        );
+        // The units take the right end and the value sits left of them, so the
+        // figures of every row form one column whatever their units are.
+        let mut value_right = rect.right();
+        if !row.units.is_empty() {
+            let width = text_width(ui, &row.units, &label_font);
+            painter.text(
+                egui::pos2(rect.right(), y),
+                egui::Align2::RIGHT_CENTER,
+                &row.units,
+                label_font.clone(),
+                theme::SUCCESS,
+            );
+            value_right -= width + 5.0;
+        }
+        let value_color = if row.muted { theme::MUTED } else { theme::FG };
+        painter.text(
+            egui::pos2(value_right, y),
+            egui::Align2::RIGHT_CENTER,
+            &row.value,
+            value_font.clone(),
+            value_color,
+        );
+        let Some(lead_text) = row.lead.as_ref() else {
+            continue;
+        };
+        let lead_width = text_width(ui, lead_text, &label_font);
+        let label_width = text_width(ui, &row.label, &label_font) + 10.0;
+        let x = value_right - text_width(ui, &row.value, &value_font) - 5.0;
+        if x - lead_width >= rect.left() + label_width {
+            painter.text(
+                egui::pos2(x, y),
+                egui::Align2::RIGHT_CENTER,
+                lead_text,
+                label_font.clone(),
+                theme::MUTED,
+            );
+        }
+    }
+}
+
+fn text_width(ui: &Ui, text: &str, font: &FontId) -> f32 {
+    ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(text.to_string(), font.clone(), theme::FG)
+            .size()
+            .x
+    })
+}
+
+/// A value card: the frame, the title row, and the rect the rows below may use.
+///
+/// The title is painted rather than laid out. A laid-out row's height depends on
+/// the enclosing layout's minimums — one line of text was taking 38 px of a
+/// 108 px card — and a card that paints a block of lines needs that height to be
+/// the number it was told, so the rows can be measured against the body instead
+/// of against the column the card sits in.
+pub fn value_card(ui: &mut Ui, height: f32, title: &str, badge: Option<&str>) -> egui::Rect {
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    let painter = ui.painter_at(rect.expand(1.0));
+    painter.rect_filled(rect, egui::CornerRadius::same(6), theme::PANEL);
+    painter.rect_stroke(
+        rect,
+        egui::CornerRadius::same(6),
+        egui::Stroke::new(1.0, theme::BORDER),
+        egui::StrokeKind::Inside,
+    );
+    let inner = rect.shrink(theme::CARD_MARGIN);
+    painter.text(
+        inner.left_top(),
+        egui::Align2::LEFT_TOP,
+        title,
+        egui::FontId::proportional(theme::font_size(12.0)),
+        theme::MUTED,
+    );
+    if let Some(badge) = badge {
+        painter.text(
+            inner.right_top(),
+            egui::Align2::RIGHT_TOP,
+            badge,
+            egui::FontId::monospace(theme::font_size(9.0)),
+            theme::MUTED,
+        );
+    }
+    egui::Rect::from_min_max(
+        egui::pos2(inner.left(), inner.top() + CARD_HEADER_HEIGHT),
+        inner.max,
+    )
+}
+
 pub fn axis_cards(app: &LincApp, ui: &mut Ui) {
     let axes = app.axes();
     let count = axes.len().min(5).max(1);

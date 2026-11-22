@@ -486,6 +486,20 @@ Default page. The layout is selected by `machine.gui`.
   not a duplicated list.
 - Axis cards expand from 3 to 5: 3 large cards at 3-axis; compact cards at
   4/5-axis. Never invent an axis that the INI does not expose.
+- **Second dashboard (AUTO, MDI).** `MAIN` pressed again on MAIN walks between
+  the default layout and a coordinate matrix; the MAIN row in the navigation
+  list does the same. The alternate view drops the axis cards and the toolpath
+  and fills their column with four cards: `WORK COORDINATES`, named with the
+  active WCS (`G54` …); `MACHINE COORDINATES`; `DISTANCE TO GO`; and
+  `TOOL LENGTH OFFSET`, the loaded tool's offsets plus the radius cutter
+  compensation uses. The coordinate cards list every configured axis at the
+  DRO's size, axis letter in the DRO's label colour; the TLO card lists the
+  offsets `TOOL_TABLE_COLUMNS` declares, and shows a dash for one the tool's row
+  does not carry (LinuxCNC reads a missing word as zero). The feed
+  strip and the program or MDI card keep their places. The view is not
+  remembered: entering MAIN from another page, leaving AUTO/MDI, or a mode
+  whose screen is not MAIN keeps the default one, and EDIT/JOG/INC/MPG/HOME
+  keep the key's single meaning.
 - Large 3D toolpath: stock, loaded program path, live tool trail in a distinct
   color, rapid path, tool marker, axes, zoom, program/machine bounds and
   selected-line highlight. `CLEAR TRAIL` clears only the live trail.
@@ -551,7 +565,13 @@ Default page. The layout is selected by `machine.gui`.
   is the rule above, `"load"` keeps the meters and makes the card read
   `NO LOAD FEEDBACK` where there is none, `"cut"` always draws the cut's
   numbers (what a machine with only a spindle load reading wants), and
-  `"none"` gives the whole row to `FEED / SPINDLE`. Controller messages are
+  `"none"` gives the whole row to `FEED / SPINDLE`. On the default dashboard,
+  when `CUT` is the card drawn, the slot is split: `CUT` takes a third of it and
+  `TLO` the rest, the loaded tool's offsets (one row per offset
+  `TOOL_TABLE_COLUMNS` declares, then `RAD` for its radius) — the offsets `G43`
+  applies. The alternate dashboard omits it there: its `TOOL LENGTH OFFSET` card
+  is the same readout, so `CUT` keeps the half the meters use. Controller
+  messages are
   not a pane: `M`
   opens them full screen, so the log is readable without crowding the MAIN
   layout.
@@ -948,6 +968,13 @@ Primary quick tool-change surface; no MDI entry required.
 - Tool table backend is the **standard LinuxCNC tool table**, read/written at
   the path in INI `[EMCIO] TOOL_TABLE`. Columns come from
   `TOOL_TABLE_COLUMNS`; the HMI uses that schema directly.
+- **Columns:** the offset columns are the axes `TOOL_TABLE_COLUMNS` declares, in
+  that order — `TXYZDR` gives `X`, `Y`, `Z`, `TZDR` gives `Z`, and the lathe's
+  `TPXZIJDQR` gives `X`, `Z` — followed by `Ø` and `DESCRIPTION`, with `POCKET`
+  before the description when a changer has pockets. `Z` is the tool length the
+  file writes as its `Z` word; the others are the offsets `G43` applies on those
+  axes. A lathe also shows `NOSE R` and `ORIENT`. The HMI never offers a column
+  the file does not carry, so an edit cannot be dropped by the next save.
 - **Pocket column:** shown only when an ATC/turret changer is used; a
   `manual` changer hides it in the Tools page. The `P` word stays in the file
   for every changer: LinuxCNC keeps one tool per `P` value, and a file without
@@ -2201,7 +2228,7 @@ For the future implementation:
     pendant mode, cycle, spindle, coolant, override, program and macro inputs;
     add a fault test proving those controls cannot change machine state.
 37. Migrate the mill tool table to a standard `P` column only when ATC is
-    enabled; keep manual profiles on `TZDR`. Validate the INI
+    enabled; keep manual profiles on `TXYZDR`. Validate the INI
     `TOOL_TABLE_COLUMNS`/`changer` match and hide the pocket column in manual
     mode.
 38. Harden untrusted file ingress: canonicalize LOAD/SAVE beneath

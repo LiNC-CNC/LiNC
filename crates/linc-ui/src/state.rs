@@ -81,6 +81,33 @@ pub enum ProgramView {
     Code,
 }
 
+/// Which MAIN dashboard is in front.
+///
+/// MAIN is the AUTO/MDI run screen and has two of them: the default one with
+/// the axis DRO cards and the toolpath, and the coordinate matrix the operator
+/// reads when setting up a run. The mode is what makes the second one
+/// meaningful — a jog screen, the editor and the homing page each already show
+/// their own numbers — so only AUTO and MDI offer the cycle, and the MAIN key
+/// walks it by being pressed again on the page it already opened.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MainView {
+    /// Axis cards, toolpath, and the feed/TLO strip under it.
+    #[default]
+    Dashboard,
+    /// The four coordinate cards, in the toolpath's place.
+    Coordinates,
+}
+
+impl MainView {
+    /// The other dashboard, which is what a repeated MAIN key selects.
+    pub fn flipped(self) -> Self {
+        match self {
+            Self::Dashboard => Self::Coordinates,
+            Self::Coordinates => Self::Dashboard,
+        }
+    }
+}
+
 /// A command a sidebar SHORTCUTS row runs when it is clicked.
 ///
 /// The shell owns the first group; the pages own the rest, and their own key
@@ -1569,7 +1596,12 @@ impl ToolDraft {
                 .map(|v| v.to_string())
                 .unwrap_or_default(),
             pocket: row.pocket.map(|v| v.to_string()).unwrap_or_default(),
-            axes: ["X", "I", "J"]
+            // Every per-axis value the table can carry: the linear and rotary
+            // tool offsets (whichever ones a given `TOOL_TABLE_COLUMNS` names)
+            // and the lathe's front and back angles. A cell shows the row's own
+            // word, and a row that carries none of a declared axis still gets a
+            // blank cell rather than a missing one.
+            axes: ["X", "Y", "A", "B", "C", "U", "V", "W", "I", "J"]
                 .into_iter()
                 .map(|axis| {
                     (
@@ -2297,6 +2329,28 @@ pub fn bounds_mode_from_config(show_program: bool, show_machine: bool) -> u8 {
         2
     } else {
         0
+    }
+}
+
+/// A tool draft is the editable copy of one table row: it has to hold every
+/// offset axis the file can declare, or a declared column renders blank and the
+/// save clears a word the row carried.
+#[cfg(test)]
+mod tool_draft_tests {
+    use super::ToolDraft;
+
+    #[test]
+    fn every_offset_axis_the_table_can_declare_has_a_draft_cell() {
+        let mut row = linc_core::model::ToolRow::new(3);
+        row.geometry.values.insert("W".to_string(), -4.5);
+        row.geometry.values.insert("A".to_string(), 12.0);
+        let draft = ToolDraft::from_row(&row);
+        assert_eq!(draft.axes.get("W").map(String::as_str), Some("-4.5"));
+        assert_eq!(draft.axes.get("A").map(String::as_str), Some("12"));
+        // An axis the row does not carry is a blank cell, not a missing one: a
+        // declared column still has to render and be clearable.
+        assert_eq!(draft.axes.get("V").map(String::as_str), Some(""));
+        assert_eq!(draft.axes.get("Y").map(String::as_str), Some(""));
     }
 }
 

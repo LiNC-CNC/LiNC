@@ -185,7 +185,7 @@ Required profile fields:
 | Velocities and acceleration | INI `[AXIS_*]` / `[JOINT_*]` |
 | Units | INI `[TRAJ] LINEAR_UNITS`, `ANGULAR_UNITS` |
 | Spindle count / maximum speed | INI `[TRAJ] SPINDLES`, `[DISPLAY] MAX_SPINDLE_SPEED` |
-| Tool table | Standard LinuxCNC file at INI `[EMCIO] TOOL_TABLE`; columns from `TOOL_TABLE_COLUMNS` |
+| Tool table | Standard LinuxCNC file at INI `[EMCIO] TOOL_TABLE`; columns from `TOOL_TABLE_COLUMNS`, which also decides the offset columns and TLO rows the HMI shows |
 | Tool in spindle | LiNC machine-state file beside the preferences; restored with `M61` + `G43` |
 | Tool pocket/station | Standard `P` column; required only for ATC/turret |
 | ATC pockets / tool-change heights | INI `[ATC]`; `[tools] atc_pockets = "ini"` |
@@ -231,7 +231,7 @@ configuration reviewable.
 | Default linear velocity | 60 mm/s |
 | Spindle | 1, 0…12000 rpm, 0.5…2.0 override |
 | ATC | 12 pockets, Z tool-change height -194 mm (manual changer today; add P only if ATC is enabled) |
-| Tool table | `tool.tbl`, standard `TZDR` (no P in manual mode) |
+| Tool table | `tool.tbl`, standard `TXYZDR` (no P in manual mode); the X and Y offsets are the ones `G43` applies on those axes |
 | Real config | `../../baiermill_pb/probe_basic.ini` |
 | Sim config | `configs/sim.ini` (loads the in-repo `hal/rio_sim.hal`) |
 
@@ -645,6 +645,40 @@ bar is not worth the slot:
 [ui]
 second_card = "cut"
 ```
+
+`CUT` does not need half the toolpath's width, so on the default dashboard the
+slot is split when it is the card drawn: `CUT` takes a third and `TLO` the
+other. `TLO` carries one row per offset the tool table declares
+(`TOOL_TABLE_COLUMNS`) plus `RAD` for the radius cutter compensation uses — the
+offsets `G43` applies to the loaded tool, so the strip says what the machine is
+adding to the position it is showing. A table that names only Z gets one row and
+the card stays short. The alternate dashboard has no `TLO` in the strip: its own
+`TOOL LENGTH OFFSET` card carries the same readout, and `CUT` keeps the half the
+meters use.
+
+### The second MAIN dashboard
+
+MAIN is the screen AUTO and MDI own. In those two modes it has a second face,
+and `MAIN` pressed again while the page is already in front walks between them —
+the `F5` key and the MAIN row in the navigation list do the same thing. It is
+not a preference: any other page opens MAIN in the default view, leaving AUTO or
+MDI puts the default one back, and in EDIT, JOG/INC/MPG and HOME the key keeps
+its single meaning, because those screens carry their own coordinates.
+
+| view | what it shows |
+| --- | --- |
+| default | axis DRO cards, the toolpath, and the feed strip under it |
+| alternate | four cards in place of both: `WORK COORDINATES` (with the active WCS, `G54` …), `MACHINE COORDINATES`, `DISTANCE TO GO`, `TOOL LENGTH OFFSET` |
+
+The coordinate cards list every axis the INI configures, at the DRO's own size,
+with the axis letter in the DRO's label colour. `TOOL LENGTH OFFSET` lists the
+offsets the tool table declares — `TOOL_TABLE_COLUMNS = TXYZDR` gives X, Y and Z,
+`TZDR` gives Z alone — and ends with the radius cutter compensation uses: half
+the `D` diameter on a mill, the `R` nose radius on a lathe. An offset the tool's
+row does not carry shows a dash, which the controller reads as zero. The feed
+strip and the program or MDI card stay where they are, so the run's numbers stay
+in front in either view; the strip does not repeat the offsets in a small `TLO`
+card, because this one already shows them.
 
 ### Window state
 

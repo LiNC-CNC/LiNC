@@ -38,7 +38,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // area is focusable and consumes the up/down keys for its own scrolling.
     let lathe = app.profile.variant == MachineVariant::Lathe;
     let pocket = app.profile.changer.uses_pockets();
-    let columns = column_specs(ui, lathe, pocket);
+    // The offsets the file carries, as the INI declares them: the table shows
+    // the same words the controller applies, and a profile that names only Z
+    // does not offer columns that would be dropped on the next save.
+    let offsets = app.profile.machine_ini.tool_offset_columns();
+    let columns = column_specs(ui, lathe, pocket, &offsets);
     if let Some(tool) = app.tools.pending_select_tool {
         if let Some(index) = app
             .snapshot
@@ -250,7 +254,12 @@ struct ColumnSpec {
     width: f32,
 }
 
-fn column_specs(ui: &Ui, lathe: bool, pocket: bool) -> Vec<ColumnSpec> {
+fn column_specs(
+    ui: &Ui,
+    lathe: bool,
+    pocket: bool,
+    offsets: &[linc_core::model::ToolColumn],
+) -> Vec<ColumnSpec> {
     let pad = theme::CELL_PAD;
     let tool_width = theme::measure(ui, "T00000", 12.0) + pad;
     let number_width = theme::measure(ui, "-000.0000", 11.0) + CELL_TEXT_PAD * 2.0;
@@ -270,15 +279,27 @@ fn column_specs(ui: &Ui, lathe: bool, pocket: bool) -> Vec<ColumnSpec> {
         },
     ];
     // Same order as probe_basic: offsets before the description, which takes the
-    // remaining width at the end.
-    if lathe {
-        for axis in ["X", "Z"] {
-            columns.push(ColumnSpec {
-                cell: Cell::Number(Field::Axis(axis)),
-                heading: if axis == "X" { "X" } else { "Z" },
+    // remaining width at the end. Which offsets exist is the INI's answer, so a
+    // mill whose table names only Z gets one offset column and one whose table
+    // names X and Y gets three.
+    for offset in offsets {
+        let column = match offset {
+            // `Z` is the tool length under its own name, and the draft keeps one
+            // string for it.
+            linc_core::model::ToolColumn::Z => ColumnSpec {
+                cell: Cell::Number(Field::Length),
+                heading: "Z",
                 width: number_width,
-            });
-        }
+            },
+            other => ColumnSpec {
+                cell: Cell::Number(Field::Axis(other.label())),
+                heading: other.label(),
+                width: number_width,
+            },
+        };
+        columns.push(column);
+    }
+    if lathe {
         for (field, heading) in [
             (Field::NoseRadius, "NOSE R"),
             (Field::Orientation, "ORIENT"),
@@ -289,15 +310,12 @@ fn column_specs(ui: &Ui, lathe: bool, pocket: bool) -> Vec<ColumnSpec> {
                 width: number_width,
             });
         }
-    } else {
-        for (field, heading) in [(Field::Length, "OFFSET"), (Field::Diameter, "Ø")] {
-            columns.push(ColumnSpec {
-                cell: Cell::Number(field),
-                heading,
-                width: number_width,
-            });
-        }
     }
+    columns.push(ColumnSpec {
+        cell: Cell::Number(Field::Diameter),
+        heading: "Ø",
+        width: number_width,
+    });
     if pocket {
         columns.push(ColumnSpec {
             cell: Cell::Number(Field::Pocket),
@@ -1033,14 +1051,16 @@ fn open_position_dialog(app: &mut LincApp) {
     seed_position_axis(app, position_axis(app));
 }
 
-/// The axis the `Z` shortcut opens on: Z where the machine has one.
+/// The axis the `Z` shortcut opens on: Z where the table carries it, else the
+/// first offset the table declares.
 fn position_axis(app: &LincApp) -> &'static str {
-    let axes = app.axes();
-    if axes.iter().any(|axis| axis == "Z") {
-        "Z"
-    } else {
-        "X"
-    }
+    let offsets = app.profile.machine_ini.tool_offset_columns();
+    offsets
+        .iter()
+        .find(|column| column.label() == "Z")
+        .or_else(|| offsets.first())
+        .map(|column| column.label())
+        .unwrap_or("Z")
 }
 
 /// Point the dialog at `axis`, seeded with the work coordinate the controller
@@ -1069,7 +1089,18 @@ fn close_position_dialog(app: &mut LincApp, ui: &mut Ui) {
 
 /// The dialog's own keys, taken before the field and the table draw.
 fn position_dialog_keys(app: &mut LincApp, ui: &mut Ui) {
-    let axes = app.axes();
+    // The axes this dialog can enter: those the table carries and the machine
+    // has. An offset for any other axis would go into the draft and be dropped
+    // by the next save.
+    let machine_axes = app.axes();
+    let axes: Vec<&str> = app
+        .profile
+        .machine_ini
+        .tool_offset_columns()
+        .iter()
+        .map(|column| column.label())
+        .filter(|axis| machine_axes.iter().any(|present| present == axis))
+        .collect();
     let mut switch: Option<String> = None;
     let (confirm, cancel) = ui.input_mut(|input| {
         let cancel = input.consume_key(app.prefs.keymap.back.modifiers, app.prefs.keymap.back.key)
@@ -1081,14 +1112,14 @@ fn position_dialog_keys(app: &mut LincApp, ui: &mut Ui) {
         // The axis letters pick which coordinate is being entered. They are
         // taken even while the field holds the keyboard: a position entry never
         // types a letter, and the panel has no Tab to reach the DRO cards with.
+        // Only the axes the tool table carries: an offset for any other axis
+        // would be written into the draft and dropped by the next save.
         for (axis, key) in [
             ("X", egui::Key::X),
             ("Y", egui::Key::Y),
             ("Z", egui::Key::Z),
         ] {
-            if axes.iter().any(|present| present == axis)
-                && input.consume_key(egui::Modifiers::NONE, key)
-            {
+            if axes.contains(&axis) && input.consume_key(egui::Modifiers::NONE, key) {
                 switch = Some(axis.to_string());
             }
         }
@@ -1328,12 +1359,13 @@ fn draw_position_dialog(app: &mut LincApp, ui: &mut Ui) {
 fn table_card(app: &mut LincApp, ui: &mut Ui, visible: &[usize]) {
     let pocket = app.profile.changer.uses_pockets();
     let lathe = app.profile.variant == MachineVariant::Lathe;
+    let offsets = app.profile.machine_ini.tool_offset_columns();
     // The hint row names the configured chord, not a hardcoded one.
     let number_key = app.prefs.keymap.tool_number.label();
     let rows = app.snapshot.tool_table.rows.clone();
     let current_tool = app.snapshot.tool_change.current_tool;
     theme::card(ui, |ui| {
-        let mut columns = column_specs(ui, lathe, pocket);
+        let mut columns = column_specs(ui, lathe, pocket, &offsets);
         ui.horizontal(|ui| {
             theme::section_header(ui, "TOOL TABLE");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1997,7 +2029,24 @@ fn save_tool_row(app: &mut LincApp, tool: u16) {
                 row.geometry.values = linc_core::model::AxisMap::from_entries(remaining);
             }
         }
-        for axis in ["X", "I", "J"] {
+        // Every offset axis the file carries, plus the lathe's angles: the same
+        // loop clears a cell the operator emptied, and it never writes a word
+        // the declared columns would drop again.
+        let mut offsets: Vec<&str> = app
+            .profile
+            .machine_ini
+            .tool_offset_columns()
+            .iter()
+            .map(|column| column.label())
+            // `Z` is the length, written above in both its names.
+            .filter(|axis| *axis != "Z")
+            .collect();
+        for axis in ["I", "J"] {
+            if app.profile.machine_ini.tool_table_columns.contains(axis) {
+                offsets.push(axis);
+            }
+        }
+        for axis in offsets {
             let text = draft.axes.get(axis).cloned().unwrap_or_default();
             match parse_number(&text, axis)? {
                 Some(value) => {

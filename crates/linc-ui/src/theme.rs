@@ -172,6 +172,9 @@ pub fn fit_middle(measure: impl Fn(&str) -> f32, text: &str, room: f32) -> Strin
 /// Shared table geometry: cell padding either side of a measured column.
 pub const CELL_PAD: f32 = 16.0;
 
+/// Inset between a card's painted frame and its content, on every side.
+pub const CARD_MARGIN: f32 = 12.0;
+
 pub fn font_size(base: f32) -> f32 {
     let mut nearest = SVG_RAMP[0];
     for value in SVG_RAMP {
@@ -327,7 +330,7 @@ pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         .fill(PANEL)
         .stroke(Stroke::new(1.0, BORDER))
         .corner_radius(CornerRadius::same(6))
-        .inner_margin(Margin::same(12))
+        .inner_margin(Margin::same(CARD_MARGIN as i8))
         .show(ui, add)
         .inner
 }

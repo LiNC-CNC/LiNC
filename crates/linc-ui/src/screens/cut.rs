@@ -13,29 +13,16 @@
 //! is working, and the card never claims a percentage of anything it cannot
 //! read.
 
-use egui::{FontId, Sense, Ui, Vec2};
+use egui::Ui;
 use linc_core::model::{MachineSnapshot, Positions};
 
+use crate::screens::common::{self, ValueRow};
 use crate::shell::LincApp;
-use crate::theme;
 
 /// Axis letters whose velocity is a linear rate. A joint's velocity arrives in
 /// machine units per second; `A`, `B` and `C` report degrees per second, so
 /// adding one to a feed rate would be adding degrees to millimetres.
 const LINEAR_AXES: [char; 6] = ['X', 'Y', 'Z', 'U', 'V', 'W'];
-
-/// One row of the card, ready to paint.
-struct Row {
-    label: &'static str,
-    /// The rate in force, drawn in the detail face ahead of the value: the
-    /// programmed figure is news only beside the one being run.
-    lead: Option<String>,
-    value: String,
-    units: String,
-    /// A rapid's velocity is not a cut rate, so its number is not painted with
-    /// the same weight as one.
-    muted: bool,
-}
 
 /// What the card shows, computed once per frame from the snapshot.
 #[derive(Debug, Clone, PartialEq)]
@@ -138,30 +125,22 @@ fn commanded_rate(positions: &Positions) -> f64 {
 /// feedback. Same frame, same width, same height, so the row does not move.
 pub fn cut_card(app: &LincApp, ui: &mut Ui, height: f32) {
     let cut = readout(&app.snapshot);
-    theme::card(ui, |ui| {
-        ui.set_min_height((height - 24.0).max(0.0));
-        ui.set_max_height((height - 24.0).max(0.0));
-        ui.set_min_width(ui.available_width());
-        ui.spacing_mut().item_spacing.y = 0.0;
-        theme::section_header(ui, "CUT");
-        let free = (ui.max_rect().bottom() - ui.cursor().top()).max(0.0);
-        let width = ui.available_width();
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, free), Sense::hover());
-        paint_rows(ui, rect, &cut);
-    });
+    let rows = card_rows(&cut);
+    let body = common::value_card(ui, height, "CUT", None);
+    common::paint_value_rows(ui, body, &rows);
 }
 
-fn card_rows(cut: &CutReadout) -> Vec<Row> {
-    let per_rev = cut.per_rev.map(|value| Row {
-        label: "CHIP",
+fn card_rows(cut: &CutReadout) -> Vec<ValueRow> {
+    let per_rev = cut.per_rev.map(|value| ValueRow {
+        label: "CHIP".into(),
         lead: None,
         value: format!("{:.*}", cut.per_rev_digits, value),
         units: format!("{}/rev", cut.units),
         muted: false,
     });
     vec![
-        Row {
-            label: "FEED",
+        ValueRow {
+            label: "FEED".into(),
             lead: cut
                 .lead
                 .map(|rate| format!("{:.*} →", cut.lead_digits, rate)),
@@ -173,97 +152,21 @@ fn card_rows(cut: &CutReadout) -> Vec<Row> {
         },
         // A mode with no per-revolution figure keeps its row: an absent number
         // is what the mode means, and a missing row would read as a bug.
-        per_rev.unwrap_or(Row {
-            label: "CHIP",
+        per_rev.unwrap_or(ValueRow {
+            label: "CHIP".into(),
             lead: None,
             value: "—".into(),
             units: String::new(),
             muted: true,
         }),
-        Row {
-            label: "RAPID",
+        ValueRow {
+            label: "RAPID".into(),
             lead: None,
             value: format!("{:.0}", cut.rapid_override * 100.0),
             units: "%".into(),
             muted: false,
         },
     ]
-}
-
-fn paint_rows(ui: &Ui, rect: egui::Rect, cut: &CutReadout) {
-    let label_font = FontId::monospace(theme::font_size(9.0));
-    let value_font = FontId::monospace(theme::font_size(11.0));
-    let rows = card_rows(cut);
-    // The row is as tall as its own text at the current zoom, never less than
-    // the meter height beside it, so a scaled-up display does not stack the
-    // rows into each other.
-    let row_height = ui
-        .fonts_mut(|fonts| fonts.row_height(&value_font))
-        .max(16.0);
-    // Centre the block: the card is as tall as the feed block beside it, and a
-    // three-row card stacked under the title would otherwise leave its slack
-    // as one gap at the bottom.
-    let lead = ((rect.height() - rows.len() as f32 * row_height) / 2.0).max(0.0);
-    let painter = ui.painter_at(rect);
-    for (index, row) in rows.iter().enumerate() {
-        let y = rect.top() + lead + (index as f32 + 0.5) * row_height;
-        painter.text(
-            egui::pos2(rect.left(), y),
-            egui::Align2::LEFT_CENTER,
-            row.label,
-            label_font.clone(),
-            theme::MUTED,
-        );
-        // The units take the right end and the value sits left of them, so the
-        // figures of every row form one column whatever their units are.
-        let mut value_right = rect.right();
-        if !row.units.is_empty() {
-            let width = text_width(ui, &row.units, &label_font);
-            painter.text(
-                egui::pos2(rect.right(), y),
-                egui::Align2::RIGHT_CENTER,
-                &row.units,
-                label_font.clone(),
-                theme::SUCCESS,
-            );
-            value_right -= width + 5.0;
-        }
-        let value_color = if row.muted { theme::MUTED } else { theme::FG };
-        painter.text(
-            egui::pos2(value_right, y),
-            egui::Align2::RIGHT_CENTER,
-            &row.value,
-            value_font.clone(),
-            value_color,
-        );
-        // The rate in force is dropped whole when it would touch the label, the
-        // same rule the DRO line uses for its machine coordinate: a truncated
-        // number is worse than no number.
-        let Some(lead_text) = row.lead.as_ref() else {
-            continue;
-        };
-        let lead_width = text_width(ui, lead_text, &label_font);
-        let label_width = text_width(ui, row.label, &label_font) + 10.0;
-        let x = value_right - text_width(ui, &row.value, &value_font) - 5.0;
-        if x - lead_width >= rect.left() + label_width {
-            painter.text(
-                egui::pos2(x, y),
-                egui::Align2::RIGHT_CENTER,
-                lead_text,
-                label_font.clone(),
-                theme::MUTED,
-            );
-        }
-    }
-}
-
-fn text_width(ui: &Ui, text: &str, font: &FontId) -> f32 {
-    ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(text.to_string(), font.clone(), theme::FG)
-            .size()
-            .x
-    })
 }
 
 #[cfg(test)]

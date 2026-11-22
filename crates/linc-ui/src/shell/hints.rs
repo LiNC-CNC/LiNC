@@ -239,6 +239,20 @@ impl LincApp {
                         ShortcutCommand::ToggleFollowingError,
                     ),
                 ];
+                // A second press of the key that opened MAIN swaps the whole
+                // dashboard in AUTO and MDI. The hint names what the next press
+                // brings, like the square's does, and is absent where the key
+                // has one meaning.
+                if self.main_alternate_available() {
+                    view_items.push(Shortcut::hint(
+                        k.machine.label(),
+                        if self.main_view == MainView::Coordinates {
+                            "DASHBOARD"
+                        } else {
+                            "COORDS"
+                        },
+                    ));
+                }
                 // The MDI input owns Ctrl+Up/Down for its buffer-line move and
                 // Ctrl+Left/Right for word moves, so the toolpath's pan hint
                 // would be false while the pane is up.

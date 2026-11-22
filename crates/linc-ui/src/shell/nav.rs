@@ -283,10 +283,45 @@ impl LincApp {
     /// front.
     pub fn request_mode_page(&mut self) {
         let page = self.mode_screen();
+        if page == Page::Machine {
+            // The mode's page is MAIN, so this press can carry a second meaning:
+            // the dashboard it already opened.
+            self.request_machine_page();
+            return;
+        }
         if page == self.nav.page {
             return;
         }
         self.request_page(page);
+    }
+
+    /// `MAIN` on MAIN, from the key or the navigation row.
+    ///
+    /// AUTO and MDI are the two modes whose screen is the dashboard, and the
+    /// dashboard has two faces there: the default one and the coordinate
+    /// matrix. A press that lands on the page anyway walks them. Everywhere
+    /// else a press only opens MAIN, because those modes have their own page
+    /// and their own numbers.
+    pub fn request_machine_page(&mut self) {
+        if self.nav.page != Page::Machine {
+            self.request_page(Page::Machine);
+            return;
+        }
+        if self.main_alternate_available() {
+            self.main_view = self.main_view.flipped();
+        }
+    }
+
+    /// True in the modes whose screen MAIN is, which are the modes the
+    /// alternate dashboard exists in, on the machine whose screen has a toolpath
+    /// to replace. An unknown, zero or offline mode answers false: the matrix
+    /// would be a guess about a machine the shell cannot see.
+    pub fn main_alternate_available(&self) -> bool {
+        self.profile.variant != MachineVariant::Lathe
+            && matches!(
+                self.snapshot.panel.mode.mode(),
+                Some(PanelMode::Auto) | Some(PanelMode::Mdi)
+            )
     }
 
     pub fn set_page(&mut self, page: Page) {
@@ -327,6 +362,12 @@ impl LincApp {
         }
         if !page.is_mode_driven() {
             self.nav.last_non_mode_page = page;
+        }
+        // Entering MAIN is a fresh look at the dashboard: the alternate view is
+        // something the operator asked for on the page, not a setting that
+        // follows them back from another screen.
+        if page == Page::Machine && self.nav.page != Page::Machine {
+            self.main_view = MainView::default();
         }
         self.nav.page = page;
         self.nav.focus_region = FocusRegion::Page;
@@ -429,7 +470,10 @@ impl LincApp {
     /// meaning, which for OFFSETS is the probe route above and for DIAG is the
     /// tab cycle.
     pub(super) fn request_nav_page(&mut self, page: Page) {
-        if page == Page::Offsets {
+        if page == Page::Machine {
+            // The MAIN row carries the dashboard cycle, like the F5 key.
+            self.request_machine_page();
+        } else if page == Page::Offsets {
             self.request_offsets();
         } else if page == Page::Diagnostics {
             self.request_diagnostics();
@@ -486,6 +530,12 @@ impl LincApp {
             }
             return;
         };
+        // The alternate dashboard belongs to AUTO and MDI. Leaving them puts the
+        // default one back, so returning to AUTO starts where the operator left
+        // MAIN rather than in a view they no longer remember choosing.
+        if !matches!(new_mode, PanelMode::Auto | PanelMode::Mdi) {
+            self.main_view = MainView::default();
+        }
         let prior_mode = self
             .nav
             .last_mode
