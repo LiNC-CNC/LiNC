@@ -6,7 +6,7 @@
 //! row carries: half the `D` diameter on a mill, the `R` nose radius on a lathe.
 //!
 //! Two cards draw this readout. MAIN's bottom strip shows it beside FEED and
-//! CUT, and the alternate dashboard's TOOL LENGTH OFFSET card shows the same
+//! CUT, and the alternate dashboard's TOOL OFFSETS card shows the same
 //! numbers in the larger type the coordinate matrix uses, so the two cannot
 //! disagree about what the loaded tool is.
 

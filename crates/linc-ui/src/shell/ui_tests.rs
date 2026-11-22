@@ -2592,7 +2592,7 @@ fn the_alternate_main_dashboard_replaces_the_toolpath_with_four_cards() {
         "WORK COORDINATES",
         "MACHINE COORDINATES",
         "DISTANCE TO GO",
-        "TOOL LENGTH OFFSET",
+        "TOOL OFFSETS",
     ] {
         assert!(
             matrix.iter().any(|text| text == title),
@@ -2613,7 +2613,7 @@ fn the_alternate_main_dashboard_replaces_the_toolpath_with_four_cards() {
         matrix.iter().any(|text| text == "FEED / SPINDLE"),
         "the feed strip stays: {matrix:?}"
     );
-    // The matrix's own TOOL LENGTH OFFSET card is the readout here, so the strip
+    // The matrix's own TOOL OFFSETS card is the readout here, so the strip
     // does not repeat it in a second, smaller card.
     assert!(
         !matrix.iter().any(|text| text == "TLO"),
@@ -2644,7 +2644,7 @@ fn the_alternate_main_dashboard_replaces_the_toolpath_with_four_cards() {
         "WORK COORDINATES",
         "MACHINE COORDINATES",
         "DISTANCE TO GO",
-        "TOOL LENGTH OFFSET",
+        "TOOL OFFSETS",
     ] {
         let (_, text) = painted
             .iter()

@@ -491,7 +491,7 @@ Default page. The layout is selected by `machine.gui`.
   list does the same. The alternate view drops the axis cards and the toolpath
   and fills their column with four cards: `WORK COORDINATES`, named with the
   active WCS (`G54` …); `MACHINE COORDINATES`; `DISTANCE TO GO`; and
-  `TOOL LENGTH OFFSET`, the loaded tool's offsets plus the radius cutter
+  `TOOL OFFSETS`, the loaded tool's offsets plus the radius cutter
   compensation uses. The coordinate cards list every configured axis at the
   DRO's size, axis letter in the DRO's label colour; the TLO card lists the
   offsets `TOOL_TABLE_COLUMNS` declares, and shows a dash for one the tool's row
@@ -569,7 +569,7 @@ Default page. The layout is selected by `machine.gui`.
   when `CUT` is the card drawn, the slot is split: `CUT` takes a third of it and
   `TLO` the rest, the loaded tool's offsets (one row per offset
   `TOOL_TABLE_COLUMNS` declares, then `RAD` for its radius) — the offsets `G43`
-  applies. The alternate dashboard omits it there: its `TOOL LENGTH OFFSET` card
+  applies. The alternate dashboard omits it there: its `TOOL OFFSETS` card
   is the same readout, so `CUT` keeps the half the meters use. Controller
   messages are
   not a pane: `M`

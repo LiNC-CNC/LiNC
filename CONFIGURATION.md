@@ -654,7 +654,7 @@ other. `TLO` carries one row per offset the tool table declares
 offsets `G43` applies to the loaded tool, so the strip says what the machine is
 adding to the position it is showing. A table that names only Z gets one row and
 the card stays short. The alternate dashboard has no `TLO` in the strip: its own
-`TOOL LENGTH OFFSET` card carries the same readout, and `CUT` keeps the half the
+`TOOL OFFSETS` card carries the same readout, and `CUT` keeps the half the
 meters use.
 
 ### The second MAIN dashboard
@@ -671,10 +671,10 @@ carry their own coordinates.
 | view | what it shows |
 | --- | --- |
 | default | axis DRO cards, the toolpath, and the feed strip under it |
-| alternate | four cards in place of both: `WORK COORDINATES` (with the active WCS, `G54` …), `MACHINE COORDINATES`, `DISTANCE TO GO`, `TOOL LENGTH OFFSET` |
+| alternate | four cards in place of both: `WORK COORDINATES` (with the active WCS, `G54` …), `MACHINE COORDINATES`, `DISTANCE TO GO`, `TOOL OFFSETS` |
 
 The coordinate cards list every axis the INI configures, at the DRO's own size,
-with the axis letter in the DRO's label colour. `TOOL LENGTH OFFSET` lists the
+with the axis letter in the DRO's label colour. `TOOL OFFSETS` lists the
 offsets the tool table declares — `TOOL_TABLE_COLUMNS = TXYZDR` gives X, Y and Z,
 `TZDR` gives Z alone — and ends with the radius cutter compensation uses: half
 the `D` diameter on a mill, the `R` nose radius on a lathe. An offset the tool's

@@ -332,7 +332,7 @@ fn coordinate_matrix(app: &LincApp, ui: &mut Ui, width: f32, height: f32) {
             matrix_card(
                 ui,
                 cell,
-                "TOOL LENGTH OFFSET",
+                "TOOL OFFSETS",
                 Some(format!("T{}", lengths.tool)),
                 &tool,
             );
