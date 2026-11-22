@@ -15,8 +15,10 @@ use crate::types::{Capsule, Sphere, P3};
 
 /// Ball radius used when neither the tool table nor the config gives one.
 pub const DEFAULT_PROBE_TIP_RADIUS_MM: f64 = 1.5;
-/// Columns assumed when the INI declares none.
-pub const DEFAULT_TOOL_TABLE_COLUMNS: &str = "TZDR";
+/// Columns assumed when the INI declares none. The mill's table carries X and Y
+/// tool offsets beside the Z length, which is the same set `configs/sim.ini`
+/// names for the controller.
+pub const DEFAULT_TOOL_TABLE_COLUMNS: &str = "TXYZDR";
 
 /// The probe, as the tool table and config describe it.
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -128,6 +128,9 @@ impl ToolTable {
                     ToolColumn::X => {
                         geometry.values.insert("X", *value);
                     }
+                    ToolColumn::Y => {
+                        geometry.values.insert("Y", *value);
+                    }
                     ToolColumn::I => geometry.front_angle = Some(*value),
                     ToolColumn::J => geometry.back_angle = Some(*value),
                     ToolColumn::Q => geometry.orientation = Some(*value as u8),
@@ -550,6 +553,38 @@ mod tests {
         assert_eq!(table.rows[0].geometry.back_angle, Some(10.0));
         assert_eq!(table.rows[0].geometry.diameter, Some(0.0625));
         assert_eq!(table.rows[0].geometry.orientation, Some(2));
+    }
+
+    /// The mill table now carries X and Y beside Z, so the words have to come
+    /// back out of a save: the file is what LinuxCNC reads, and G43 applies the
+    /// offset of every axis the table describes.
+    #[test]
+    fn x_and_y_tool_offsets_survive_a_round_trip() {
+        let text = "T1 P0 X+12.5 Y-3.25 Z-56.068 D+6 ; offset mill\n";
+        let table = ToolTable::parse(
+            Path::new("tool.tbl"),
+            text,
+            "TXYZDR",
+            ToolChangerKind::Manual,
+        )
+        .unwrap();
+        let row = &table.rows[0];
+        assert_eq!(row.geometry.values.get("X"), Some(&12.5));
+        assert_eq!(row.geometry.values.get("Y"), Some(&-3.25));
+        assert_eq!(row.geometry.length, Some(-56.068));
+
+        let rendered = table.render();
+        assert!(rendered.contains("X+12.5"), "{rendered}");
+        assert!(rendered.contains("Y-3.25"), "{rendered}");
+        // A machine that lists the columns but has no offset for an axis keeps
+        // the row as it was: no word, which LinuxCNC reads as zero.
+        let mut bare = ToolRow::new(2);
+        bare.geometry.length = Some(0.0);
+        let columns = [ToolColumn::T, ToolColumn::X, ToolColumn::Y, ToolColumn::Z];
+        let line = render_row(&bare, &columns);
+        assert!(line.contains("Z+0"), "{line}");
+        assert!(!line.contains('X'), "{line}");
+        assert!(!line.contains('Y'), "{line}");
     }
 
     /// The `Z` column is written from the length, the field the HMI edits, so a

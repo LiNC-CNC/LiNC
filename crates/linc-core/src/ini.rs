@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::model::ToolColumn;
+
 #[derive(Debug, Error)]
 pub enum IniError {
     #[error("cannot read INI {path}: {source}")]
@@ -405,6 +407,41 @@ impl MachineIni {
         self.axes.iter().map(|axis| axis.name.clone()).collect()
     }
 
+    /// The tool-offset axes the tool table declares, in `TOOL_TABLE_COLUMNS`
+    /// order.
+    ///
+    /// The words in the file are the words LinuxCNC applies on `G43`, so this is
+    /// what the HMI shows: a table that names X and Y gets those columns and the
+    /// same rows in the TLO readouts, and one that names only Z gets neither. An
+    /// INI without a columns line reads as `TZDR`, the default the loader uses.
+    ///
+    /// The lathe's `I`/`J` (front and back angle) and `Q` (orientation) are tool
+    /// geometry, not axis offsets, so they are not listed here.
+    pub fn tool_offset_columns(&self) -> Vec<ToolColumn> {
+        let mut columns: Vec<ToolColumn> = Vec::new();
+        for character in self.tool_table_columns.chars() {
+            let Some(column) = ToolColumn::parse(character) else {
+                continue;
+            };
+            let is_offset_axis = matches!(
+                column,
+                ToolColumn::X
+                    | ToolColumn::Y
+                    | ToolColumn::Z
+                    | ToolColumn::A
+                    | ToolColumn::B
+                    | ToolColumn::C
+                    | ToolColumn::U
+                    | ToolColumn::V
+                    | ToolColumn::W
+            );
+            if is_offset_axis && !columns.contains(&column) {
+                columns.push(column);
+            }
+        }
+        columns
+    }
+
     pub fn axis(&self, name: &str) -> Option<&AxisIni> {
         self.axes.iter().find(|axis| axis.name == name)
     }
@@ -508,6 +545,39 @@ HOME_USE_INDEX = YES
                 (".01mm".to_string(), 0.01),
             ]
         );
+    }
+
+    /// The offsets the tool table declares are the ones the HMI shows, so a
+    /// mill table with X and Y gets three columns and one that names only Z gets
+    /// one. The lathe's angles are not axis offsets and stay out of it.
+    #[test]
+    fn the_tool_offset_axes_are_the_ones_the_table_declares() {
+        let columns = |line: Option<&str>| {
+            // SIM names TZDR in [DISPLAY], which the loader reads first, so the
+            // wanted line replaces it rather than being appended beside it.
+            let text = match line {
+                Some(line) => SIM.replace(
+                    "TOOL_TABLE_COLUMNS = TZDR",
+                    &format!("TOOL_TABLE_COLUMNS = {line}"),
+                ),
+                None => SIM.replace("TOOL_TABLE_COLUMNS = TZDR\n", ""),
+            };
+            MachineIni::parse(Path::new("/tmp/machine/probe_basic.ini"), &text)
+                .unwrap()
+                .tool_offset_columns()
+        };
+        assert_eq!(
+            columns(Some("TXYZDR")),
+            [ToolColumn::X, ToolColumn::Y, ToolColumn::Z]
+        );
+        assert_eq!(columns(Some("TPZDR")), [ToolColumn::Z]);
+        assert_eq!(columns(Some("TPXZIJDQR")), [ToolColumn::X, ToolColumn::Z]);
+        // Rotary and dual-column offsets are axes too.
+        assert_eq!(columns(Some("TAWDR")), [ToolColumn::A, ToolColumn::W]);
+        // A table with no offset words shows no offset rows, and a table with no
+        // columns line reads as the loader's own default.
+        assert!(columns(Some("TDR")).is_empty());
+        assert_eq!(columns(None), [ToolColumn::Z]);
     }
 
     /// `[SPINDLE_0]INCREMENT` is what LinuxCNC adds per `+`/`-` step, and the
