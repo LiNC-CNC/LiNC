@@ -10,6 +10,17 @@ impl LincApp {
         self.prefs.dirty = true;
     }
 
+    /// The MAIN dashboard the operator chose, so the next session opens where
+    /// this one left off. Only MAIN in AUTO or MDI offers the alternate view, so
+    /// the choice is stored untouched by the modes that have no second face.
+    pub(super) fn remember_main_view(&mut self, view: MainView) {
+        let key = view.key();
+        if self.prefs.preferences.main_view.as_deref() != Some(key) {
+            self.prefs.preferences.main_view = Some(key.to_string());
+            self.prefs.dirty = true;
+        }
+    }
+
     pub(super) fn remember_program_view(&mut self, view: ProgramView) {
         let key = match view {
             ProgramView::Split => "split",

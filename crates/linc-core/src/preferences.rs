@@ -46,6 +46,13 @@ pub struct Preferences {
     /// `split` or `code`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program_view: Option<String>,
+    /// Which MAIN dashboard the operator last chose: `dashboard` (the axis
+    /// readouts and the toolpath) or `coordinates` (the coordinate matrix). The
+    /// alternate view is only offered in AUTO and MDI, so this is a view
+    /// preference and never machine data; a file written before it existed reads
+    /// as the default dashboard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main_view: Option<String>,
     /// `iso3d`, `xy`, `xz` or `lathe`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub toolpath_view: Option<String>,

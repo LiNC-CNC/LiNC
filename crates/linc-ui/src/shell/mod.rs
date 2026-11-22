@@ -263,7 +263,14 @@ impl LincApp {
                 ..Default::default()
             },
             design_scale: configured_scale,
-            main_view: MainView::default(),
+            // The dashboard the operator last chose, so a restart opens on it.
+            // An unknown or absent key (a file written before this preference
+            // existed) reads as the default one.
+            main_view: preferences
+                .main_view
+                .as_deref()
+                .and_then(MainView::from_key)
+                .unwrap_or_default(),
             diag_bus: None,
             fps: 0.0,
             nav: NavUi {

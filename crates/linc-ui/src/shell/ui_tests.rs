@@ -2671,56 +2671,97 @@ fn the_alternate_main_dashboard_replaces_the_toolpath_with_four_cards() {
     );
 }
 
-/// MAIN on MAIN walks the two dashboards in the modes whose screen MAIN is.
-/// Everywhere else a press only opens MAIN, and the alternate view is not
-/// offered at all.
+/// MAIN on MAIN walks the two dashboards in the modes whose screen MAIN is, and
+/// the choice is the operator's: it is stored, so the next start opens the
+/// dashboard they left, and a trip through another page or another mode does not
+/// undo it.
 #[test]
-fn main_walks_the_two_dashboards_only_where_the_dashboard_lives() {
+fn main_walks_the_two_dashboards_and_remembers_the_choice() {
     let (_dir, mut app) = make_app(PanelMode::Auto);
     assert_eq!(app.nav.page, Page::Machine);
     assert_eq!(app.main_view, MainView::Dashboard);
+    // A press on the page MAIN already opened walks it, and stores the choice.
     app.request_mode_page();
+    assert_eq!(app.main_view, MainView::Coordinates);
     assert_eq!(
-        app.main_view,
-        MainView::Coordinates,
-        "the second press shows the matrix"
+        app.prefs.preferences.main_view.as_deref(),
+        Some("coordinates"),
+        "the choice is a preference, not session state"
     );
     app.request_mode_page();
-    assert_eq!(app.main_view, MainView::Dashboard, "and the third is back");
+    assert_eq!(app.main_view, MainView::Dashboard);
+    assert_eq!(
+        app.prefs.preferences.main_view.as_deref(),
+        Some("dashboard")
+    );
     // The MAIN row in the sidebar carries the same cycle as the key.
     app.request_nav_page(Page::Machine);
     assert_eq!(app.main_view, MainView::Coordinates);
-    // A press from another page opens MAIN in the default view, not in the one
-    // it was last left in.
+
+    // Leaving MAIN and coming back shows what was chosen.
     app.set_page(Page::Tools);
     app.request_mode_page();
     assert_eq!(app.nav.page, Page::Machine);
-    assert_eq!(app.main_view, MainView::Dashboard);
+    assert_eq!(app.main_view, MainView::Coordinates);
 
-    // MDI has the same pair: its screen is MAIN too.
+    // MDI is the other mode whose screen MAIN is, so the pair is offered there
+    // too and the stored choice follows the mode.
     switch_mode(&mut app, PanelMode::Mdi);
-    app.request_mode_page();
     assert_eq!(app.main_view, MainView::Coordinates);
-
-    // JOG has its own page, and the alternate dashboard would be a guess on a
-    // screen that is not the run's.
-    switch_mode(&mut app, PanelMode::Jog);
-    app.set_page(Page::Machine);
+    app.request_mode_page();
     assert_eq!(app.main_view, MainView::Dashboard);
-    app.request_nav_page(Page::Machine);
-    assert_eq!(app.main_view, MainView::Dashboard, "no cycle in JOG");
-
-    // Leaving AUTO or MDI drops the alternate view rather than keeping it for
-    // the next visit.
-    switch_mode(&mut app, PanelMode::Auto);
     app.request_mode_page();
     assert_eq!(app.main_view, MainView::Coordinates);
+
+    // JOG has its own page and no second face: the press opens MAIN and stops,
+    // and the stored choice is not thrown away by the trip.
+    switch_mode(&mut app, PanelMode::Jog);
+    app.request_machine_page();
+    assert_eq!(app.nav.page, Page::Machine);
+    assert_eq!(app.main_view, MainView::Coordinates, "no cycle in JOG");
+    assert_eq!(
+        app.prefs.preferences.main_view.as_deref(),
+        Some("coordinates")
+    );
+
+    // A mode whose screen is not MAIN keeps its single meaning, and coming back
+    // to AUTO restores the chosen dashboard.
     switch_mode(&mut app, PanelMode::Edit);
     switch_mode(&mut app, PanelMode::Auto);
+    assert_eq!(app.main_view, MainView::Coordinates);
+}
+
+/// The chosen dashboard is written to the preferences file, so a restart opens
+/// where the operator left off.
+#[test]
+fn the_chosen_dashboard_outlives_the_session() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.request_mode_page();
+    assert_eq!(harness.app.main_view, MainView::Coordinates);
+    harness.app.save_preferences(true);
+    let text = std::fs::read_to_string(&harness.app.profile.preferences_path).unwrap();
+    assert!(
+        text.contains("main_view = \"coordinates\""),
+        "the choice is in the preferences file: {text}"
+    );
+
+    // A fresh app from the same profile opens on it.
+    let profile = harness.app.profile.clone();
+    let ctx = egui::Context::default();
+    let mut slot = None;
+    let mut profile_slot = Some(profile);
+    let mut output = ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+        let profile = profile_slot.take().expect("one pass");
+        let backend = Box::new(LocalBackend::new(profile.clone(), PanelMode::Auto));
+        slot = Some(LincApp::new(profile, backend, ui.ctx()));
+    });
+    output.textures_delta.clear();
+    let reloaded = slot.expect("one app");
+    assert_eq!(reloaded.nav.page, Page::Machine);
     assert_eq!(
-        app.main_view,
-        MainView::Dashboard,
-        "a trip through EDIT forgets the matrix"
+        reloaded.main_view,
+        MainView::Coordinates,
+        "the next start opens the dashboard that was left"
     );
 }
 

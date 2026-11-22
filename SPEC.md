@@ -495,11 +495,11 @@ Default page. The layout is selected by `machine.gui`.
   compensation uses. The coordinate cards list every configured axis at the
   DRO's size, axis letter in the DRO's label colour; the TLO card lists the
   offsets `TOOL_TABLE_COLUMNS` declares, and shows a dash for one the tool's row
-  does not carry (LinuxCNC reads a missing word as zero). The feed
-  strip and the program or MDI card keep their places. The view is not
-  remembered: entering MAIN from another page, leaving AUTO/MDI, or a mode
-  whose screen is not MAIN keeps the default one, and EDIT/JOG/INC/MPG/HOME
-  keep the key's single meaning.
+  does not carry (LinuxCNC reads a missing word as zero). The feed strip and
+  the program or MDI card keep their places. The choice is a preference
+  (`main_view` in the preferences file), so the next start opens the dashboard
+  the operator left and a page or mode change does not undo it; only AUTO and
+  MDI offer the cycle, and EDIT/JOG/INC/MPG/HOME keep the key's single meaning.
 - Large 3D toolpath: stock, loaded program path, live tool trail in a distinct
   color, rapid path, tool marker, axes, zoom, program/machine bounds and
   selected-line highlight. `CLEAR TRAIL` clears only the live trail.

@@ -309,6 +309,9 @@ impl LincApp {
         }
         if self.main_alternate_available() {
             self.main_view = self.main_view.flipped();
+            // The choice is the operator's, so it outlives the session: the next
+            // start opens the dashboard they left.
+            self.remember_main_view(self.main_view);
         }
     }
 
@@ -362,12 +365,6 @@ impl LincApp {
         }
         if !page.is_mode_driven() {
             self.nav.last_non_mode_page = page;
-        }
-        // Entering MAIN is a fresh look at the dashboard: the alternate view is
-        // something the operator asked for on the page, not a setting that
-        // follows them back from another screen.
-        if page == Page::Machine && self.nav.page != Page::Machine {
-            self.main_view = MainView::default();
         }
         self.nav.page = page;
         self.nav.focus_region = FocusRegion::Page;
@@ -530,12 +527,6 @@ impl LincApp {
             }
             return;
         };
-        // The alternate dashboard belongs to AUTO and MDI. Leaving them puts the
-        // default one back, so returning to AUTO starts where the operator left
-        // MAIN rather than in a view they no longer remember choosing.
-        if !matches!(new_mode, PanelMode::Auto | PanelMode::Mdi) {
-            self.main_view = MainView::default();
-        }
         let prior_mode = self
             .nav
             .last_mode

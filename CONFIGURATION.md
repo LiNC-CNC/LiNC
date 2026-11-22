@@ -501,9 +501,10 @@ Runtime UI state is stored separately:
 ```
 
 Allowed preference keys include window geometry, last page, program view,
-toolpath view angle, recent files, visible panels, per-tool type labels
-(`tool_kinds`, LiNC-only because the LinuxCNC tool table has no type column),
-and typed probing feeds, clearances, feature hints and UI mode (`probe`).
+toolpath view angle, the MAIN dashboard in front (`main_view`), recent files,
+visible panels, per-tool type labels (`tool_kinds`, LiNC-only because the
+LinuxCNC tool table has no type column), and typed probing feeds, clearances,
+feature hints and UI mode (`probe`).
 Probe enablement and tool identity remain profile-owned; the measured `#3032`
 calibration offset remains controller-owned and is synchronized after a run.
 Machine identity, HAL pins, safety flags and the LinuxCNC INI path are never
@@ -660,10 +661,12 @@ meters use.
 
 MAIN is the screen AUTO and MDI own. In those two modes it has a second face,
 and `MAIN` pressed again while the page is already in front walks between them —
-the `F5` key and the MAIN row in the navigation list do the same thing. It is
-not a preference: any other page opens MAIN in the default view, leaving AUTO or
-MDI puts the default one back, and in EDIT, JOG/INC/MPG and HOME the key keeps
-its single meaning, because those screens carry their own coordinates.
+the `F5` key and the MAIN row in the navigation list do the same thing. The
+choice is remembered like the toolpath view: it is written to the preferences
+file, so the next start opens the dashboard the operator left, and a page or
+mode change does not undo it. Only AUTO and MDI offer the cycle; in EDIT,
+JOG/INC/MPG and HOME the key keeps its single meaning, because those screens
+carry their own coordinates.
 
 | view | what it shows |
 | --- | --- |

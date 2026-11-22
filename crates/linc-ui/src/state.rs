@@ -106,6 +106,23 @@ impl MainView {
             Self::Coordinates => Self::Dashboard,
         }
     }
+
+    /// The preferences key. Stored as a name, not as a variant index, so the
+    /// file stays readable and an unknown name reads as the default.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Dashboard => "dashboard",
+            Self::Coordinates => "coordinates",
+        }
+    }
+
+    pub fn from_key(value: &str) -> Option<Self> {
+        match value {
+            "dashboard" => Some(Self::Dashboard),
+            "coordinates" => Some(Self::Coordinates),
+            _ => None,
+        }
+    }
 }
 
 /// A command a sidebar SHORTCUTS row runs when it is clicked.
