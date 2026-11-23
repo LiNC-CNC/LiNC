@@ -1559,6 +1559,15 @@ impl CycleClock {
             .map(|seconds| (seconds * 1000.0).round() as u64)
     }
 
+    /// The estimate for the whole program: the time already run plus what the
+    /// estimate says is left. The bar reads this rather than the remainder,
+    /// because "how long is this job" is the question a cycle clock answers, and
+    /// it should not need the operator to add two figures on a moving target.
+    pub fn total_ms(&self) -> Option<u64> {
+        self.remaining_ms()
+            .map(|remaining| self.elapsed_ms().saturating_add(remaining))
+    }
+
     /// Whether this loaded program has been run. Before the first cycle start
     /// the bar keeps the line count; once there is a clock, that is the wider
     /// and more useful claim.
@@ -4194,6 +4203,7 @@ mod loop_readout_tests {
         );
         assert_eq!(clock.elapsed_ms(), 10_000);
         assert_eq!(clock.remaining_ms(), Some(10_000));
+        assert_eq!(clock.total_ms(), Some(20_000));
     }
 
     #[test]

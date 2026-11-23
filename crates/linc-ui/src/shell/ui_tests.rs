@@ -243,6 +243,11 @@ fn the_status_bar_promises_the_plan_a_running_program_bit_into() {
         Some(12_000),
         "both cuts at their planned six seconds"
     );
+    assert_eq!(
+        app.program.cycle.total_ms(),
+        Some(12_000),
+        "nothing has run yet, so the total is all of what is left"
+    );
     let fields: Vec<String> = app
         .status_fields()
         .into_iter()

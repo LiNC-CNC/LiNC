@@ -261,11 +261,12 @@ pub fn state_label(power: MachinePower) -> &'static str {
     power.label()
 }
 
-/// The bottom bar's program clock: elapsed cycle time, and the estimate to
-/// program end while the machine is cutting. `H:MM:SS`, not a clock time, so it
+/// The bottom bar's program clock: elapsed cycle time, and the estimate for the
+/// whole program while the machine is cutting. `H:MM:SS`, not a clock time, so it
 /// cannot be mistaken for the time of day, and the estimate carries a `~`:
 /// it is a model of the moves left, measured against the run so far, not the
-/// controller's own count.
+/// controller's own count. The second figure is the total, not the remainder:
+/// a job is planned, not counted down.
 fn format_cycle_time(ms: u64) -> String {
     let seconds = ms / 1000;
     format!(
@@ -276,14 +277,15 @@ fn format_cycle_time(ms: u64) -> String {
     )
 }
 
-fn cycle_field(elapsed_ms: u64, remaining_ms: Option<u64>) -> String {
-    // Elapsed over remaining, the way a clock is written: `CYCLE 0:01:12 /
-    // ~0:03:40`. The tilde keeps the second figure honest as an estimate, and the
-    // slash says which is which without spending a word of the bar on a label.
+fn cycle_field(elapsed_ms: u64, total_ms: Option<u64>) -> String {
+    // Elapsed over total, the way a clock is written: `CYCLE 0:01:12 /
+    // ~0:04:52`. The tilde keeps the second figure honest as an estimate (the
+    // elapsed half is measured, the rest is modelled), and the slash says which
+    // is which without spending a word of the bar on a label.
     let mut text = format!("CYCLE {}", format_cycle_time(elapsed_ms));
-    if let Some(remaining) = remaining_ms {
+    if let Some(total) = total_ms {
         text.push_str(" / ~");
-        text.push_str(&format_cycle_time(remaining));
+        text.push_str(&format_cycle_time(total));
     }
     text
 }
@@ -502,7 +504,7 @@ impl LincApp {
                     "{percent}%  {}",
                     cycle_field(
                         self.program.cycle.elapsed_ms(),
-                        self.program.cycle.remaining_ms()
+                        self.program.cycle.total_ms()
                     )
                 )
             } else {
@@ -564,6 +566,16 @@ mod tests {
         assert_eq!(
             cycle_field(12_000, Some(3_723_000)),
             "CYCLE 0:00:12 / ~1:02:03"
+        );
+    }
+
+    #[test]
+    fn the_cycle_field_pairs_the_elapsed_time_with_the_total_estimate() {
+        // The pair comes from the clock, which adds the remainder to the run:
+        // 1:12 run, 3:40 left, so the job reads as 4:52 in all.
+        assert_eq!(
+            cycle_field(72_000, Some(292_000)),
+            "CYCLE 0:01:12 / ~0:04:52"
         );
     }
 
