@@ -104,6 +104,13 @@ the pin exists at all.
 
 - `hal.allowed_outputs` must equal `LincOutput::ALLOWED` exactly, in order (`config.rs` compares the vectors). Adding an output means updating the enum,
   `ALLOWED`, `LincHal::new`, `configs/base.toml`, the post-GUI net and tests.
+- A HAL function needs three lines, never two: `loadrt … names=<instance>`, the `net` that uses it, and
+  `addf <instance> <thread>`. A function that is created and netted but not added is never called, so its output
+  stays at its initial value for ever and no error is raised: `and2.<gate>.time` is the only proof it runs.
+  `crates/linc-core/tests/program_gate_hal.rs` asserts every `and2` these HAL files create is in a thread.
+- Every `LincOutput` a UI path writes must be published by something: the writer call itself, or the backend loop
+  reading `snapshot.hal.<field>` (`hmi-alive`, `status-display`, `machine-off`, `net-safe`, `program-ok`). A variant
+  parked in a "the worker owns these" arm that no worker handles is dropped without a trace.
 - Never add a generic HAL write. `SetHalOutput`/`HalWriter` take the closed `LincOutput` enum; arbitrary pin names are not representable.
 - `linc.*` pins exist only after the GUI starts. Put every `linc.*` net in `hal/linc-postgui.hal` (`hal/linc-sim-postgui.hal` for sim), never
   `hal/linc.hal`. `linc-display.sh` waits for `linc.status-display`, then loads it.

@@ -23,3 +23,4 @@ Problem, Symptoms, What Didn't Work, Solution, Why This Works, Prevention.
 
 - [Saving a program must reopen it, or AUTO runs the pre-edit text](integration-issues/linuxcnc-save-must-reopen-program.md)
 - [Recovery from a hard limit needs the override armed before motion is enabled](integration-issues/limit-switch-recovery-needs-override-first.md)
+- [A HAL interlock fails silently unless it is also added to a thread](integration-issues/hal-gate-needs-addf.md)
