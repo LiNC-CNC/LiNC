@@ -74,6 +74,70 @@ impl LincApp {
         None
     }
 
+    /// Why this CYCLE START press must not start the machine, or `None` when it
+    /// may.
+    ///
+    /// A paused program is resumed by the same key, so the run-only checks (idle
+    /// interpreter) cannot apply to it; everything else - machine on, AUTO,
+    /// homing, a live panel, and the program interlock - holds either way.
+    pub(super) fn cycle_start_refusal(&self) -> Option<String> {
+        if self.snapshot.program.paused {
+            if self.snapshot.machine.estop {
+                return Some("emergency stop is active".into());
+            }
+            if self.snapshot.task.power != linc_core::model::MachinePower::On {
+                return Some("machine is not ON".into());
+            }
+            if self.snapshot.panel.mode.mode() != Some(PanelMode::Auto) {
+                return Some("select AUTO on the panel first".into());
+            }
+            if self.panel_offline() || self.snapshot.meta.stale {
+                return Some("panel state is not current".into());
+            }
+            return self.program_block_reason();
+        }
+        if let Some(reason) = self.start_gate(PanelMode::Auto, true) {
+            return Some(reason.to_string());
+        }
+        self.program_block_reason()
+    }
+
+    /// Take the panel's CYCLE START key: decide, then either send it to the
+    /// controller or say why not.
+    ///
+    /// Runs once a frame, after the snapshot is polled, on the rising edge of the
+    /// key's bit. The press is not forwarded as a HAL edge: it becomes
+    /// [`linc_core::command::MachineCommand::CycleStart`], so a press LiNC refuses
+    /// never becomes a command at all and the controller answers with its own
+    /// words when it turns one down.
+    pub(super) fn service_cycle_start(&mut self) {
+        let down = self
+            .snapshot
+            .panel
+            .button(linc_core::model::panel_button::CYCLE_START);
+        let pressed = down && !self.cycle_start_down;
+        if down != self.cycle_start_down {
+            // The key is momentary and the HMI reads it from a 20 Hz snapshot, so
+            // a press can be seen, missed, or refused - and until now none of the
+            // three left a trace outside the screen. One line per edge is all it
+            // takes to tell those apart from the machine side.
+            log::info!("cycle start key {}", if down { "down" } else { "up" });
+        }
+        self.cycle_start_down = down;
+        if !pressed {
+            return;
+        }
+        if let Some(reason) = self.cycle_start_refusal() {
+            log::warn!("cycle start refused: {reason}");
+            self.cycle_refusal = Some(reason.clone());
+            self.toast(format!("CYCLE START REFUSED — {reason}"), theme::ERROR);
+            return;
+        }
+        log::info!("cycle start sent to the controller");
+        self.cycle_refusal = None;
+        self.send(linc_core::command::MachineCommand::CycleStart);
+    }
+
     pub fn program_protected(&self) -> bool {
         self.snapshot.panel.protect_effective()
     }

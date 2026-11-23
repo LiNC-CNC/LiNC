@@ -138,6 +138,9 @@ impl LincApp {
         // a save: the dirty marker must not survive it.
         self.program.editor.mark_saved();
         self.overlay.modal = None;
+        // Save-as writes a file the interpreter has never been shown, so the
+        // interlock must not open on the strength of the old verdict.
+        self.verify_saved_text(&content);
         self.toast(format!("saved {name}"), theme::SUCCESS);
     }
 

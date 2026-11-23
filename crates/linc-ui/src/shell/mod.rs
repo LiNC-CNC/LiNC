@@ -126,6 +126,14 @@ pub struct LincApp {
     /// `linc.program-ok` as last written. `None` until the first write, so the
     /// first frame publishes the level instead of assuming it.
     pub(super) program_ok_sent: Option<bool>,
+    /// The panel's CYCLE START key as last seen, for the rising edge. The HMI
+    /// owns the press now: the key's HAL pin no longer reaches
+    /// `halui.program.run` directly, so a press that must not start the machine
+    /// can be refused and explained.
+    pub(super) cycle_start_down: bool,
+    /// Why the last press was refused, kept until the press can go through:
+    /// a key that does nothing and says nothing reads as a dead key.
+    pub(super) cycle_refusal: Option<String>,
     /// Where the cycle-time calibration is written: what the last run of a
     /// program measured, so the next run of the same program can predict
     /// itself.
@@ -360,6 +368,8 @@ impl LincApp {
                 run_active: false,
             },
             program_ok_sent: None,
+            cycle_start_down: false,
+            cycle_refusal: None,
             chrome: ChromeUi {
                 quit_requested: false,
                 last_snapshot_ms: now_ms(),

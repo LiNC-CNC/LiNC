@@ -65,6 +65,42 @@ fn metric_width(ui: &egui::Ui, text: &str, size: f32) -> f32 {
 
 /// A top-bar metric whose value carries a state colour: the label stays quiet,
 /// the value is what has to be read at a glance.
+/// The program interlock beside the program it is about, red while it is shut.
+///
+/// The gate used to be invisible: cycle start simply did nothing, and the only
+/// place that said why was a banner after a press. This says what the machine
+/// HAL sees, on the bar the operator already reads, and the hover names the
+/// reason without a press.
+impl LincApp {
+    fn program_ok_metric(&mut self, ui: &mut egui::Ui) {
+        let ready = self.program_ready();
+        let reason = if ready {
+            None
+        } else {
+            self.program_block_reason()
+        };
+        ui.add_space(6.0);
+        let response = ui
+            .vertical(|ui| {
+                ui.label(
+                    RichText::new("PROG OK")
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new(if ready { "OK" } else { "NOT OK" })
+                        .monospace()
+                        .size(13.0)
+                        .color(if ready { theme::FG } else { theme::ERROR }),
+                );
+            })
+            .response;
+        if let Some(reason) = reason {
+            response.on_hover_text(format!("cycle start is blocked: {reason}"));
+        }
+    }
+}
+
 pub(super) fn metric_colored(
     ui: &mut egui::Ui,
     label: &str,
@@ -177,6 +213,7 @@ impl LincApp {
             });
             ui.add_space(18.0);
             metric_capped(ui, "PROGRAM", self.program_label(), 13.0, PROGRAM_MAX_WIDTH);
+            self.program_ok_metric(ui);
             let (state_word, state_color) = program_state_word(&self.snapshot.program);
             metric_colored(ui, "STATE", state_word.into(), 13.0, state_color);
             metric(
@@ -585,6 +622,46 @@ impl LincApp {
                 ),
             );
             ui.add_space(4.0);
+        }
+        if let Some(check) = self
+            .program
+            .machine_check
+            .as_ref()
+            .filter(|check| check.outcome == linc_core::verify::CheckOutcome::Refused)
+        {
+            // The issue list already names a fault on a line it could locate. A
+            // refusal whose block is in a subroutine, or whose line could not be
+            // matched, has no row there - and then this is the only place the
+            // operator can learn why cycle start is dead.
+            if check.marked_line().is_none() {
+                theme::banner(
+                    ui,
+                    theme::ERROR,
+                    &format!(
+                        "MACHINE CHECK REFUSED: {} — CYCLE START IS BLOCKED",
+                        check
+                            .message
+                            .as_deref()
+                            .unwrap_or("the interpreter refused it")
+                    ),
+                );
+                ui.add_space(4.0);
+            }
+        }
+        if let Some(reason) = self.cycle_refusal.clone() {
+            // A press that does nothing is a dead key unless it explains itself.
+            // The reason is re-derived every frame: once the operator fixes what
+            // it names, the banner has nothing left to say and goes.
+            if self.cycle_start_refusal().is_some() {
+                theme::banner(
+                    ui,
+                    theme::ERROR,
+                    &format!("CYCLE START REFUSED — {}", reason.to_uppercase()),
+                );
+                ui.add_space(4.0);
+            } else {
+                self.cycle_refusal = None;
+            }
         }
         if self.nav.page == Page::Program && self.program.external_change {
             theme::banner(

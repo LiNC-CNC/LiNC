@@ -196,7 +196,56 @@ impl LincApp {
             .as_deref()
             .zip(self.snapshot.program.path.as_deref())
             .is_some_and(|(shown, loaded)| shown == loaded);
-        loaded && !self.program.editor.dirty && self.program.issues.is_empty()
+        // The controller's verdict is a fact about the text, not about the
+        // editor: a refusal holds the gate even when the message names no line,
+        // which is every fault the interpreter raises inside a subroutine. The
+        // issue list cannot carry those, so the verdict is read directly.
+        let controller_ok = !self
+            .program
+            .machine_check
+            .as_ref()
+            .is_some_and(|check| check.outcome == linc_core::verify::CheckOutcome::Refused);
+        loaded && !self.program.editor.dirty && self.program.issues.is_empty() && controller_ok
+    }
+
+    /// Why the interlock is shut, in one sentence the operator can act on.
+    ///
+    /// `program_ready` answers yes or no; a press that goes nowhere needs more
+    /// than that, and so does the top bar's indicator. The order is the order the
+    /// checks are made: the first thing that is wrong is the one to fix first.
+    pub(super) fn program_block_reason(&self) -> Option<String> {
+        let loaded = self
+            .program
+            .loaded_path
+            .as_deref()
+            .zip(self.snapshot.program.path.as_deref());
+        match loaded {
+            Some((shown, controller)) if shown == controller => {}
+            _ if self.program.loaded_path.is_none() && self.snapshot.program.path.is_none() => {
+                return Some("no program is loaded — pick one in FILES".into());
+            }
+            _ => {
+                return Some("the controller holds a different file than the one on screen".into());
+            }
+        }
+        if self.program.editor.dirty {
+            return Some("the buffer has unsaved changes — save it (Ctrl+S)".into());
+        }
+        if let Some(check) = self
+            .program
+            .machine_check
+            .as_ref()
+            .filter(|check| check.outcome == linc_core::verify::CheckOutcome::Refused)
+        {
+            return Some(format!(
+                "the interpreter refused the program: {}",
+                check.message.as_deref().unwrap_or("no reason given")
+            ));
+        }
+        if let Some(issue) = self.program.issues.first() {
+            return Some(format!("line {}: {}", issue.line, issue.message));
+        }
+        None
     }
 
     /// Publish the program interlock when it changes. Called after anything that

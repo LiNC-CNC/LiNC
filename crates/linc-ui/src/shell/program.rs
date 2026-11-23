@@ -128,6 +128,50 @@ impl LincApp {
         self.program.pending_load = true;
     }
 
+    /// Ask the interpreter about text that has just become the loaded program,
+    /// remember the answer and publish the gate.
+    ///
+    /// The verdict held for the *old* text says nothing about the new one, and a
+    /// program typed into EDIT was never asked about at all: save is the only
+    /// route by which a file the interpreter refuses could reach the panel with
+    /// the interlock open. Both save paths - overwrite and save-as - end here.
+    pub(super) fn verify_saved_text(&mut self, content: &str) {
+        self.program.machine_check = self.controller_check(content);
+        if let Some(check) = self
+            .program
+            .machine_check
+            .as_ref()
+            .filter(|check| check.outcome == linc_core::verify::CheckOutcome::Refused)
+        {
+            let reason = format!("SAVED — {}", check.summary());
+            self.toast(reason, theme::ERROR);
+        }
+        self.sync_program_ok();
+    }
+
+    /// Ask the controller's own interpreter about `text`, when this profile asks
+    /// it to. `None` means the question is off in the configuration, which is not
+    /// the same answer as "no faults".
+    ///
+    /// `rs274` reads the file the way the machine's task will: same reader, same
+    /// preparation, no axis moves. It is the only check here that knows what a
+    /// line means in the context of the lines above it, so it runs on everything
+    /// that can become the loaded program - a load, and a save, which is how a
+    /// program typed straight into the editor becomes one.
+    fn controller_check(&mut self, text: &str) -> Option<linc_core::verify::MachineCheck> {
+        if !self.profile.config.program.verify_on_load {
+            return None;
+        }
+        let timeout =
+            std::time::Duration::from_millis(self.profile.config.program.verify_timeout_ms.max(1));
+        Some(linc_core::verify::check_program(
+            Some(self.profile.machine_ini_path.as_path()),
+            Some(self.profile.machine_ini.tool_table.as_path()),
+            text,
+            timeout,
+        ))
+    }
+
     /// Why this file must not be loaded, if it must not.
     ///
     /// Two checks, cheapest first: the block-level lint always runs, and the
@@ -154,17 +198,9 @@ impl LincApp {
         if let Some(error) = &preview.error {
             return Some(format!("NOT LOADED  LN {}: {}", error.line, error.message));
         }
-        if !self.profile.config.program.verify_on_load {
+        let Some(check) = self.controller_check(&text) else {
             return None;
-        }
-        let timeout =
-            std::time::Duration::from_millis(self.profile.config.program.verify_timeout_ms.max(1));
-        let check = linc_core::verify::check_program(
-            Some(self.profile.machine_ini_path.as_path()),
-            Some(self.profile.machine_ini.tool_table.as_path()),
-            &text,
-            timeout,
-        );
+        };
         self.program.machine_check = Some(check.clone());
         match check.outcome {
             linc_core::verify::CheckOutcome::Refused => {
@@ -314,10 +350,7 @@ impl LincApp {
         } else if !self.program_protected() {
             self.toast("save queued", theme::ACCENT);
         }
-        // The file on disk is now the buffer, so the interlock may open - and the
-        // controller's verdict was about the old text, so it no longer stands.
-        self.program.machine_check = None;
-        self.sync_program_ok();
+        self.verify_saved_text(&content);
     }
 
     /// Drop the editor buffer's unsaved changes: the loaded program is the

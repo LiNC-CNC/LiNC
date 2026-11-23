@@ -2523,6 +2523,201 @@ fn discard_reverts_the_buffer_to_the_loaded_program() {
     assert_eq!(app.program.selected_line, 1);
 }
 
+/// Pressing cycle start on the panel goes through the HMI now, so a press it
+/// refuses reaches nothing and a press it allows is one controller command.
+///
+/// The key is taken from the snapshot's button word, which the simulation leaves
+/// at zero, so these drive the service directly: one call is one frame.
+#[test]
+fn a_refused_cycle_start_sends_nothing_and_says_why() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    for axis in ["X", "Y", "Z"] {
+        harness
+            .app
+            .snapshot
+            .machine
+            .homed
+            .insert(axis.to_string(), true);
+    }
+    harness.app.snapshot.meta.stale = false;
+    harness.app.snapshot.panel.program_protect_known = true;
+    harness.app.snapshot.panel.program_protect = false;
+    // A machine that is otherwise ready to run, with one thing wrong: the buffer
+    // has changes the controller has never seen.
+    harness.app.refresh_preview();
+    // After the refresh: a preview rebuild polls, and the simulation's snapshot
+    // has no path of its own.
+    harness.app.snapshot.program.path = Some(std::path::PathBuf::from("/tmp/demo.ngc"));
+    harness.app.program.loaded_path = harness.app.snapshot.program.path.clone();
+    harness.app.sync_issues();
+    harness.app.program.editor.replace_text("G0 X9\n".into());
+    harness.app.snapshot.panel.buttons |= 1u64 << linc_core::model::panel_button::CYCLE_START;
+
+    harness.app.service_cycle_start();
+
+    let sent = harness.sent.borrow();
+    assert!(
+        !sent
+            .iter()
+            .any(|command| matches!(command, MachineCommand::CycleStart)),
+        "a refused press must not reach the controller: {:?}",
+        harness.sent_debug()
+    );
+    let reason = harness
+        .app
+        .cycle_refusal
+        .clone()
+        .expect("the refusal is remembered for the banner");
+    assert!(
+        reason.contains("unsaved changes"),
+        "the message names the fault: {reason}"
+    );
+}
+
+/// The same press on a clean program is one command, and a key held down is
+/// still one press.
+#[test]
+fn an_accepted_cycle_start_sends_one_command() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    for axis in ["X", "Y", "Z"] {
+        harness
+            .app
+            .snapshot
+            .machine
+            .homed
+            .insert(axis.to_string(), true);
+    }
+    harness.app.snapshot.meta.stale = false;
+    harness.app.snapshot.panel.program_protect_known = true;
+    harness.app.snapshot.panel.program_protect = false;
+    harness.app.refresh_preview();
+    harness.app.snapshot.program.path = Some(std::path::PathBuf::from("/tmp/demo.ngc"));
+    harness.app.program.loaded_path = harness.app.snapshot.program.path.clone();
+    harness.app.sync_issues();
+    assert!(
+        harness.app.program_ready(),
+        "the fixture program is clean: {:?}",
+        harness.app.program_block_reason()
+    );
+    harness.app.snapshot.panel.buttons |= 1u64 << linc_core::model::panel_button::CYCLE_START;
+
+    let presses = |harness: &ProbeHarness| -> usize {
+        harness
+            .sent
+            .borrow()
+            .iter()
+            .filter(|command| matches!(command, MachineCommand::CycleStart))
+            .count()
+    };
+
+    harness.app.service_cycle_start();
+    assert_eq!(presses(&harness), 1, "one press is one command");
+    assert!(harness.app.cycle_refusal.is_none());
+
+    // The key is still down on the next frame: no second command.
+    harness.app.service_cycle_start();
+    assert_eq!(
+        presses(&harness),
+        1,
+        "a held key is not a stream of presses"
+    );
+}
+
+/// The header carries the interlock beside the program it is about, so the gate
+/// stops being invisible until a key does nothing.
+#[test]
+fn the_header_shows_the_program_interlock() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.refresh_preview();
+    harness.app.snapshot.program.path = Some(std::path::PathBuf::from("/tmp/demo.ngc"));
+    harness.app.program.loaded_path = harness.app.snapshot.program.path.clone();
+    harness.app.sync_issues();
+    let texts = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(texts.iter().any(|text| text == "PROG OK"), "{texts:?}");
+    assert!(texts.iter().any(|text| text == "OK"), "{texts:?}");
+
+    harness.app.program.editor.replace_text("G0 X9\n".into());
+    let texts = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        texts.iter().any(|text| text == "NOT OK"),
+        "a shut gate is red on the bar: {texts:?}"
+    );
+}
+
+/// The interpreter's refusal is a fact about the text, so it holds the gate on
+/// its own — including when the fault lives in a subroutine and no line in this
+/// file can be marked for the issue list to carry.
+#[test]
+fn a_refused_machine_check_closes_the_interlock_even_without_a_line() {
+    let (_dir, mut app) = make_app(PanelMode::Edit);
+    // The fixture's controller holds the demo program; opening it is what a load
+    // does to the UI's own idea of the loaded file. The interlock compares the
+    // two paths, so the controller needs one to compare against.
+    app.refresh_preview();
+    // After the poll: a refresh replaces the snapshot with the backend's, which
+    // has no path in this fixture.
+    app.snapshot.program.path = Some(std::path::PathBuf::from("/tmp/demo.ngc"));
+    app.program.loaded_path = app.snapshot.program.path.clone();
+    app.sync_issues();
+    assert!(
+        app.program_ready(),
+        "the demo program is clean: dirty={:?} issues={:?} check={:?} loaded={:?}",
+        app.program_dirty(),
+        app.program
+            .issues
+            .iter()
+            .map(|issue| (issue.line, issue.message.clone()))
+            .collect::<Vec<_>>(),
+        app.program.machine_check,
+        app.program.loaded_path,
+    );
+
+    app.program.machine_check = Some(linc_core::verify::MachineCheck {
+        outcome: linc_core::verify::CheckOutcome::Refused,
+        message: Some("Cannot use g53 incremental".into()),
+        block: Some("G91 G53 G0 X10".into()),
+        line: None,
+    });
+    app.sync_issues();
+    assert!(
+        !app.program_ready(),
+        "a refusal with no line still blocks cycle start"
+    );
+}
+
+/// A save is how a program typed into EDIT becomes the loaded one, and the
+/// verdict held for the old text says nothing about it: the interpreter is asked
+/// again, with a deadline, and its answer is remembered.
+#[test]
+fn saving_a_program_asks_the_interpreter_again() {
+    let (_dir, mut app) = make_app(PanelMode::Edit);
+    // A deadline the check cannot meet makes the answer a Timeout, which still
+    // proves the question was asked - and keeps the test off rs274's timing.
+    app.profile.config.program.verify_timeout_ms = 1;
+    app.program.machine_check = None;
+    app.program.editor.replace_text("G0 X0\nG1 X10\n".into());
+    app.save_program();
+    // The buffer had no path, so the save asked for a name; naming it is the
+    // save-as path, and it must ask the interpreter as well.
+    if app.program.machine_check.is_none() && app.overlay.modal.is_some() {
+        app.save_program_as("typed");
+    }
+    let check = app
+        .program
+        .machine_check
+        .as_ref()
+        .expect("the save asked the interpreter");
+    assert_ne!(
+        check.outcome,
+        linc_core::verify::CheckOutcome::Refused,
+        "a one millisecond deadline cannot be a refusal: {check:?}"
+    );
+    assert!(
+        app.program_ready() || check.outcome == linc_core::verify::CheckOutcome::Timeout,
+        "only a refusal closes the gate: {check:?}"
+    );
+}
+
 /// A program typed straight into EDIT has no file; the save asks for a name
 /// instead of failing with "No program path".
 #[test]
