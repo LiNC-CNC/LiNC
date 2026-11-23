@@ -250,7 +250,7 @@ fn the_status_bar_promises_the_plan_a_running_program_bit_into() {
         .collect();
     let bar = fields.join(" | ");
     assert!(bar.contains("CYCLE 0:00:00"), "{bar}");
-    assert!(bar.contains("LEFT ~0:00:12"), "{bar}");
+    assert!(bar.contains("/ ~0:00:12"), "{bar}");
 }
 
 /// A fresh installation has no acceptance in its preferences file, so the shell
@@ -874,7 +874,7 @@ fn the_bottom_bar_readout_fits_the_minimum_window() {
     // tripped, program protected, a program running with its clock. A running
     // program replaces the exact line count with the percentage and the clock,
     // and the clock replaces the DTG field, so those are never drawn together.
-    let left = measure(&["100%  CYCLE 99:59:59  LEFT ~99:59:59", "HOMED"]);
+    let left = measure(&["100%  CYCLE 99:59:59 / ~99:59:59"]);
     let group = measure(&[
         "E-STOP ACTIVE",
         "MACHINE OFF",
@@ -1410,7 +1410,7 @@ fn the_bottom_bar_groups_the_positions_then_their_dtg() {
                 .collect::<Vec<_>>()
         );
     };
-    // Left-aligned in the flow: it starts after the machine fields (LN, HOMED)
+    // Left-aligned in the flow: it starts after the machine fields (LN)
     // rather than floating in the middle of the bar.
     assert!(
         rect.left() > 60.0 && rect.left() < 320.0,
@@ -1418,7 +1418,7 @@ fn the_bottom_bar_groups_the_positions_then_their_dtg() {
         rect.left()
     );
     for (text, field) in &texts {
-        if (text.starts_with("LN ") || text == "HOMED") && field.center().y > 690.0 {
+        if text.starts_with("LN ") && field.center().y > 690.0 {
             assert!(
                 field.right() < rect.left(),
                 "{text} ends before the readout begins: {} vs {}",

@@ -232,30 +232,6 @@ pub(super) fn program_state_word(program: &ProgramState) -> (&'static str, Color
     }
 }
 
-/// Homing progress for the status line.
-///
-/// Moves fail closed until every axis is homed, so a partly homed machine is a
-/// warning that names the axes it already trusts; the fully homed case is the
-/// normal one and stays muted.
-pub(super) fn homing_field(homed: &AxisMap<bool>) -> Option<(String, Color32)> {
-    if homed.is_empty() {
-        return None;
-    }
-    let total = homed.len();
-    let done: Vec<&str> = homed
-        .iter()
-        .filter(|(_, is_homed)| **is_homed)
-        .map(|(axis, _)| axis)
-        .collect();
-    if done.len() == total {
-        Some(("HOMED".into(), theme::MUTED))
-    } else if done.is_empty() {
-        Some(("NOT HOMED".into(), theme::WARNING))
-    } else {
-        Some((format!("HOMED {}", done.join(" ")), theme::WARNING))
-    }
-}
-
 /// The axis with the most left to go, for the status line's DTG field.
 ///
 /// A settled machine has no field; during a move or a jog the largest distance
@@ -301,9 +277,12 @@ fn format_cycle_time(ms: u64) -> String {
 }
 
 fn cycle_field(elapsed_ms: u64, remaining_ms: Option<u64>) -> String {
+    // Elapsed over remaining, the way a clock is written: `CYCLE 0:01:12 /
+    // ~0:03:40`. The tilde keeps the second figure honest as an estimate, and the
+    // slash says which is which without spending a word of the bar on a label.
     let mut text = format!("CYCLE {}", format_cycle_time(elapsed_ms));
     if let Some(remaining) = remaining_ms {
-        text.push_str("  LEFT ~");
+        text.push_str(" / ~");
         text.push_str(&format_cycle_time(remaining));
     }
     text
@@ -531,9 +510,6 @@ impl LincApp {
             };
             fields.push((text, theme::MUTED));
         }
-        if let Some(field) = homing_field(&self.snapshot.machine.homed) {
-            fields.push(field);
-        }
         // A held limit switch is never quiet: it blocks motion and says why.
         let limits = self.snapshot.machine.limit_labels();
         if !limits.is_empty() {
@@ -587,7 +563,7 @@ mod tests {
         assert_eq!(cycle_field(12_000, None), "CYCLE 0:00:12");
         assert_eq!(
             cycle_field(12_000, Some(3_723_000)),
-            "CYCLE 0:00:12  LEFT ~1:02:03"
+            "CYCLE 0:00:12 / ~1:02:03"
         );
     }
 
@@ -599,19 +575,6 @@ mod tests {
         assert_eq!(program_state_word(&program).0, "RUNNING");
         program.paused = true;
         assert_eq!(program_state_word(&program).0, "PAUSED");
-    }
-
-    #[test]
-    pub(super) fn homing_names_the_axes_it_cannot_trust() {
-        let mut homed = AxisMap::new();
-        assert!(homing_field(&homed).is_none(), "no axes, no field");
-        homed.insert("X", false);
-        homed.insert("Y", false);
-        assert_eq!(homing_field(&homed).unwrap().0, "NOT HOMED");
-        homed.insert("X", true);
-        assert_eq!(homing_field(&homed).unwrap().0, "HOMED X");
-        homed.insert("Y", true);
-        assert_eq!(homing_field(&homed).unwrap().0, "HOMED");
     }
 
     #[test]
