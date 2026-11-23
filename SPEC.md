@@ -923,9 +923,13 @@ Program rules:
   editor: below the line when it sits high in the viewport, above it when it sits
   low, and never over any row of the line itself - a wrapped block is cleared
   across every row it occupies. The box is clamped inside the editor, so it
-  cannot cover the assignment line above or below either; when neither side has
-  room for the whole message the box keeps the larger side and is cut at its own
-  rim rather than spilling over the line. The operator's place survives a
+  cannot cover the line above or below either; when neither side has room for the
+  whole message the box keeps the larger side and is cut at its own rim rather
+  than spilling over the line. Its fill is opaque (the editor's glyphs must not
+  read through the message), it starts at the block's first glyph rather than at
+  the pane edge, and it carries a drop shadow cast on the editor - the gap to the
+  line is wider than the shadow reaches, so the shadow never touches the glyphs
+  it explains. The operator's place survives a
   rebuild: a repair that moves or removes a fault keeps him on the same fault
   while it still exists, and falls back into range when it does not.
 - A program with a fault is **not loaded** into the interpreter while

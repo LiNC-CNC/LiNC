@@ -23,6 +23,9 @@ pub const ACCENT_DARK: Color32 = Color32::from_rgb(0x0d, 0x2c, 0x4f);
 pub const SUCCESS: Color32 = Color32::from_rgb(0x3d, 0xdc, 0x84);
 pub const WARNING: Color32 = Color32::from_rgb(0xff, 0xb0, 0x20);
 pub const ERROR: Color32 = Color32::from_rgb(0xff, 0x5c, 0x5c);
+/// Fill of the editor's fault box. Opaque on purpose: the box sits over a line of
+/// G-code, and a wash let the glyphs behind it read through the message.
+pub const ERROR_BOX: Color32 = Color32::from_rgb(0x3b, 0x18, 0x1b);
 pub const C1: Color32 = Color32::from_rgb(0x67, 0xe8, 0xf9);
 pub const C2: Color32 = Color32::from_rgb(0xc0, 0x84, 0xfc);
 pub const C3: Color32 = Color32::from_rgb(0xfb, 0xbf, 0x24);

@@ -935,7 +935,14 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                 if !say.is_empty() {
                     let (top, bottom) =
                         line_span(&output.galley, output.galley_pos.y, &starts, current);
-                    fault_box(ui, &painter, clip, (top, bottom), &say.join("  \u{00b7}  "));
+                    fault_box(
+                        ui,
+                        &painter,
+                        clip,
+                        output.galley_pos.x,
+                        (top, bottom),
+                        &say.join("  \u{00b7}  "),
+                    );
                 }
             }
             if let Some(line) = scroll_to {
@@ -976,8 +983,11 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
 /// The box is placed, then clamped into the clip rect on the side it chose. When
 /// neither side holds the whole box, the side with more room keeps it and the box
 /// is shortened; the edge nearest the line never crosses into the line.
-fn fault_box_rect(clip: egui::Rect, line: (f32, f32), size: egui::Vec2) -> egui::Rect {
-    const GAP: f32 = 5.0;
+fn fault_box_rect(clip: egui::Rect, left: f32, line: (f32, f32), size: egui::Vec2) -> egui::Rect {
+    // The clear space either side of the line is wider than the drop shadow
+    // reaches, so the shadow falls on the editor's empty rows and never on the
+    // line the box is explaining.
+    const GAP: f32 = 9.0;
     let (top, bottom) = line;
     let above = (top - GAP - clip.top()).max(0.0);
     let below = (clip.bottom() - bottom - GAP).max(0.0);
@@ -990,25 +1000,36 @@ fn fault_box_rect(clip: egui::Rect, line: (f32, f32), size: egui::Vec2) -> egui:
         (top - GAP - size.y.min(above), above)
     };
     let height = size.y.min(room.max(0.0));
-    let width = size.x.min(clip.width());
+    // Left-aligned to the first glyph of the block, which is what the operator
+    // reads as that line's own text; clamped for a scrolled buffer.
+    let left = left.max(clip.left());
+    let width = size.x.min((clip.right() - left).max(0.0));
     let y = if use_below {
         start.min(clip.bottom() - height)
     } else {
         (top - GAP - height).max(clip.top())
     };
     egui::Rect::from_min_size(
-        egui::pos2(clip.left(), y.max(clip.top())),
+        egui::pos2(left, y.max(clip.top())),
         egui::vec2(width, height),
     )
 }
 
 /// The box itself: red rim, red text, wrapped to the pane. Long messages grow
 /// downwards from wherever the box was placed.
-fn fault_box(ui: &Ui, painter: &egui::Painter, clip: egui::Rect, line: (f32, f32), message: &str) {
+fn fault_box(
+    ui: &Ui,
+    painter: &egui::Painter,
+    clip: egui::Rect,
+    text_left: f32,
+    line: (f32, f32),
+    message: &str,
+) {
     const PAD: egui::Vec2 = egui::vec2(7.0, 4.0);
     const MAX_WIDTH: f32 = 420.0;
     let font = FontId::monospace(theme::font_size(9.5));
-    let wrap = (clip.width() - 2.0 * PAD.x).min(MAX_WIDTH).max(80.0);
+    let left = text_left.max(clip.left());
+    let wrap = (clip.right() - left - 2.0 * PAD.x).min(MAX_WIDTH).max(80.0);
     let mut job = LayoutJob::default();
     job.wrap.max_width = wrap;
     job.append(
@@ -1024,18 +1045,27 @@ fn fault_box(ui: &Ui, painter: &egui::Painter, clip: egui::Rect, line: (f32, f32
     );
     let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
     let size = galley.size() + 2.0 * PAD;
-    let rect = fault_box_rect(clip, line, size);
+    let rect = fault_box_rect(clip, left, line, size);
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return;
     }
-    painter.rect_filled(
-        rect,
-        egui::CornerRadius::same(3),
-        theme::tint(theme::ERROR, 0x2e),
+    let corner = egui::CornerRadius::same(3);
+    // The shadow falls on the editor, not on the box: the box is opaque, so the
+    // lift has to read outside it, and the gap above keeps the fuzzy edge off the
+    // glyphs of the line it explains.
+    painter.add(
+        egui::epaint::Shadow {
+            offset: [0, 3],
+            blur: 8,
+            spread: 0,
+            color: Color32::from_black_alpha(180),
+        }
+        .as_shape(rect, corner),
     );
+    painter.rect_filled(rect, corner, theme::ERROR_BOX);
     painter.rect_stroke(
         rect,
-        egui::CornerRadius::same(3),
+        corner,
         egui::Stroke::new(1.0, theme::ERROR),
         egui::StrokeKind::Inside,
     );
@@ -1212,25 +1242,30 @@ mod tests {
 
         // A line near the top: the box goes below it.
         let high = (20.0, 36.0);
-        let below = fault_box_rect(clip, high, egui::vec2(300.0, 40.0));
+        let below = fault_box_rect(clip, 64.0, high, egui::vec2(300.0, 40.0));
+        assert_eq!(
+            below.left(),
+            64.0,
+            "the box starts where the block's text starts, not at the pane edge"
+        );
         assert!(below.top() >= high.1, "{below:?} covers the line {high:?}");
 
         // A line near the bottom: above it, and still inside the viewport.
         let low = (250.0, 272.0);
-        let above = fault_box_rect(clip, low, egui::vec2(300.0, 40.0));
+        let above = fault_box_rect(clip, 64.0, low, egui::vec2(300.0, 40.0));
         assert!(above.bottom() <= low.0, "{above:?} covers the line {low:?}");
         assert!(above.top() >= clip.top());
 
         // A wrapped block spans several rows; the box clears all of them.
         let wrapped = (120.0, 210.0);
-        let boxed = fault_box_rect(clip, wrapped, egui::vec2(300.0, 30.0));
+        let boxed = fault_box_rect(clip, 64.0, wrapped, egui::vec2(300.0, 30.0));
         assert!(
             boxed.bottom() <= wrapped.0 || boxed.top() >= wrapped.1,
             "{boxed:?} overlaps the wrapped span {wrapped:?}"
         );
 
         // A box taller than either side is shortened, not allowed to overlap.
-        let tight = fault_box_rect(clip, (120.0, 180.0), egui::vec2(300.0, 500.0));
+        let tight = fault_box_rect(clip, 64.0, (120.0, 180.0), egui::vec2(300.0, 500.0));
         assert!(
             tight.bottom() <= 120.0 || tight.top() >= 180.0,
             "{tight:?} overlaps the line (120..180)"
@@ -1238,7 +1273,7 @@ mod tests {
         assert!(tight.top() >= clip.top() && tight.bottom() <= clip.bottom());
 
         // Never wider than the pane, whatever the message wants.
-        let wide = fault_box_rect(clip, high, egui::vec2(900.0, 20.0));
+        let wide = fault_box_rect(clip, 64.0, high, egui::vec2(900.0, 20.0));
         assert!(
             wide.width() <= clip.width(),
             "{wide:?} is wider than {clip:?}"

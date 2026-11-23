@@ -1001,9 +1001,10 @@ the interpreter's, when it named a line - is marked: the line is washed red, its
 gutter number is red, a red bar sits in the gutter and the word at fault is
 underlined. `fault_next` (`Ctrl+PageDown`) and `fault_prev` (`Ctrl+PageUp`) walk
 them, and the hint row names the pair. The fault on the line under the cursor is
-also shown in full in a red box beside it - below a line high in the viewport,
-above one low in it, clear of every row of a wrapped block - because the footer
-only has room for the shortened form.
+also shown in full in an opaque red box beside it - below a line high in the
+viewport, above one low in it, clear of every row of a wrapped block, aligned to
+the block's first glyph and lifted off the editor with a drop shadow - because
+the footer only has room for the shortened form.
 
 ### `[files]`
 
