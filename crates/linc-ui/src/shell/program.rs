@@ -152,17 +152,13 @@ impl LincApp {
         let axes = self.axes();
         let preview = linc_core::gcode::parse_preview(&text, &axes, None, self.tool_tip());
         if let Some(error) = &preview.error {
-            return Some(format!(
-                "NOT LOADED  LN {}: {}",
-                error.line, error.message
-            ));
+            return Some(format!("NOT LOADED  LN {}: {}", error.line, error.message));
         }
         if !self.profile.config.program.verify_on_load {
             return None;
         }
-        let timeout = std::time::Duration::from_millis(
-            self.profile.config.program.verify_timeout_ms.max(1),
-        );
+        let timeout =
+            std::time::Duration::from_millis(self.profile.config.program.verify_timeout_ms.max(1));
         let check = linc_core::verify::check_program(
             Some(self.profile.machine_ini_path.as_path()),
             Some(self.profile.machine_ini.tool_table.as_path()),
@@ -182,7 +178,10 @@ impl LincApp {
                 };
                 Some(format!(
                     "NOT LOADED  {place}: {}",
-                    check.message.as_deref().unwrap_or("the interpreter refused it")
+                    check
+                        .message
+                        .as_deref()
+                        .unwrap_or("the interpreter refused it")
                 ))
             }
             // Ok, Timeout and Unavailable all let the load through.

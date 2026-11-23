@@ -229,9 +229,10 @@ goto_line = "Ctrl+G"
 program_run_from_line = "Ctrl+R"
 # Page-local to Program: walk the syntax faults marked in the editor, wrapping at
 # both ends. Two chords, not a Shift pair: the panel's keyboard has no Shift key,
-# and F8 is the OFFSETS page.
-fault_next = "Ctrl+K"
-fault_prev = "Ctrl+P"
+# and F8 is the OFFSETS page. The manual screens bind the same two chords to the
+# spindle speed; a binding is page-local, so both pages can have them.
+fault_next = "Ctrl+PageDown"
+fault_prev = "Ctrl+PageUp"
 # The CNC keyboard has no Delete key: the Files page deletes with Backspace.
 # Delete is kept for a desktop keyboard.
 files_delete = "Delete"

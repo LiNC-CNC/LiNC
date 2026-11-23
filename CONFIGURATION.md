@@ -999,7 +999,11 @@ the backend.
 Every fault the editor knows about - the lint's, the preview's own fatal one and
 the interpreter's, when it named a line - is marked: the line is washed red, its
 gutter number is red, a red bar sits in the gutter and the word at fault is
-underlined. `fault_next` (`Ctrl+K`) and `fault_prev` (`Ctrl+P`) walk them.
+underlined. `fault_next` (`Ctrl+PageDown`) and `fault_prev` (`Ctrl+PageUp`) walk
+them, and the hint row names the pair. The fault on the line under the cursor is
+also shown in full in a red box beside it - below a line high in the viewport,
+above one low in it, clear of every row of a wrapped block - because the footer
+only has room for the shortened form.
 
 ### `[files]`
 
@@ -1114,10 +1118,14 @@ two chords walk them, wrapping at both ends, and move the caret and the scroll t
 the fault's line. Both are plain Ctrl chords because the panel's keyboard has no
 Shift key, and neither is F8, which is the OFFSETS page.
 
+The manual screens bind the same two chords to the spindle speed. A binding is
+page-local, so the two pages can share them, exactly as `save` and
+`spindle_speed` share `Ctrl+S`.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `fault_next` | `Ctrl+K` | Next fault. |
-| `fault_prev` | `Ctrl+P` | Previous fault. |
+| `fault_next` | `Ctrl+PageDown` | Next fault. |
+| `fault_prev` | `Ctrl+PageUp` | Previous fault. |
 
 ### `[keys]` lathe view bindings
 

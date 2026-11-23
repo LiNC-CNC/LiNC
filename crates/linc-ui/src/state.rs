@@ -2961,6 +2961,8 @@ pub struct Keymap {
     /// Page-local to Program: start the loaded program at the current line.
     pub program_run_from_line: Binding,
     /// Page-local to Program: walk the syntax faults, wrapping at both ends.
+    /// Ctrl+PageDown forward, Ctrl+PageUp back; the manual screens keep the same
+    /// two chords for the spindle speed.
     pub fault_next: Binding,
     pub fault_prev: Binding,
     pub files_delete: Binding,
@@ -3118,8 +3120,19 @@ impl Keymap {
                 &mut rejected,
             ),
             goto_line: binding(&keys.goto_line, Binding::new(Key::G, ctrl), &mut rejected),
-            fault_next: binding(&keys.fault_next, Binding::new(Key::K, ctrl), &mut rejected),
-            fault_prev: binding(&keys.fault_prev, Binding::new(Key::P, ctrl), &mut rejected),
+            // PageUp/PageDown with Ctrl: free on the Program page, because the
+            // manual screens own those two chords (see base.toml), the same way
+            // Ctrl+S is SAVE here and the spindle speed there.
+            fault_next: binding(
+                &keys.fault_next,
+                Binding::new(Key::PageDown, ctrl),
+                &mut rejected,
+            ),
+            fault_prev: binding(
+                &keys.fault_prev,
+                Binding::new(Key::PageUp, ctrl),
+                &mut rejected,
+            ),
             program_run_from_line: binding(
                 &keys.program_run_from_line,
                 Binding::new(Key::R, ctrl),
