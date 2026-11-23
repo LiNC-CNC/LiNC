@@ -229,67 +229,66 @@ impl LincApp {
                 });
             }
             Page::Machine => {
-                // MAIN shows the same toolpath, so it carries the same view
-                // commands, plus the two program actions that do not need the
-                // editor in front (run from line and go to line).
-                let mut view_items = vec![
-                    Shortcut::run(view_cycle.clone(), "VIEW", ShortcutCommand::CycleView),
-                    Shortcut::run(k.graph_fit.label(), "FIT", ShortcutCommand::FitGraph),
-                    Shortcut::run(
-                        k.graph_clear.label(),
-                        "CLEAR TRAIL",
-                        ShortcutCommand::ClearTrail,
-                    ),
-                    Shortcut::run(
-                        k.toggle_bounds.label(),
-                        "BOUNDS",
-                        ShortcutCommand::CycleBounds,
-                    ),
-                    Shortcut::run(
-                        k.remaining.label(),
-                        "REMAINING",
-                        ShortcutCommand::CycleRemaining,
-                    ),
-                    // The square swaps the feed/servo pair below the graph for
-                    // the following-error traces, and names what the next press
-                    // brings back.
-                    Shortcut::run(
-                        square.clone(),
-                        if self.following.active {
-                            "FEED"
-                        } else {
-                            "F.ERROR"
-                        },
-                        ShortcutCommand::ToggleFollowingError,
-                    ),
-                ];
-                // A second press of the key that opened MAIN swaps the whole
-                // dashboard in AUTO and MDI. The hint names what the next press
-                // brings, like the square's does, and is absent where the key
-                // has one meaning — including the manual modes, whose MAIN page
-                // is not the mode's screen, so their key opens that instead.
-                if self.main_alternate_available() && self.mode_screen() == Page::Machine {
-                    view_items.push(Shortcut::hint(
-                        k.machine.label(),
-                        if self.main_view == MainView::Coordinates {
-                            "DASHBOARD"
-                        } else {
-                            "COORDS"
-                        },
-                    ));
+                // The matrix takes the toolpath's place, so the view
+                // commands have nothing to act on: the group is left out
+                // rather than advertising keys that would change state
+                // nobody can see. MAIN stays on the navigation row, so
+                // the way back is still in view.
+                if !self.main_matrix_active() {
+                    // MAIN shows the same toolpath, so it carries the same view
+                    // commands, plus the two program actions that do not need the
+                    // editor in front (run from line and go to line).
+                    let mut view_items = vec![
+                        Shortcut::run(view_cycle.clone(), "VIEW", ShortcutCommand::CycleView),
+                        Shortcut::run(k.graph_fit.label(), "FIT", ShortcutCommand::FitGraph),
+                        Shortcut::run(
+                            k.graph_clear.label(),
+                            "CLEAR TRAIL",
+                            ShortcutCommand::ClearTrail,
+                        ),
+                        Shortcut::run(
+                            k.toggle_bounds.label(),
+                            "BOUNDS",
+                            ShortcutCommand::CycleBounds,
+                        ),
+                        Shortcut::run(
+                            k.remaining.label(),
+                            "REMAINING",
+                            ShortcutCommand::CycleRemaining,
+                        ),
+                        // The square swaps the feed/servo pair below the graph for
+                        // the following-error traces, and names what the next press
+                        // brings back.
+                        Shortcut::run(
+                            square.clone(),
+                            if self.following.active {
+                                "FEED"
+                            } else {
+                                "F.ERROR"
+                            },
+                            ShortcutCommand::ToggleFollowingError,
+                        ),
+                    ];
+                    // A second press of the key that opened MAIN swaps this
+                    // dashboard for the matrix. This face is the dashboard, so
+                    // the hint always names the matrix; it is absent where MAIN
+                    // is the mode's own screen and has no second meaning.
+                    if self.main_alternate_available() && self.mode_screen() == Page::Machine {
+                        view_items.push(Shortcut::hint(k.machine.label(), "COORDS"));
+                    }
+                    // The MDI input owns Ctrl+Up/Down for its buffer-line move and
+                    // Ctrl+Left/Right for word moves, so the toolpath's pan hint
+                    // would be false while the pane is up.
+                    if !self.mdi_pane_visible() {
+                        view_items.push(Shortcut::hint(k.view_pan_hint(), "PAN"));
+                    }
+                    view_items.push(Shortcut::hint(k.view_zoom_hint(), "ZOOM"));
+                    view_items.extend(lathe_hints.clone());
+                    groups.push(ShortcutGroup {
+                        title: "VIEW",
+                        items: view_items,
+                    });
                 }
-                // The MDI input owns Ctrl+Up/Down for its buffer-line move and
-                // Ctrl+Left/Right for word moves, so the toolpath's pan hint
-                // would be false while the pane is up.
-                if !self.mdi_pane_visible() {
-                    view_items.push(Shortcut::hint(k.view_pan_hint(), "PAN"));
-                }
-                view_items.push(Shortcut::hint(k.view_zoom_hint(), "ZOOM"));
-                view_items.extend(lathe_hints.clone());
-                groups.push(ShortcutGroup {
-                    title: "VIEW",
-                    items: view_items,
-                });
                 if self.mdi_pane_visible() {
                     // While the pane is up its keys replace the MAIN ones:
                     // Enter and the arrows act on the buffer, Ctrl+R runs the
@@ -498,32 +497,36 @@ impl LincApp {
                 // Three groups: the toolpath, the spindle, and the keys the page
                 // itself owns. The spindle group is manual modes only: HOME and
                 // PROG.HOME share this page family without a spindle control.
-                let mut view_items = vec![
-                    Shortcut::run(k.graph_fit.label(), "FIT", ShortcutCommand::FitGraph),
-                    Shortcut::run(view_cycle.clone(), "VIEW", ShortcutCommand::CycleView),
-                    Shortcut::run(
-                        k.toggle_bounds.label(),
-                        "BOUNDS",
-                        ShortcutCommand::CycleBounds,
-                    ),
-                    Shortcut::run(
-                        k.graph_clear.label(),
-                        "CLEAR TRAIL",
-                        ShortcutCommand::ClearTrail,
-                    ),
-                    Shortcut::run(
-                        k.remaining.label(),
-                        "REMAINING",
-                        ShortcutCommand::CycleRemaining,
-                    ),
-                    Shortcut::hint(k.view_pan_hint(), "PAN"),
-                    Shortcut::hint(k.view_zoom_hint(), "ZOOM"),
-                ];
-                view_items.extend(lathe_hints.clone());
-                groups.push(ShortcutGroup {
-                    title: "VIEW",
-                    items: view_items,
-                });
+                // The matrix replaces the live graph here too, so the view
+                // commands lose their subject exactly as they do on MAIN.
+                if !self.main_matrix_active() {
+                    let mut view_items = vec![
+                        Shortcut::run(k.graph_fit.label(), "FIT", ShortcutCommand::FitGraph),
+                        Shortcut::run(view_cycle.clone(), "VIEW", ShortcutCommand::CycleView),
+                        Shortcut::run(
+                            k.toggle_bounds.label(),
+                            "BOUNDS",
+                            ShortcutCommand::CycleBounds,
+                        ),
+                        Shortcut::run(
+                            k.graph_clear.label(),
+                            "CLEAR TRAIL",
+                            ShortcutCommand::ClearTrail,
+                        ),
+                        Shortcut::run(
+                            k.remaining.label(),
+                            "REMAINING",
+                            ShortcutCommand::CycleRemaining,
+                        ),
+                        Shortcut::hint(k.view_pan_hint(), "PAN"),
+                        Shortcut::hint(k.view_zoom_hint(), "ZOOM"),
+                    ];
+                    view_items.extend(lathe_hints.clone());
+                    groups.push(ShortcutGroup {
+                        title: "VIEW",
+                        items: view_items,
+                    });
+                }
 
                 if self.nav.page == Page::Manual
                     && matches!(

@@ -343,6 +343,15 @@ impl LincApp {
             )
     }
 
+    /// True when the coordinate matrix is drawn in place of the toolpath.
+    ///
+    /// The view commands have no subject then: the matrix takes the graph's
+    /// place, so FIT, BOUNDS and the view cycle would change state the operator
+    /// cannot see until the dashboard comes back.
+    pub fn main_matrix_active(&self) -> bool {
+        self.main_view == MainView::Coordinates && self.main_alternate_available()
+    }
+
     pub fn set_page(&mut self, page: Page) {
         self.remember_page(page);
         if page == Page::Help && self.nav.page != Page::Help {

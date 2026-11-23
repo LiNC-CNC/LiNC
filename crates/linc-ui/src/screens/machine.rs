@@ -6,7 +6,6 @@ use linc_view::ViewMode;
 
 use crate::screens::common;
 use crate::shell::LincApp;
-use crate::state::MainView;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
@@ -249,7 +248,7 @@ fn bottom_card(
 /// True when the alternate dashboard is both asked for and offered: the
 /// operator pressed MAIN on MAIN, and the mode is one whose screen MAIN is.
 pub(super) fn alternate_active(app: &LincApp) -> bool {
-    app.main_view == MainView::Coordinates && app.main_alternate_available()
+    app.main_matrix_active()
 }
 
 /// One line of a matrix card: the axis name and the figure beside it.

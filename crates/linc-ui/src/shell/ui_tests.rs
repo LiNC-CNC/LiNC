@@ -7588,6 +7588,70 @@ fn the_manual_shortcuts_are_grouped_by_subject() {
     assert_eq!(titles, ["VIEW", "HOMING"], "{titles:?}");
 }
 
+/// The coordinate matrix takes the toolpath's place, so the view group goes with
+/// it: VIEW, FIT, BOUNDS, CLEAR TRAIL and the pan/zoom hints would change state
+/// the operator cannot see. MAIN stays on the navigation row, so the way back
+/// does not need the shortcut pane.
+#[test]
+fn the_coordinate_matrix_drops_the_view_shortcuts() {
+    fn titles(harness: &ProbeHarness) -> Vec<&'static str> {
+        harness
+            .app
+            .key_hints()
+            .iter()
+            .map(|group| group.title)
+            .collect()
+    }
+
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    assert_eq!(harness.app.nav.page, Page::Machine);
+    harness.frame(&[]);
+    let dashboard = titles(&harness);
+    assert!(dashboard.contains(&"VIEW"), "{dashboard:?}");
+    let coords = harness
+        .app
+        .key_hints()
+        .into_iter()
+        .find(|group| group.title == "VIEW")
+        .is_some_and(|group| group.items.iter().any(|item| item.label == "COORDS"));
+    assert!(coords, "the dashboard names the matrix key it still has");
+
+    harness.app.request_mode_page();
+    assert!(harness.app.main_matrix_active());
+    harness.frame(&[]);
+    let matrix = titles(&harness);
+    assert!(!matrix.contains(&"VIEW"), "{matrix:?}");
+    assert!(
+        matrix.contains(&"PROGRAM"),
+        "the groups that still apply stay: {matrix:?}"
+    );
+
+    harness.app.request_mode_page();
+    harness.frame(&[]);
+    assert!(
+        titles(&harness).contains(&"VIEW"),
+        "the dashboard brings the view group back"
+    );
+}
+
+/// The manual page draws the same matrix in place of its live graph, so its
+/// view group goes the same way.
+#[test]
+fn the_matrix_drops_the_view_shortcuts_on_the_manual_page() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.app.request_mode_page();
+    harness.frame(&[]);
+    assert!(harness.app.main_matrix_active());
+    let titles: Vec<&str> = harness
+        .app
+        .key_hints()
+        .iter()
+        .map(|group| group.title)
+        .collect();
+    assert_eq!(titles, ["SPINDLE", "MANUAL"], "{titles:?}");
+}
+
 /// AUTO keeps the spindle chords for itself: the page may be showing, but the
 /// panel mode decides, and nothing goes out.
 #[test]
