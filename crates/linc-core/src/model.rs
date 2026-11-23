@@ -1396,7 +1396,22 @@ pub struct PanelSnapshot {
     pub power_off_pulse: bool,
 }
 
+/// Bit positions in [`PanelSnapshot::buttons`], as the panel's serial frame
+/// numbers them. The panel driver publishes the whole word, so the HMI reads a
+/// key by its bit rather than through a pin of its own.
+pub mod panel_button {
+    /// The key that used to reach `halui.program.run` from HAL directly.
+    pub const CYCLE_START: u32 = 14;
+    /// Cycle stop: feed hold, or the alarm's acknowledge while a fault stands.
+    pub const CYCLE_STOP: u32 = 15;
+}
+
 impl PanelSnapshot {
+    /// Whether the panel's key at `bit` is down right now.
+    pub fn button(&self, bit: u32) -> bool {
+        self.buttons & (1u64 << bit) != 0
+    }
+
     /// Program protect is a safety input: unknown or stale means locked.
     pub fn protect_effective(&self) -> bool {
         !self.program_protect_known || self.program_protect

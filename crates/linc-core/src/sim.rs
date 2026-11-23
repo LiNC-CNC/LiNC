@@ -1534,6 +1534,25 @@ impl MachineBackend for SimBackend {
                 }
                 Ok(())
             }
+            MachineCommand::CycleStart => {
+                if self.snapshot.program.line_count == 0 {
+                    return Err(MachineError::Invalid("no program is loaded".into()));
+                }
+                // Every panel gate the run-from-line path applies, which is what
+                // the machine's own task checks before it starts a program.
+                if self.snapshot.panel.mode.mode() != Some(crate::model::PanelMode::Auto) {
+                    return Err(MachineError::Invalid("panel mode is not AUTO".into()));
+                }
+                if self.snapshot.program.paused {
+                    // The same key resumes a held program.
+                    self.snapshot.program.paused = false;
+                }
+                self.snapshot.task.running = true;
+                self.snapshot.task.interp = InterpState::Reading;
+                self.snapshot.task.mode = TaskMode::Auto;
+                self.snapshot.program.current_line = 1;
+                Ok(())
+            }
             MachineCommand::RunFromLine { line } => {
                 if !self.snapshot.writes_allowed() {
                     if self.snapshot.panel.protect_effective() {
@@ -3308,4 +3327,26 @@ enabled = true
         assert!(result.has_parameter(1009));
         assert_eq!(result.measured.get("Z").copied(), Some(1.5));
     }
+    /// Cycle stop holds the program; the same key has to resume it. A paused
+    /// program is not idle, and a run-and-resume pair that both demanded an idle
+    /// interpreter left the operator with no way to continue after a feed hold.
+    #[test]
+    fn cycle_start_resumes_a_held_program() {
+        let (dir, profile) = profile_fixture();
+        let mut sim = SimBackend::new(profile, PanelMode::Auto);
+        sim.send(MachineCommand::CycleStart).expect("start");
+        assert!(sim.snapshot().task.running);
+        // Cycle stop: feed hold, which leaves the interpreter paused.
+        sim.snapshot.program.paused = true;
+        sim.snapshot.task.interp = InterpState::Paused;
+        sim.send(MachineCommand::CycleStart).expect("resume");
+        let after = sim.snapshot();
+        assert!(!after.program.paused, "the hold is released");
+        assert_eq!(
+            after.task.interp,
+            InterpState::Reading,
+            "and the interpreter carries on"
+        );
+    }
+
 }

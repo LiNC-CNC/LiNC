@@ -40,9 +40,42 @@ pub struct CncPanelHal {
     home_state_z: HalPin,
     communication_error: HalPin,
     panel_connected: HalPin,
+    /// When the cycle-start key was last seen down. A momentary key read by the
+    /// HMI from a 20 Hz snapshot is missed whenever the tap is shorter than the
+    /// polling window - the operator pressed, nothing happened, and pressing
+    /// again looked like the cure. Holding the pin for MIN_KEY_HOLD makes every
+    /// press a press.
+    cycle_start_seen: Option<std::time::Instant>,
 }
 
 unsafe impl Send for CncPanelHal {}
+
+/// The pin level for a momentary key that a 20 Hz reader has to see.
+///
+/// `pressed` records the press as it happens and keeps the pin high until the
+/// hold expires, so the level the HMI reads is never shorter than the interval it
+/// samples at. Without it a tap that starts and ends between two status snapshots
+/// leaves no trace at all: the operator presses, nothing happens, and pressing
+/// again looks like the cure.
+fn held_for_reading(
+    pressed: bool,
+    seen: &mut Option<std::time::Instant>,
+    hold: std::time::Duration,
+    now: std::time::Instant,
+) -> bool {
+    if pressed {
+        *seen = Some(now);
+        return true;
+    }
+    match *seen {
+        Some(at) if now.duration_since(at) < hold => true,
+        Some(_) => {
+            *seen = None;
+            false
+        }
+        None => false,
+    }
+}
 
 impl CncPanelHal {
     pub fn new() -> Result<Self, HalError> {
@@ -150,6 +183,7 @@ impl CncPanelHal {
             home_state_z,
             communication_error,
             panel_connected,
+            cycle_start_seen: None,
         })
     }
 
@@ -159,13 +193,26 @@ impl CncPanelHal {
 
     /// Publish the decoded panel state to HAL.
     pub fn apply_outputs(&mut self, outputs: &PanelOutputs) {
+        // How long a momentary key stays on its pin. The HMI samples the panel
+        // word through the status snapshot, at 20 Hz, so anything shorter than
+        // 50 ms can fall entirely between two reads; 200 ms is four samples and
+        // shorter than any deliberate press.
+        const MIN_KEY_HOLD: std::time::Duration = std::time::Duration::from_millis(200);
         unsafe {
             for (_name, mask, pin) in &self.button_pins {
-                let pressed = match *mask {
+                let mut pressed = match *mask {
                     crate::buttons::PROGRAM_PROTECT => outputs.program_protect,
                     crate::buttons::ESTOP => outputs.estop,
                     _ => outputs.buttons & *mask != 0,
                 };
+                if *mask == crate::buttons::CYCLE_START {
+                    pressed = held_for_reading(
+                        pressed,
+                        &mut self.cycle_start_seen,
+                        MIN_KEY_HOLD,
+                        std::time::Instant::now(),
+                    );
+                }
                 *pin.bit() = pressed as u8;
             }
             for (_name, mode, pin) in &self.mode_pins {
@@ -246,6 +293,42 @@ pub fn mode_bitmap(mode: PanelModeValidity) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// A tap shorter than the reader's sampling interval still reaches the pin,
+    /// and the pin goes low once it has been held long enough to be read.
+    #[test]
+    fn a_short_tap_is_held_for_the_reader() {
+        let hold = std::time::Duration::from_millis(200);
+        let t0 = std::time::Instant::now();
+        let mut seen = None;
+        assert!(held_for_reading(true, &mut seen, hold, t0));
+        assert!(
+            held_for_reading(
+                false,
+                &mut seen,
+                hold,
+                t0 + std::time::Duration::from_millis(199)
+            ),
+            "still held while the reader catches up"
+        );
+        assert!(
+            !held_for_reading(
+                false,
+                &mut seen,
+                hold,
+                t0 + std::time::Duration::from_millis(200)
+            ),
+            "released once the hold has expired"
+        );
+        assert!(
+            !held_for_reading(false, &mut seen, hold, t0),
+            "and stays low"
+        );
+        // A second press starts a fresh hold.
+        assert!(held_for_reading(true, &mut seen, hold, t0));
+    }
+
     use super::*;
 
     #[test]

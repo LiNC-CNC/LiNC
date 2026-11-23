@@ -409,7 +409,7 @@ pub struct LincHal {
     net_safe: HalPin,
     /// Program interlock: high while the buffer on screen is the loaded program,
     /// holds no syntax fault and is not dirty. The machine HAL ANDs it into
-    /// cycle start, because the panel's CYCLE START does not pass through LiNC.
+    /// cycle start.
     program_ok: HalPin,
     /// Cabinet machine-on switch, wired through the post-GUI HAL. A falling
     /// edge is a switch-off request that ends the session, except while a probe

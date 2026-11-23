@@ -81,10 +81,8 @@ pub enum LincOutput {
     NetworkSafe,
     /// The buffer on screen is the program the interpreter holds, it holds no
     /// syntax fault, and it has not been edited since. The machine HAL ANDs this
-    /// into cycle start, the way it ANDs `net-safe`: the panel's CYCLE START
-    /// reaches `halui.program.run` without passing through LiNC, so this pin is
-    /// the only thing that can stop a broken file from starting. Low while a
-    /// file is refused, dirty, or not the loaded one, and after an unload.
+    /// into cycle start, the way it ANDs `net-safe`: Low while a file is refused,
+    /// dirty, or not the loaded one, and after an unload.
     ProgramOk,
 }
 
@@ -316,11 +314,19 @@ pub enum MachineCommand {
         output: LincOutput,
         value: HalValue,
     },
+    /// One press of the panel's CYCLE START key, decided by the HMI.
+    ///
+    /// Sent to the controller as `EMC_TASK_PLAN_RUN` (or `EMC_TASK_PLAN_RESUME`
+    /// for a paused program), not through a HAL pin: `halui` fires
+    /// `halui.program.run` on *either* edge of its pin, so a pulse from the HMI
+    /// produced two run commands per press - the second refused, and after a
+    /// reset the refusals are what the operator saw as a dead key.
+    CycleStart,
     /// Start the loaded program at `line`, skipping everything before it.
     ///
-    /// This is the one program-start the HMI initiates: a line number cannot
-    /// come from the panel. It still requires the panel to be in AUTO, so the
-    /// panel remains the authority over whether the machine may run.
+    /// A line number cannot come from the panel. It still requires the panel to
+    /// be in AUTO, so the panel remains the authority over whether the machine
+    /// may run.
     RunFromLine {
         line: u32,
     },
@@ -353,6 +359,7 @@ impl MachineCommand {
             Self::ZeroWorkOffset { .. } => "Zero work offset",
             Self::SetWorkPosition { .. } => "Set work position",
             Self::RunFromLine { .. } => "Run from line",
+            Self::CycleStart => "Cycle start",
             Self::SetToolTableRow { .. } => "Set tool table row",
             Self::DeleteToolTableRow { .. } => "Delete tool table row",
             Self::SyncToolTable => "Sync tool table",
