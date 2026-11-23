@@ -279,7 +279,7 @@ impl LincApp {
         let motion = if self.snapshot.machine.on {
             "MOTION IS ENABLED."
         } else {
-            "MOTION IS DISABLED AND HOME WILL NOT WORK UNTIL IT IS RE-ENABLED."
+            "MOTION IS DISABLED — A TRIPPED LIMIT HOLDS IT OFF. RECOVER ARMS THE OVERRIDE AND RE-ENABLES IT."
         };
         ui.label(format!("{limit} TRIPPED. {motion}"));
         ui.add_space(4.0);

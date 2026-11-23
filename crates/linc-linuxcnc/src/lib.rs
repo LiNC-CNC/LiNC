@@ -866,9 +866,62 @@ impl NmlBackend {
     fn arm_limits_override(&mut self, axis: &str) -> Result<(), MachineError> {
         let snapshot = self.refresh();
         linc_core::recovery::check_gates(&snapshot, axis)?;
+        self.enter_manual_for_override()?;
         self.nml_send(&NmlCommand::OverrideLimits)?;
         self.wait_complete(Duration::from_secs(1))?;
+        self.wait_override_armed(axis)?;
         self.enable_motion()
+    }
+
+    /// `EMC_JOINT_OVERRIDE_LIMITS` is only honoured while the task is in MANUAL
+    /// mode: `emctaskmain.cc` drops it in AUTO or MDI and still reports success,
+    /// so an override sent from a program's leavings arms nothing and the
+    /// enable that follows fails with a message about motion instead of about
+    /// the mode. Read the mode back before sending it.
+    fn enter_manual_for_override(&mut self) -> Result<(), MachineError> {
+        if self.poll_status()?.task.mode == NmlTaskMode::Manual {
+            return Ok(());
+        }
+        // The mode an MDI block restores 400 ms later would undo this.
+        self.pending_restore = None;
+        self.nml_send(&NmlCommand::SetMode(NmlTaskMode::Manual))?;
+        let deadline = Instant::now() + Duration::from_millis(500);
+        loop {
+            if self.poll_status()?.task.mode == NmlTaskMode::Manual {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(MachineError::Backend(
+                    "the task would not switch to manual mode".into(),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// The echo of the override proves the task read the message, not that
+    /// motion masked anything: `overrideLimitMask` changes in the servo thread
+    /// afterwards. Poll the joint's own `override_limits` the way
+    /// `enable_motion` polls `motion.enabled`.
+    fn wait_override_armed(&mut self, axis: &str) -> Result<(), MachineError> {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let armed = self
+                .refresh()
+                .machine
+                .overridden
+                .iter()
+                .any(|(name, armed)| name.eq_ignore_ascii_case(axis) && *armed);
+            if armed {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(MachineError::Backend(
+                    "the limits override did not arm".into(),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     /// `EMC_TASK_SET_STATE(ON)` is the only path from the HMI to motion's
