@@ -437,27 +437,34 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
         // One status line. The buffer's name and editability are in the header;
         // everything here is progress, so a wrapped row would only cost the
         // listing a line to say nothing twice.
-        // The fault list is what the operator walks, so the status names the one
-        // he is on and how many there are; the parser's fatal fault is the first
-        // entry when it stopped the drawing.
+        //
+        // The counter and the line number are what tells the operator where he is
+        // in the list, so they are measured against the row and never cut. The
+        // message is the part that gives way: it is fitted on its own into what
+        // the prefix leaves, so a long fault reads `SYNTAX 7/10  LN 28: paramete…`
+        // instead of pushing the row past the pane. The walk itself has no
+        // buttons: `fault_next`/`fault_prev` are the way, and the hint row names
+        // them.
         let issue_count = app.program.issues.len();
-        let (status, status_color) = match app.program.issues.get(app.program.issue_index) {
-            Some(issue) if issue_count > 1 => (
-                format!(
-                    "SYNTAX {}/{}  LN {}: {}",
-                    app.program.issue_index + 1,
-                    issue_count,
-                    issue.line,
-                    issue.message
+        let (status, fault_message, status_color) =
+            match app.program.issues.get(app.program.issue_index) {
+                Some(issue) if issue_count > 1 => (
+                    format!(
+                        "SYNTAX {}/{}  LN {}: ",
+                        app.program.issue_index + 1,
+                        issue_count,
+                        issue.line
+                    ),
+                    Some(issue.message.as_str()),
+                    theme::ERROR,
                 ),
-                theme::ERROR,
-            ),
-            Some(issue) => (
-                format!("SYNTAX LN {}: {}", issue.line, issue.message),
-                theme::ERROR,
-            ),
-            None => ("PREVIEW VALID".to_string(), theme::SUCCESS),
-        };
+                Some(issue) => (
+                    format!("SYNTAX LN {}: ", issue.line),
+                    Some(issue.message.as_str()),
+                    theme::ERROR,
+                ),
+                None => ("PREVIEW VALID".to_string(), None, theme::SUCCESS),
+            };
         // Inside a subroutine the controller reports a line of the routine's own
         // file and does not publish that file's name, so the preview names it.
         let chip = subroutine_chip(app);
@@ -485,17 +492,21 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                         .as_deref()
                         .map_or(0.0, |text| theme::measure(ui, text, 9.0) + 10.0)
                     + 16.0;
-                let room = (ui.available_width() - reserved).max(60.0);
-                let text = fit_text(ui, &readout.line(), room);
-                let cut = text != readout.line();
-                let response = ui.label(
-                    RichText::new(text)
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(theme::ACCENT),
-                );
-                if cut {
-                    response.on_hover_text(readout.line());
+                // No floor either: the status to its right keeps its glyphs, and
+                // the readout is the one that disappears when the row is short.
+                let room = (ui.available_width() - reserved).max(0.0);
+                if room > 24.0 {
+                    let text = fit_text(ui, &readout.line(), room);
+                    let cut = text != readout.line();
+                    let response = ui.label(
+                        RichText::new(text)
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(theme::ACCENT),
+                    );
+                    if cut {
+                        response.on_hover_text(readout.line());
+                    }
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
@@ -503,43 +514,26 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                 let chip_room = chip
                     .as_deref()
                     .map_or(0.0, |text| theme::measure(ui, text, 9.0) + 10.0);
-                let room = (ui.available_width() - chip_room).max(80.0);
-                // The buttons sit left of the message (right-to-left layout puts
-                // the last widget added furthest left), so the row still reads
-                // "< 2/5  SYNTAX ..." when the message is cut short.
-                if issue_count > 1 {
-                    if ui
-                        .small_button(RichText::new("\u{25b6}").size(theme::font_size(9.0)))
-                        .on_hover_text(format!(
-                            "next fault ({})",
-                            app.prefs.keymap.fault_next.label()
-                        ))
-                        .clicked()
-                    {
-                        app.cycle_issue(1);
+                // Right-to-left: this group owns what the left-hand labels left
+                // behind, so its own available width is the whole room. No floor:
+                // a floor is what pushed the row past the pane on a narrow window.
+                let room = (ui.available_width() - chip_room).max(0.0);
+                if room > 8.0 {
+                    let shown = fitted_status(ui, &status, fault_message, room);
+                    let response = ui.label(
+                        RichText::new(shown.clone())
+                            .monospace()
+                            .size(theme::font_size(9.0))
+                            .color(status_color),
+                    );
+                    // A cut message stays readable on hover instead of wrapping
+                    // the row into a second line.
+                    if let Some(message) = fault_message {
+                        let full = format!("{status}{message}");
+                        if shown != full {
+                            response.on_hover_text(full);
+                        }
                     }
-                    if ui
-                        .small_button(RichText::new("\u{25c0}").size(theme::font_size(9.0)))
-                        .on_hover_text(format!(
-                            "previous fault ({})",
-                            app.prefs.keymap.fault_prev.label()
-                        ))
-                        .clicked()
-                    {
-                        app.cycle_issue(-1);
-                    }
-                }
-                let fitted = fit_text(ui, &status, room);
-                let response = ui.label(
-                    RichText::new(fitted.clone())
-                        .monospace()
-                        .size(theme::font_size(9.0))
-                        .color(status_color),
-                );
-                // A cut message stays readable on hover instead of wrapping the
-                // row into a second line.
-                if fitted != status {
-                    response.on_hover_text(&status);
                 }
                 if let Some(chip) = &chip {
                     ui.label(
@@ -569,6 +563,34 @@ fn subroutine_chip(app: &LincApp) -> Option<String> {
 }
 
 /// `text` cut to `room` pixels on a character boundary, marked where it ends.
+/// The status string cut to `room` without ever losing the fault counter or the
+/// line number: the prefix is measured first and kept whole, and only the message
+/// is fitted into what is left. A message with no room to say anything is dropped
+/// rather than dragged past the edge of the pane.
+fn fitted_status(ui: &Ui, prefix: &str, message: Option<&str>, room: f32) -> String {
+    let prefix_room = theme::measure(ui, prefix, 9.0);
+    // A pane narrow enough that even the counter does not fit: cut the line as a
+    // whole, so the row still stops at the edge and keeps as much of the counter
+    // as there is room for. Measured, not guessed: at 9 pt the mill counter
+    // `SYNTAX 7/10  LN 28: ` is 135 px, which is already wider than a quarter of
+    // the pane.
+    if prefix_room > room {
+        let full = match message {
+            Some(message) => format!("{prefix}{message}"),
+            None => prefix.to_string(),
+        };
+        return fit_text(ui, &full, room);
+    }
+    let Some(message) = message else {
+        return prefix.to_string();
+    };
+    let left = room - prefix_room;
+    if left <= 12.0 {
+        return prefix.to_string();
+    }
+    format!("{prefix}{}", fit_text(ui, message, left))
+}
+
 fn fit_text(ui: &Ui, text: &str, room: f32) -> String {
     if theme::measure(ui, text, 9.0) <= room {
         return text.to_string();
@@ -898,6 +920,24 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     }
                 }
             }
+            // The fault under the cursor, in full. The footer shortens the
+            // message to fit one row, so this is where the operator reads it: a
+            // red box clear of the line it belongs to, above when the line sits
+            // low in the viewport and below when it sits high. A wrapped line is
+            // cleared across every row it occupies, which is why the box is
+            // placed from the line's row span and not from its first row.
+            if current <= starts.len() {
+                let say: Vec<&str> = issues
+                    .iter()
+                    .filter(|issue| issue.line == current)
+                    .map(|issue| issue.message.as_str())
+                    .collect();
+                if !say.is_empty() {
+                    let (top, bottom) =
+                        line_span(&output.galley, output.galley_pos.y, &starts, current);
+                    fault_box(ui, &painter, clip, (top, bottom), &say.join("  \u{00b7}  "));
+                }
+            }
             if let Some(line) = scroll_to {
                 let index = line.max(1).min(starts.len());
                 scroll_target = Some(line_span(
@@ -927,6 +967,83 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             ui.scroll_to_rect(rect, Some(egui::Align::Center));
         }
     });
+}
+
+/// Where a fault box goes: on the side of the line with the room for it, and
+/// never overlapping the line's rows. `line` is the block's full painted span, so
+/// a wrapped block is cleared whole.
+///
+/// The box is placed, then clamped into the clip rect on the side it chose. When
+/// neither side holds the whole box, the side with more room keeps it and the box
+/// is shortened; the edge nearest the line never crosses into the line.
+fn fault_box_rect(clip: egui::Rect, line: (f32, f32), size: egui::Vec2) -> egui::Rect {
+    const GAP: f32 = 5.0;
+    let (top, bottom) = line;
+    let above = (top - GAP - clip.top()).max(0.0);
+    let below = (clip.bottom() - bottom - GAP).max(0.0);
+    // Below first when it has room: the line under the cursor is read downwards,
+    // and a box that jumps above it on every small scroll is harder to follow.
+    let use_below = below >= size.y || below >= above;
+    let (start, room) = if use_below {
+        (bottom + GAP, below)
+    } else {
+        (top - GAP - size.y.min(above), above)
+    };
+    let height = size.y.min(room.max(0.0));
+    let width = size.x.min(clip.width());
+    let y = if use_below {
+        start.min(clip.bottom() - height)
+    } else {
+        (top - GAP - height).max(clip.top())
+    };
+    egui::Rect::from_min_size(
+        egui::pos2(clip.left(), y.max(clip.top())),
+        egui::vec2(width, height),
+    )
+}
+
+/// The box itself: red rim, red text, wrapped to the pane. Long messages grow
+/// downwards from wherever the box was placed.
+fn fault_box(ui: &Ui, painter: &egui::Painter, clip: egui::Rect, line: (f32, f32), message: &str) {
+    const PAD: egui::Vec2 = egui::vec2(7.0, 4.0);
+    const MAX_WIDTH: f32 = 420.0;
+    let font = FontId::monospace(theme::font_size(9.5));
+    let wrap = (clip.width() - 2.0 * PAD.x).min(MAX_WIDTH).max(80.0);
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = wrap;
+    job.append(
+        message,
+        0.0,
+        TextFormat {
+            font_id: font,
+            color: theme::ERROR,
+            background: Color32::TRANSPARENT,
+            italics: false,
+            ..Default::default()
+        },
+    );
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let size = galley.size() + 2.0 * PAD;
+    let rect = fault_box_rect(clip, line, size);
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return;
+    }
+    painter.rect_filled(
+        rect,
+        egui::CornerRadius::same(3),
+        theme::tint(theme::ERROR, 0x2e),
+    );
+    painter.rect_stroke(
+        rect,
+        egui::CornerRadius::same(3),
+        egui::Stroke::new(1.0, theme::ERROR),
+        egui::StrokeKind::Inside,
+    );
+    // Clipped to its own box: a message taller than the room on its side is cut
+    // at the rim instead of spilling over the line or the pane edge.
+    painter
+        .with_clip_rect(rect)
+        .galley(rect.min + PAD, galley, theme::ERROR);
 }
 
 /// Top and bottom of one logical line's painted rows, from its first row to
@@ -1081,6 +1198,97 @@ mod tests {
             job.format_at_byte(egui::text::ByteIndex(third)).background,
             theme::tint(theme::ERROR, 0x2b),
             "a fault further down the file stays marked"
+        );
+    }
+
+    /// The status row keeps the counter and the line and gives up message text:
+    /// the row must not grow past the width it was given, whatever the message.
+    /// The fault box never covers the line it describes: below a line high in the
+    /// viewport, above one low in it, and clear of a wrapped block's whole span
+    /// either way.
+    #[test]
+    fn the_fault_box_keeps_off_the_line_it_describes() {
+        let clip = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(400.0, 300.0));
+
+        // A line near the top: the box goes below it.
+        let high = (20.0, 36.0);
+        let below = fault_box_rect(clip, high, egui::vec2(300.0, 40.0));
+        assert!(below.top() >= high.1, "{below:?} covers the line {high:?}");
+
+        // A line near the bottom: above it, and still inside the viewport.
+        let low = (250.0, 272.0);
+        let above = fault_box_rect(clip, low, egui::vec2(300.0, 40.0));
+        assert!(above.bottom() <= low.0, "{above:?} covers the line {low:?}");
+        assert!(above.top() >= clip.top());
+
+        // A wrapped block spans several rows; the box clears all of them.
+        let wrapped = (120.0, 210.0);
+        let boxed = fault_box_rect(clip, wrapped, egui::vec2(300.0, 30.0));
+        assert!(
+            boxed.bottom() <= wrapped.0 || boxed.top() >= wrapped.1,
+            "{boxed:?} overlaps the wrapped span {wrapped:?}"
+        );
+
+        // A box taller than either side is shortened, not allowed to overlap.
+        let tight = fault_box_rect(clip, (120.0, 180.0), egui::vec2(300.0, 500.0));
+        assert!(
+            tight.bottom() <= 120.0 || tight.top() >= 180.0,
+            "{tight:?} overlaps the line (120..180)"
+        );
+        assert!(tight.top() >= clip.top() && tight.bottom() <= clip.bottom());
+
+        // Never wider than the pane, whatever the message wants.
+        let wide = fault_box_rect(clip, high, egui::vec2(900.0, 20.0));
+        assert!(
+            wide.width() <= clip.width(),
+            "{wide:?} is wider than {clip:?}"
+        );
+    }
+
+    #[test]
+    fn a_long_fault_message_is_cut_and_never_pushes_the_row() {
+        let ctx = egui::Context::default();
+        let mut results: Vec<(String, f32, f32, f32)> = Vec::new();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let prefix = "SYNTAX 7/10  LN 28: ";
+            let message = "parameter assignment has no value";
+            let prefix_room = theme::measure(ui, prefix, 9.0);
+            // 400 px holds the line in full; the rest are narrower than the
+            // message, the prefix, and finally than the counter itself.
+            for room in [400.0_f32, 240.0, 180.0, 90.0, 24.0] {
+                let shown = fitted_status(ui, prefix, Some(message), room);
+                let width = theme::measure(ui, &shown, 9.0);
+                results.push((shown, room, width, prefix_room));
+            }
+        });
+        // The first frame paints into the font atlas; egui insists the deltas are
+        // either uploaded or dropped deliberately.
+        output.textures_delta.clear();
+        for (index, (shown, room, width, prefix_room)) in results.iter().enumerate() {
+            assert!(
+                *width <= *room + 0.5,
+                "{shown:?} is {width} px wide in {room} px"
+            );
+            if index == 0 {
+                continue;
+            }
+            if *room >= *prefix_room {
+                // Enough room for the counter and the line: they are kept whole
+                // and the message gives way.
+                assert!(
+                    shown.starts_with("SYNTAX 7/10  LN 28: "),
+                    "the counter and the line must survive the cut: {shown:?}"
+                );
+            }
+            assert!(
+                !shown.contains("assignment"),
+                "the message must be the part that gives way: {shown:?}"
+            );
+        }
+        // The widest room shows the message in full: nothing is cut that fits.
+        assert_eq!(
+            results[0].0,
+            "SYNTAX 7/10  LN 28: parameter assignment has no value"
         );
     }
 

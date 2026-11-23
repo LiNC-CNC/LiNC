@@ -2949,8 +2949,10 @@ fn a_file_with_a_syntax_fault_is_not_loaded_into_the_interpreter() {
                 MachineCommand::SetHalOutput { output, value } => Some((*output, *value)),
                 _ => None,
             })
-            .any(|(output, value)| output == linc_core::command::LincOutput::ProgramOk
-                && value == linc_core::command::HalValue::Bit(true)),
+            .any(
+                |(output, value)| output == linc_core::command::LincOutput::ProgramOk
+                    && value == linc_core::command::HalValue::Bit(true)
+            ),
         "the interlock was opened for a file the check refused"
     );
 }

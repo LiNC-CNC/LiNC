@@ -488,7 +488,9 @@ pub struct KeysConfig {
     pub program_run_from_line: String,
     /// Page-local to Program: walk the syntax faults marked in the editor,
     /// wrapping at both ends. Two chords rather than a Shift pair: the panel's
-    /// keyboard has no Shift key, and F8 is the OFFSETS page.
+    /// keyboard has no Shift key, and F8 is the OFFSETS page. The manual screens
+    /// bind the same two chords for the spindle speed; a binding is page-local,
+    /// so both can have them.
     pub fault_next: String,
     pub fault_prev: String,
     pub files_delete: String,
@@ -560,8 +562,8 @@ impl KeysConfig {
             spindle_speed: "Ctrl+S".into(),
             goto_line: "Ctrl+G".into(),
             program_run_from_line: "Ctrl+R".into(),
-            fault_next: "Ctrl+K".into(),
-            fault_prev: "Ctrl+P".into(),
+            fault_next: "Ctrl+PageDown".into(),
+            fault_prev: "Ctrl+PageUp".into(),
             files_delete: "Delete".into(),
             tools: "F7".into(),
             offsets: "F8".into(),

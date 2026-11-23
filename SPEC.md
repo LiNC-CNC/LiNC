@@ -905,10 +905,25 @@ Program rules:
   fault, which is underlined in red; its line is washed red, its gutter number is
   red and a red bar marks it in the gutter. The fault the operator is on carries
   a stronger wash.
-- **Ctrl+K** and **Ctrl+P** (`fault_next`, `fault_prev`) walk the fault list,
-  wrapping at both ends, and move the caret and the scroll to the fault's line;
-  the status row shows `n/total` and the same two steps as clickable arrows. Not
-  F8/Shift+F8: F8 is the OFFSETS page and the panel's keyboard has no Shift. The operator's place survives a
+- **Ctrl+PageDown** and **Ctrl+PageUp** (`fault_next`, `fault_prev`) walk the
+  fault list, wrapping at both ends, and move the caret and the scroll to the
+  fault's line; the hint row names the pair and the status row shows
+  `n/total LN n` in front of the message. There are no buttons for it in the
+  footer. Not F8/Shift+F8: F8 is the OFFSETS page and the panel's keyboard has no
+  Shift. The manual screens bind the same two chords to the spindle speed, which
+  is safe because a binding is page-local.
+- The status row never overflows the pane: the counter and the line number are
+  measured first and kept whole, and only the message is fitted into what is
+  left, ending in an ellipsis. The full text is on hover. The loop readout to its
+  left is dropped entirely rather than pushed past the edge when the row is
+  narrow.
+- The fault on the line under the cursor is shown in full in a red box in the
+  editor: below the line when it sits high in the viewport, above it when it sits
+  low, and never over any row of the line itself - a wrapped block is cleared
+  across every row it occupies. The box is clamped inside the editor, so it
+  cannot cover the assignment line above or below either; when neither side has
+  room for the whole message the box keeps the larger side and is cut at its own
+  rim rather than spilling over the line. The operator's place survives a
   rebuild: a repair that moves or removes a fault keeps him on the same fault
   while it still exists, and falls back into range when it does not.
 - A program with a fault is **not loaded** into the interpreter while

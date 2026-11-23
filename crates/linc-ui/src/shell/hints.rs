@@ -198,6 +198,14 @@ impl LincApp {
                     // Unload closes the controller's program, which is also what
                     // releases the external-link interlock.
                     Shortcut::run("Ctrl+U", "UNLOAD", ShortcutCommand::UnloadProgram),
+                    // The fault walk has no buttons in the pane footer: the counter
+                    // and the line are there, and these two chords are the only way
+                    // to move between the marks. One entry, because the pair is a
+                    // single idea.
+                    Shortcut::hint(
+                        format!("{}/{}", k.fault_prev.label(), k.fault_next.label()),
+                        "FAULT",
+                    ),
                 ]);
                 groups.push(ShortcutGroup {
                     title: "PROGRAM",
