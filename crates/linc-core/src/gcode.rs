@@ -1388,11 +1388,27 @@ fn apply_arc(
     };
     let (center_u, center_v, radius) = if let Some(radius) = r {
         let chord = sep(start, end);
-        if chord <= 1e-12 || radius.abs() < chord * 0.5 - 1e-9 {
+        // The interpreter's own leeway for an R word, from `arc_data_r`:
+        // a radius short of the chord by up to RADIUS_TOLERANCE still runs, and
+        // a half circle within TINY of the chord is clamped to an exact one so
+        // `asin` of a ratio a hair over 1 does not wobble. CAM output rounded to
+        // three decimals lands inside that tolerance all the time - 1.8 mm for a
+        // 3.60033 mm chord is 0.17 um short and the machine runs it - so refusing
+        // it here blocked a file LinuxCNC itself accepts.
+        const RADIUS_TOLERANCE: f64 = 0.00005 * 25.4;
+        const TINY: f64 = 1e-12;
+        let abs_radius = radius.abs();
+        let half = chord * 0.5;
+        if chord <= TINY || half - abs_radius > RADIUS_TOLERANCE {
             return None;
         }
         let midpoint = [(start[u] + end[u]) * 0.5, (start[v] + end[v]) * 0.5];
-        let h = (radius * radius - chord * chord * 0.25).max(0.0).sqrt();
+        let half = if half / abs_radius > 1.0 - TINY {
+            abs_radius
+        } else {
+            half
+        };
+        let h = (radius * radius - half * half).max(0.0).sqrt();
         let dx = (end[u] - start[u]) / chord;
         let dy = (end[v] - start[v]) / chord;
         let sign = if clockwise { -1.0 } else { 1.0 };
@@ -4620,6 +4636,9 @@ pub fn parse_preview_full(
     let mut comp_radius_unknown: Option<(usize, u16)> = None;
     // G98 (initial Z) is the default retract mode; G99 retracts to R.
     let mut retract_to_r = false;
+    // Faults only a modal reading can see, kept apart from the parser's fatal
+    // verdict: the file still draws, and the operator gets one row per fault.
+    let mut modal_issues: Vec<crate::lint::LintIssue> = Vec::new();
 
     // Execution order, not file order: an o-word program calls, loops and
     // branches, so the drawn path is what the blocks do when they run.
@@ -4805,6 +4824,33 @@ pub fn parse_preview_full(
                         preview.modal.mcodes.push(format_m(value));
                     }
                 }
+            }
+        }
+
+        // G53 names machine coordinates, so the interpreter reads it narrowly:
+        // absolute mode only ("Cannot use g53 incremental"), no cutter radius
+        // compensation ("Cannot use g53 with cutter radius comp"), and no arc
+        // ("Must use g0 or g1 with g53"). Each of those is a refusal at the
+        // block, so the preview refuses it too — otherwise the program loads
+        // clean and dies at the block that runs it. Words are order-independent,
+        // so this reads the block's own G90/G91 and G41/G42 as well as the
+        // modal state it inherited.
+        if machine_coordinates {
+            let message = if !absolute {
+                Some("G53 cannot be used in incremental mode (G91)")
+            } else if comp_request.or(comp).is_some() {
+                Some("G53 cannot be used with cutter radius compensation")
+            } else if motion != 0.0 && motion != 1.0 {
+                Some("G53 needs G0 or G1, not an arc")
+            } else {
+                None
+            };
+            if let Some(message) = message {
+                modal_issues.push(crate::lint::LintIssue {
+                    line: block.line,
+                    span: None,
+                    message: message.to_string(),
+                });
             }
         }
 
@@ -5696,6 +5742,16 @@ pub fn parse_preview_full(
     // own verdict joins it when the same line does not already carry it, because
     // the parser knows something no single block can.
     preview.issues = crate::lint::lint_program(text);
+    for issue in modal_issues {
+        if !preview
+            .issues
+            .iter()
+            .any(|known| known.line == issue.line && known.message == issue.message)
+        {
+            preview.issues.push(issue);
+        }
+    }
+    preview.issues.sort_by_key(|issue| issue.line);
     if let Some(fatal) = &preview.error {
         // One entry per line from the parser: the lint already named this line
         // with the offending word's span, and two rows for one fault would cost
@@ -6599,6 +6655,127 @@ mod tests {
             (ends(&preview)[0] - 110.0).abs() < 1e-9,
             "{:?}",
             ends(&preview)
+        );
+    }
+
+    /// G53 names machine positions, so the interpreter refuses it under G91.
+    /// The preview has to refuse it too: a program that loads clean and dies on
+    /// the block that runs it is exactly what the interlock exists to stop.
+    #[test]
+    fn a_g53_block_in_incremental_mode_is_a_fault() {
+        // The same block, in either word order.
+        for text in [
+            "G21 G90\nG91 G53 G0 X10\nM2\n",
+            "G21 G90\nG53 G91 G0 X10\nM2\n",
+            // And a G91 set on an earlier block: the mode is modal.
+            "G21 G90\nG91\nG53 G0 X10\nM2\n",
+        ] {
+            let preview = parse_with_offset(text, [0.0; 3]);
+            let issue = preview
+                .issues
+                .iter()
+                .find(|issue| issue.message.contains("G53"))
+                .unwrap_or_else(|| panic!("no G53 fault in {text:?}: {:?}", preview.issues));
+            assert_eq!(
+                issue.line,
+                text.lines().position(|line| line.contains("G53")).unwrap() + 1
+            );
+        }
+        // G90, whether written in the block or inherited, is fine.
+        for text in [
+            "G21 G90\nG53 G0 X10\nM2\n",
+            "G21\nG90\nG53 G0 X10\nM2\n",
+            // G91 restored before the G53 block.
+            "G21 G90\nG91\nG90\nG53 G0 X10\nM2\n",
+        ] {
+            let preview = parse_with_offset(text, [0.0; 3]);
+            assert!(
+                !preview
+                    .issues
+                    .iter()
+                    .any(|issue| issue.message.contains("G53")),
+                "{text:?}: {:?}",
+                preview.issues
+            );
+        }
+    }
+
+    /// The rest of what `G53` will not take. Each is one refusal the
+    /// interpreter makes at the block, none of them is visible to a check that
+    /// reads a line on its own, and each therefore has to be found here or the
+    /// program runs until that line.
+    #[test]
+    fn a_g53_block_the_interpreter_refuses_is_a_fault() {
+        let faults = |text: &str| -> Vec<String> {
+            let preview = parse_with_offset(text, [0.0; 3]);
+            preview
+                .issues
+                .iter()
+                .filter(|issue| issue.message.contains("G53"))
+                .map(|issue| issue.message.clone())
+                .collect()
+        };
+        // Cutter radius compensation, whether it is set in this block or
+        // inherited from an earlier one.
+        for text in [
+            "G21 G90\nG41 D1 G1 X5\nG53 G0 X10\nM2\n",
+            "G21 G90\nG41 D1 G1 X5\nG42 G1 X6\nG53 G0 X10\nM2\n",
+        ] {
+            assert!(
+                faults(text)
+                    .iter()
+                    .any(|message| message.contains("cutter radius")),
+                "{text:?}"
+            );
+        }
+        // An arc word, and a modal arc with no motion word in the block.
+        for text in [
+            "G21 G90\nG53 G2 X10 Y10 I5 J0\nM2\n",
+            "G21 G90\nG2 X10 Y10 I5 J0\nG53 X0 Y0\nM2\n",
+        ] {
+            assert!(
+                faults(text)
+                    .iter()
+                    .any(|message| message.contains("G0 or G1")),
+                "{text:?}"
+            );
+        }
+        // A plain machine rapid is not a fault.
+        assert!(faults("G21 G90\nG53 G0 X10\nM2\n").is_empty());
+    }
+
+    /// An R word a fraction of a micron short of half the chord is what CAM
+    /// output rounded to three decimals produces, and the interpreter runs it:
+    /// `arc_data_r` allows RADIUS_TOLERANCE (1.27 um) of slack and clamps a half
+    /// circle. The preview refused this block and the file it came from would not
+    /// load - one of 8990 lines in a program the machine had been running.
+    #[test]
+    fn an_r_arc_short_of_half_the_chord_by_rounding_is_an_arc() {
+        let text = "G21 G90\nG0 X31.253 Y-8.148\nG3 X34.175 Y-10.251 R-1.8\nM2\n";
+        let preview = parse_with_offset(text, [0.0; 3]);
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let arc = preview
+            .segments
+            .iter()
+            .find(|segment| segment.kind == SegmentKind::Arc)
+            .expect("the G3 is drawn as an arc");
+        // Half a circle: the centre sits on the chord's midpoint.
+        let mid = [(31.253 + 34.175) / 2.0, (-8.148 - 10.251) / 2.0];
+        let spec = arc.arc.as_ref().expect("an arc spec");
+        assert!((spec.center[0] - mid[0]).abs() < 1e-6, "{spec:?}");
+        assert!((spec.center[1] - mid[1]).abs() < 1e-6, "{spec:?}");
+
+        // A radius that is really too small is still refused, as the
+        // interpreter refuses it.
+        let text = "G21 G90\nG0 X31.253 Y-8.148\nG3 X34.175 Y-10.251 R-1.0\nM2\n";
+        let preview = parse_with_offset(text, [0.0; 3]);
+        assert!(
+            preview
+                .error
+                .as_ref()
+                .is_some_and(|error| error.message.contains("arc")),
+            "{:?}",
+            preview.error
         );
     }
 
