@@ -92,6 +92,19 @@ impl LincApp {
     pub(super) fn sync_issues(&mut self) {
         let previous = self.program.issues.get(self.program.issue_index).cloned();
         self.program.issues = self.program.preview.issues.clone();
+        // A program the machine cannot reach is not a syntax fault, but it is
+        // exactly what the interlock is for: the 3D view paints those moves red
+        // and cycle start must refuse them. One issue, on the first offending
+        // line, so the error keys walk it like any other fault.
+        self.program.travel_violation = self.outside_travel();
+        if let Some((line, label)) = self.program.travel_violation.clone() {
+            self.program.issues.push(linc_core::lint::LintIssue {
+                line,
+                span: None,
+                message: format!("outside the machine travel envelope ({label})"),
+            });
+            self.program.issues.sort_by_key(|issue| issue.line);
+        }
         // The controller's own verdict is one more fault to walk when it names a
         // line: the operator must be able to reach the block the machine refused,
         // and it may be a block the block-level checks accept.
@@ -137,6 +150,41 @@ impl LincApp {
         });
         self.program.issue_index =
             kept.unwrap_or(self.program.issue_index.min(self.program.issues.len() - 1));
+    }
+
+    /// The first move in the preview that leaves the machine's travel box, with
+    /// its line and the limit it crosses.
+    ///
+    /// Sampled the way the toolpath paints it — arcs by the same chords
+    /// [`linc_view::arc_points`] gives the card — so the block that blocks cycle
+    /// start is the block that turns red, not a neighbour of it.
+    fn outside_travel(&self) -> Option<(usize, String)> {
+        let limits = self.machine_bounds()?;
+        for segment in &self.program.preview.segments {
+            // Straight moves are one segment; arcs are the chords the card draws.
+            let chords: Vec<([f64; 3], [f64; 3])> = match &segment.arc {
+                Some(arc) => linc_view::arc_points(segment, arc)
+                    .windows(2)
+                    .map(|pair| (pair[0], pair[1]))
+                    .collect(),
+                None => vec![(segment.start, segment.end)],
+            };
+            let offending = chords.into_iter().find(|(start, end)| {
+                !matches!(
+                    linc_view::travel::classify_segment(*start, *end, &limits),
+                    linc_view::travel::TravelClass::Inside
+                )
+            });
+            if let Some((start, end)) = offending {
+                let point = if point_inside_travel(start, &limits) {
+                    end
+                } else {
+                    start
+                };
+                return Some((segment.line, outside_label(point, &limits)));
+            }
+        }
+        None
     }
 
     /// Whether the interpreter holds exactly the program on screen, with no fault
@@ -438,6 +486,31 @@ pub(crate) struct ViewState {
 /// X is a position, never a diameter.
 pub fn x_reads_as_diameter(lathe: bool, preference: Option<bool>, program: bool) -> bool {
     lathe && preference.unwrap_or(program)
+}
+
+/// Whether a machine-space point lies inside the travel box. Bounds are
+/// inclusive, as they are for the classifier: a point on `MIN_LIMIT` is still
+/// reachable travel.
+fn point_inside_travel(point: [f64; 3], limits: &linc_core::gcode::Bounds3) -> bool {
+    (0..3).all(|axis| {
+        let (min, max) = (limits.min[axis], limits.max[axis]);
+        !min.is_finite() || !max.is_finite() || (point[axis] >= min && point[axis] <= max)
+    })
+}
+
+/// The limit a point crosses, spelled like the limit banner: `X+` past
+/// `MAX_LIMIT`, `X-` past `MIN_LIMIT`.
+fn outside_label(point: [f64; 3], limits: &linc_core::gcode::Bounds3) -> String {
+    for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
+        let (min, max) = (limits.min[axis], limits.max[axis]);
+        if point[axis] < min {
+            return format!("{name}-");
+        }
+        if point[axis] > max {
+            return format!("{name}+");
+        }
+    }
+    "LIMITS".to_string()
 }
 
 #[cfg(test)]

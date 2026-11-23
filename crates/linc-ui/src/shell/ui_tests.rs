@@ -22,7 +22,7 @@ fn fixture() -> (tempfile::TempDir, Profile) {
     .unwrap();
     std::fs::write(
         root.join("probe_basic.ini"),
-        "[EMC]\nMACHINE = Test\n[DISPLAY]\nPROGRAM_PREFIX = gcode\nTOOL_TABLE_COLUMNS = TXYZDR\n[KINS]\nJOINTS = 3\nKINEMATICS = trivkins coordinates=XYZ\n[TRAJ]\nCOORDINATES = XYZ\nLINEAR_UNITS = mm\nSPINDLES = 1\n[EMCIO]\nTOOL_TABLE = tool.tbl\n[AXIS_X]\nMIN_LIMIT = -372\nMAX_LIMIT = 5\n[AXIS_Y]\nMIN_LIMIT = -346\nMAX_LIMIT = 4\n[AXIS_Z]\nMIN_LIMIT = -253\nMAX_LIMIT = 19\n",
+        "[EMC]\nMACHINE = Test\n[DISPLAY]\nPROGRAM_PREFIX = gcode\nTOOL_TABLE_COLUMNS = TXYZDR\n[KINS]\nJOINTS = 3\nKINEMATICS = trivkins coordinates=XYZ\n[TRAJ]\nCOORDINATES = XYZ\nLINEAR_UNITS = mm\nSPINDLES = 1\n[EMCIO]\nTOOL_TABLE = tool.tbl\n[AXIS_X]\nMIN_LIMIT = -372\nMAX_LIMIT = 5\n[AXIS_Y]\nMIN_LIMIT = -346\nMAX_LIMIT = 4\n[AXIS_Z]\nMIN_LIMIT = -253\nMAX_LIMIT = 100\n",
     )
     .unwrap();
     std::fs::write(
@@ -2138,7 +2138,7 @@ fn machine_bounds_follow_the_ini_and_classify_the_toolpath() {
     let (_dir, profile) = fixture();
     let bounds = machine_bounds(&profile).expect("the INI has X/Y/Z limits");
     assert_eq!(bounds.min, [-372.0, -346.0, -253.0]);
-    assert_eq!(bounds.max, [5.0, 4.0, 19.0]);
+    assert_eq!(bounds.max, [5.0, 4.0, 100.0]);
     // The same box the toolpath painter receives. A move from X 0 to X 10
     // crosses MAX_LIMIT 5 halfway along, so the red starts halfway.
     assert_eq!(
@@ -3020,7 +3020,7 @@ fn a_file_with_a_syntax_fault_is_not_loaded_into_the_interpreter() {
 fn a_clean_file_loads_and_opens_the_interlock() {
     let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
     let path = harness._dir.path().join("gcode").join("good.ngc");
-    std::fs::write(&path, "G0 X0 Y0\nG1 X10 F300\nM2\n").unwrap();
+    std::fs::write(&path, "G0 X0 Y0\nG1 X2 F300\nM2\n").unwrap();
     harness.sent.borrow_mut().clear();
     harness.app.load_program(path.clone());
     assert!(
@@ -3035,11 +3035,62 @@ fn a_clean_file_loads_and_opens_the_interlock() {
     // The interpreter confirms the load on the next poll; until then the buffer
     // is not the loaded program and the interlock stays shut.
     harness.app.poll_backend();
-    harness.app.sync_issues();
+    harness.frame(&[]);
     assert!(
         harness.app.program.issues.is_empty(),
         "{:?}",
         harness.app.program.issues
+    );
+}
+
+/// A program whose moves leave the travel box is a fault, not just a red line:
+/// the interlock that the machine HAL gates cycle start with goes shut, and the
+/// banner names the block so the operator can jump to it.
+#[test]
+fn a_move_outside_the_travel_box_blocks_cycle_start() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let path = harness._dir.path().join("gcode").join("outside.ngc");
+    std::fs::write(&path, "G0 X0 Y0 Z0\nG1 X10 F100\nM2\n").unwrap();
+    harness.app.load_program(path);
+    harness.app.poll_backend();
+    harness.app.refresh_preview();
+    harness.frame(&[]);
+
+    assert_eq!(
+        harness.app.program.travel_violation,
+        Some((2, "X+".into())),
+        "issues: {:?}",
+        harness.app.program.issues
+    );
+    assert!(
+        harness
+            .app
+            .program
+            .issues
+            .iter()
+            .any(|issue| issue.line == 2
+                && issue
+                    .message
+                    .contains("outside the machine travel envelope")),
+        "{:?}",
+        harness.app.program.issues
+    );
+    assert!(
+        !harness.app.program_ready(),
+        "the interlock has to stay shut"
+    );
+    assert_eq!(harness.app.program_ok_sent, Some(false));
+
+    let texts: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        texts
+            .iter()
+            .any(|text| text
+                == "PROGRAM OUTSIDE MACHINE LIMITS AT LINE 2 (X+) — CYCLE START IS BLOCKED"),
+        "{texts:?}"
     );
 }
 

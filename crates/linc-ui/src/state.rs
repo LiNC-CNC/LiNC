@@ -1626,6 +1626,11 @@ pub struct ProgramUi {
     /// keys walk and the editor marks in red. Rebuilt with the preview, so it is
     /// the same text the graph was drawn from.
     pub issues: Vec<linc_core::lint::LintIssue>,
+    /// The first move the machine cannot reach, with its line and the limit it
+    /// crosses, spelled like the limit banner (`X+`). `None` when every move of
+    /// the preview lies inside the travel box — the case the 3D view shows red
+    /// and the interlock has to refuse.
+    pub travel_violation: Option<(usize, String)>,
     /// Which of [ProgramUi::issues] the operator is on. Kept across rebuilds so
     /// typing above the fault does not throw the selection away.
     pub issue_index: usize,
@@ -1652,6 +1657,7 @@ impl Default for ProgramUi {
             view: ProgramView::Split,
             preview: Preview::empty(),
             last_valid_preview: Preview::empty(),
+            travel_violation: None,
             preview_due: None,
             editor_revision_seen: 0,
             program_revision_seen: 0,

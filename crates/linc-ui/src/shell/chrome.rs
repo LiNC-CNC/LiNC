@@ -574,6 +574,18 @@ impl LincApp {
             );
             ui.add_space(4.0);
         }
+        if let Some((line, label)) = self.program.travel_violation.clone() {
+            // The 3D view paints these moves red; this is the same finding, said
+            // in words and with the line the error keys can jump to.
+            theme::banner(
+                ui,
+                theme::ERROR,
+                &format!(
+                    "PROGRAM OUTSIDE MACHINE LIMITS AT LINE {line} ({label}) — CYCLE START IS BLOCKED"
+                ),
+            );
+            ui.add_space(4.0);
+        }
         if self.nav.page == Page::Program && self.program.external_change {
             theme::banner(
                 ui,
