@@ -3837,6 +3837,39 @@ fn escape_stops_a_running_program() {
     );
 }
 
+/// The fault walk is its own legend group, ERRORS, with one row per chord: the
+/// pane lists one command per line, and a joined `Ctrl+PgUp/Ctrl+PgDn` row named
+/// two keys on one line.
+#[test]
+fn the_legend_gives_the_fault_keys_their_own_group() {
+    let (_dir, mut app) = make_app(PanelMode::Edit);
+    app.set_page(Page::Program);
+    let group = app
+        .key_hints()
+        .into_iter()
+        .find(|group| group.title == "ERRORS")
+        .expect("the Program page has an ERRORS group");
+    let rows: Vec<(String, String)> = group
+        .items
+        .iter()
+        .map(|shortcut| (shortcut.key.clone(), shortcut.label.to_string()))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            (app.prefs.keymap.fault_prev.label(), "PREV".to_string()),
+            (app.prefs.keymap.fault_next.label(), "NEXT".to_string()),
+        ],
+        "one row per chord, in key order"
+    );
+    // Nowhere else: the walk is page-local to Program.
+    app.set_page(Page::Machine);
+    assert!(
+        !app.key_hints().iter().any(|group| group.title == "ERRORS"),
+        "the ERRORS group belongs to the page that shows the marks"
+    );
+}
+
 #[test]
 fn the_sidebar_offers_reset_while_a_program_is_active() {
     let (_dir, mut app) = make_app(PanelMode::Auto);
