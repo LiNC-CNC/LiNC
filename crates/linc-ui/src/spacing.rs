@@ -22,8 +22,10 @@ pub fn is_value_word(c: char) -> bool {
 /// space in front of it.
 ///
 /// Never at the start of the current line, never after a space, a tab or a
-/// newline, and never inside a `(...)` comment or a `[...]` expression, where
-/// the characters are prose or an expression rather than G-code words.
+/// newline, never after a character that does not end a G-code word (a word of
+/// prose like `repeat` must not grow an axis space in the middle of it), and
+/// never inside a `(...)` comment or a `[...]` expression, where the characters
+/// are prose or an expression rather than G-code words.
 pub fn needs_space(text: &[char], at: usize, c: char) -> bool {
     if !is_value_word(c) || at == 0 || at > text.len() {
         return false;
@@ -32,8 +34,20 @@ pub fn needs_space(text: &[char], at: usize, c: char) -> bool {
         // The start of a line is as good as the start of the buffer: the first
         // word of a block takes no leading space.
         Some(' ') | Some('\t') | Some('\n') | None => false,
+        // Only a value ends in one of these. A letter means the caret is still
+        // inside a word — `repe|at` is one word, not a word plus an A axis.
+        Some(previous) if !ends_a_word(*previous) => false,
         Some(_) => !inside_comment_or_expression(&text[..at]),
     }
+}
+
+/// Whether `c` ends a G-code word, which is the only place a following word
+/// takes a space in front of it.
+///
+/// A digit or a decimal point ends a value (`G1`, `X10.5`, `#1`), and a closing
+/// `)` or `]` ends a comment or an expression (`G1 (a)`, `X[#1+2]`).
+fn ends_a_word(c: char) -> bool {
+    matches!(c, '0'..='9' | '.' | ')' | ']')
 }
 
 /// Whether the characters up to the caret leave a `(...)` comment or a
@@ -154,6 +168,33 @@ mod tests {
         assert_eq!(type_line("", "G1X10"), ("G1 X10".to_string(), 6));
         assert_eq!(type_line("", "X10G0"), ("X10 G0".to_string(), 6));
         assert_eq!(type_line("", "M3M5"), ("M3 M5".to_string(), 5));
+        // M-commands take the space on both sides of the rule: a word that
+        // follows an M code, and an M code that follows a value.
+        assert_eq!(type_line("", "G1M3"), ("G1 M3".to_string(), 5));
+        assert_eq!(type_line("", "M8S1000"), ("M8 S1000".to_string(), 8));
+        assert_eq!(type_line("", "M30M5"), ("M30 M5".to_string(), 6));
+        assert!(needs_space(&chars("G1"), 2, 'M'));
+        assert!(needs_space(&chars("M3"), 2, 'M'));
+    }
+
+    /// Prose is not G-code: `repeat` is one word, and the `a` in the middle of
+    /// it is a letter, not the A axis. Only a finished word (a value, a closed
+    /// comment, a closed expression) can be split in front of.
+    #[test]
+    fn a_letter_inside_a_word_does_not_split_it() {
+        assert_eq!(type_line("", "repeat"), ("repeat".to_string(), 6));
+        assert_eq!(
+            type_line("", "o100 repeat[3]"),
+            ("o100 repeat[3]".to_string(), 14)
+        );
+        assert!(!needs_space(&chars("repe"), 4, 'a'));
+        assert!(!needs_space(&chars("o100 repe"), 9, 'a'));
+        // A value in front of the letter still splits, and so does a closed
+        // comment or expression.
+        assert!(needs_space(&chars("G1"), 2, 'A'));
+        assert!(needs_space(&chars("X10"), 3, 'A'));
+        assert!(needs_space(&chars("G1 (a)"), 6, 'A'));
+        assert!(needs_space(&chars("X[#1]"), 5, 'A'));
     }
 
     #[test]
@@ -228,7 +269,7 @@ mod tests {
         // A comment closed on an earlier line does not leak into this one, and
         // the count restarts after the newline.
         assert!(!inside_comment_or_expression(&chars("G1 (a)\nG1")));
-        assert!(needs_space(&chars("G1 (a)\nG1"), 8, 'X'));
+        assert!(needs_space(&chars("G1 (a)\nG1"), 9, 'X'));
         // Letters that do not open a word, and a caret past the end.
         assert!(!needs_space(&chars("G1"), 2, '1'));
         assert!(!needs_space(&chars("G1"), 9, 'X'));
