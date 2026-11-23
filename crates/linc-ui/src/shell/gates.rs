@@ -136,6 +136,34 @@ impl LincApp {
         self.nav.page_focus_requested = true;
     }
 
+    /// Hand the keyboard back from an in-place field that has closed.
+    ///
+    /// egui keeps a text edit's focus after the widget stops being drawn, and
+    /// `text_edit_focused` then answers true for the rest of the session, which
+    /// makes every page key inert — the operator sees a dead HMI. The fields that
+    /// open and close in place are listed here with the state that says they are
+    /// on screen; when one is closed, the focus goes back to the page.
+    pub(super) fn release_closed_edits(&mut self, ctx: &egui::Context) {
+        let transient = [
+            (crate::state::DRO_FIELD_ID, self.offsets.dro_edit.is_some()),
+            ("linc-probe-dro", self.probe.dro_edit.is_some()),
+            (
+                "linc-probe-param",
+                self.probe.param_editing || self.probe.param_focused,
+            ),
+        ];
+        for (name, open) in transient {
+            if open {
+                continue;
+            }
+            let id = egui::Id::unique(name);
+            if ctx.memory(|memory| memory.focused()) == Some(id) {
+                ctx.memory_mut(|memory| memory.surrender_focus(id));
+                self.restore_page_keyboard();
+            }
+        }
+    }
+
     /// End the session because the cabinet was switched off, not because the
     /// operator asked. Deliberately skips the idle guard, the discard prompt and
     /// the confirm dialog: the machine power is going away regardless, and a

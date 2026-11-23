@@ -493,8 +493,13 @@ impl LincApp {
                 && (self.tools.editing
                     || self.tools.kind_popup.is_some()
                     || self.tools.search_focused))
-                || (self.nav.page == Page::Offsets
-                    && (self.offsets.editing || self.offsets.dro_edit.is_some()))
+                || (self.nav.page == Page::Offsets && self.offsets.editing)
+                // The WCS edit is drawn by the OFFSETS page and by the matrix on
+                // MAIN and the manual page, and it owns Escape only where that
+                // field is on screen: otherwise the key would die on a page that
+                // has nothing to close.
+                || (self.offsets.dro_edit.is_some()
+                    && (self.nav.page == Page::Offsets || self.main_matrix_active()))
                 || (self.nav.page == Page::Files && self.files.rename.is_some())
                 || (self.nav.page == Page::Probe
                     && (self.probe.param_editing

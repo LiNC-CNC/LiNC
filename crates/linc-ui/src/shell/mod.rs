@@ -447,6 +447,11 @@ impl LincApp {
 
     pub fn draw(&mut self, ui: &mut egui::Ui) {
         self.sync();
+        // Whatever closed an in-place field — Escape, Enter, a page change, a face
+        // flip — the focus it leaves behind has to come back, or the page keys are
+        // inert for the rest of the session.
+        let ctx = ui.ctx().clone();
+        self.release_closed_edits(&ctx);
         // A fresh model each frame: a region that disappears must not linger.
         self.diagnostics.regions.clear();
         let screen = ui.available_rect_before_wrap();

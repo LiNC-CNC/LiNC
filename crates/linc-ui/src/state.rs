@@ -1813,7 +1813,9 @@ pub struct OffsetDraft {
     pub rotation: String,
 }
 
-/// Inline editor for one axis of the Offsets page DRO.
+/// Inline editor for one axis of the active WCS, opened from the OFFSETS page's
+/// DRO or from MAIN's coordinate matrix. One at a time, so both draw the field
+/// under one id and either page can give the keyboard back.
 #[derive(Clone, Debug, Default)]
 pub struct DroEdit {
     pub axis: String,
@@ -1821,6 +1823,14 @@ pub struct DroEdit {
     /// Put the keyboard in the field on the next frame.
     pub focus: bool,
 }
+
+/// The widget id of that field.
+///
+/// egui keeps a text edit's focus after the widget stops being drawn, and
+/// [`egui::Context::text_edit_focused`] then answers true for the rest of the
+/// session, which makes every page key inert. One id means whichever page closed
+/// the edit can hand the focus back.
+pub const DRO_FIELD_ID: &str = "linc-wcs-dro";
 
 pub struct OffsetsUi {
     pub selected: u8,

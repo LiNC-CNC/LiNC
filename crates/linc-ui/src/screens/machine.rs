@@ -450,7 +450,7 @@ fn matrix_edit_field(app: &mut LincApp, ui: &mut Ui, row: egui::Rect, size: f32)
         .as_ref()
         .map(|edit| edit.buffer.clone())
         .unwrap_or_default();
-    let id = egui::Id::unique("linc-matrix-dro");
+    let id = egui::Id::unique(crate::state::DRO_FIELD_ID);
     let edit = child.add_sized(
         [field.width(), height],
         egui::TextEdit::singleline(&mut buffer)

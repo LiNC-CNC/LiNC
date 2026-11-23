@@ -560,7 +560,10 @@ impl LincApp {
                     });
                 }
 
-                let mut key_items = vec![Shortcut::hint("Arrows", "SELECT")];
+                // No SELECT row: neither page acts on the arrows. They walk the
+                // shell's widget focus, which the page title already does, so the
+                // row advertised a key that changed nothing here.
+                let mut key_items: Vec<Shortcut> = Vec::new();
                 // Only INC takes the digits: a continuous JOG has no increment
                 // to pick, MPG selects its step on the handwheel, and
                 // HOME/PROG.HOME share this page family without a step row.
@@ -575,7 +578,8 @@ impl LincApp {
                 }
                 // X/Y/Z edit the active WCS on the matrix, the OFFSETS page's
                 // keys, and keep zeroing only where no matrix is drawn: HOME and
-                // PROG.HOME, whose page has nothing to write into.
+                // PROG.HOME, whose page has nothing to write into. `A` goes with
+                // them: the manual modes have no zero-all key at all.
                 if self.main_matrix_active() {
                     key_items.push(Shortcut::hint("X/Y/Z", "EDIT DRO"));
                     if self.offsets.dro_edit.is_some() {
@@ -587,12 +591,12 @@ impl LincApp {
                     Some(PanelMode::Home | PanelMode::ProgHome)
                 ) {
                     key_items.push(Shortcut::hint("X/Y/Z", "ZERO AXIS"));
+                    key_items.push(Shortcut::run(
+                        "A",
+                        "ZERO ALL",
+                        ShortcutCommand::ManualZeroAll,
+                    ));
                 }
-                key_items.push(Shortcut::run(
-                    "A",
-                    "ZERO ALL",
-                    ShortcutCommand::ManualZeroAll,
-                ));
                 key_items.push(Shortcut::run(
                     "O",
                     "LIMIT RECOVERY",

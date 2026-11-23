@@ -7574,6 +7574,18 @@ fn the_manual_shortcuts_are_grouped_by_subject() {
         spindle.items[0].key,
         harness.app.prefs.keymap.spindle_speed_up.label()
     );
+    // The arrows act on neither page, so the group advertises only the keys it
+    // owns: the limit-recovery walk, and on the homing pages the touch-off ones.
+    let manual = groups
+        .iter()
+        .find(|group| group.title == "MANUAL")
+        .expect("the manual group");
+    let labels: Vec<&str> = manual.items.iter().map(|item| item.label).collect();
+    assert!(
+        !labels.contains(&"SELECT"),
+        "the arrows are not this page's: {labels:?}"
+    );
+    assert_eq!(labels, ["LIMIT RECOVERY"], "{labels:?}");
 
     // HOME / PROG.HOME share the page family without a spindle control.
     let mut harness = ProbeHarness::new(PanelMode::Home, false, true);
@@ -7662,9 +7674,11 @@ fn the_matrix_wcs_takes_the_offsets_page_keys() {
     harness.frame(&[]);
 
     // The dashboard face keeps the graph: the letters are inert there now, so a
-    // stray X cannot re-zero the offset the operator is working from.
+    // stray X cannot re-zero the offset the operator is working from, and `A` —
+    // the manual modes' zero-all — is gone with them.
     harness.sent.borrow_mut().clear();
     harness.frame(&[egui::Key::X]);
+    harness.frame(&[egui::Key::A]);
     assert!(
         !harness.sent.borrow().iter().any(|command| matches!(
             command,
@@ -7709,6 +7723,78 @@ fn the_matrix_wcs_takes_the_offsets_page_keys() {
         .map(|position| position.work)
         .unwrap_or(f64::NAN);
     assert!((work - 12.5).abs() < 1e-6, "X shows {work}, expected 12.5");
+}
+
+/// The in-place edit owns the keyboard, so Escape must reach the field that was
+/// opened rather than the shell. When it closes, the focus has to come back with
+/// it: a text-edit id left focused makes `text_edit_focused` true for the rest of
+/// the session, and every page key goes inert.
+#[test]
+fn escape_closes_the_matrix_dro_and_hands_the_keyboard_back() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.app.request_mode_page();
+    harness.frame(&[]);
+    harness.frame(&[egui::Key::X]);
+    assert!(
+        harness.app.offsets.dro_edit.is_some(),
+        "X opens the WCS edit"
+    );
+    let page = harness.app.nav.page;
+
+    harness.frame(&[egui::Key::Escape]);
+    assert!(
+        harness.app.offsets.dro_edit.is_none(),
+        "Escape closes the edit"
+    );
+    assert_eq!(harness.app.nav.page, page, "and does not leave the page");
+
+    harness.frame(&[egui::Key::X]);
+    assert!(
+        harness.app.offsets.dro_edit.is_some(),
+        "the letters work again once the field has let go"
+    );
+
+    // Flipping the face takes the field away, so the edit goes with it: a stale
+    // edit would swallow Escape on the dashboard, which draws no field at all.
+    harness.app.request_mode_page();
+    assert!(!harness.app.main_matrix_active());
+    assert!(
+        harness.app.offsets.dro_edit.is_none(),
+        "the flip drops the open edit"
+    );
+}
+
+/// The homing pages have no matrix to edit, so they keep the touch-off letters
+/// the manual modes gave up — `X` for one axis and `A` for all of them.
+#[test]
+fn the_home_page_keeps_the_zero_letters() {
+    let mut harness = ProbeHarness::new(PanelMode::Home, false, true);
+    assert_eq!(harness.app.nav.page, Page::Homing);
+
+    harness.sent.borrow_mut().clear();
+    harness.frame(&[egui::Key::X]);
+    let single = harness.sent.borrow().iter().any(|command| {
+        matches!(
+            command,
+            MachineCommand::ZeroWorkOffset { axes, .. } if axes == &vec!["X".to_string()]
+        )
+    });
+    assert!(
+        single,
+        "X still touches off one axis: {:?}",
+        harness.sent_debug()
+    );
+
+    harness.sent.borrow_mut().clear();
+    harness.frame(&[egui::Key::A]);
+    let all = harness.sent.borrow().iter().any(|command| {
+        matches!(
+            command,
+            MachineCommand::ZeroWorkOffset { axes, .. } if axes.len() == harness.app.axes().len()
+        )
+    });
+    assert!(all, "A still zeroes every axis: {:?}", harness.sent_debug());
 }
 
 /// AUTO keeps the spindle chords for itself: the page may be showing, but the

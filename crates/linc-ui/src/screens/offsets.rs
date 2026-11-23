@@ -148,7 +148,7 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                     [field.width(), 28.0],
                     egui::TextEdit::singleline(&mut buffer)
                         // Stable id so the shell can leave keys to the field.
-                        .id(egui::Id::unique("linc-offsets-dro"))
+                        .id(egui::Id::unique(crate::state::DRO_FIELD_ID))
                         .font(egui::FontId::monospace(theme::font_size(20.0)))
                         .margin(egui::Margin::symmetric(4, 0)),
                 );
@@ -162,7 +162,7 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                     edit.request_focus();
                     // Pre-select the value: the operator is replacing a reading,
                     // not appending to it.
-                    let id = egui::Id::unique("linc-offsets-dro");
+                    let id = egui::Id::unique(crate::state::DRO_FIELD_ID);
                     if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
                         state
                             .cursor
@@ -380,7 +380,14 @@ pub(crate) fn handle_dro_keys(app: &mut LincApp, ui: &mut Ui) {
         commit_dro_edit(app);
     } else if cancel {
         app.offsets.dro_edit = None;
+    } else {
+        return;
     }
+    // The field is about to stop being drawn. egui would keep its focus and keep
+    // answering `text_edit_focused` for a widget nobody can see, so hand the
+    // keyboard back here rather than leaving the next keypress to a dead field.
+    let id = egui::Id::unique(crate::state::DRO_FIELD_ID);
+    ui.ctx().memory_mut(|memory| memory.surrender_focus(id));
 }
 
 /// Send the typed position. `G10 L20` computes the offset from the position the

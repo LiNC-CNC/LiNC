@@ -323,6 +323,9 @@ impl LincApp {
         if !self.main_alternate_available() {
             return;
         }
+        // The matrix carries the only WCS field, so a flip takes the field away:
+        // drop the edit with it rather than leaving one open that nothing draws.
+        self.offsets.dro_edit = None;
         self.main_view = self.main_view.flipped();
         self.remember_main_view(self.main_view);
     }
