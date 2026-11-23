@@ -1,0 +1,30 @@
+(LiNC syntax-check fixture: block faults, ten of them)
+(Every fault below is one block's own mistake, so all ten are marked at once.)
+(Use it to see the red gutter bars, the word underlines and the n/10 counter.)
+(Ctrl+PageDown walks to the next fault, Ctrl+PageUp to the previous one.)
+(Do not run this file: the load gate refuses it, which is the point.)
+O3001
+G21 G90 G54 G17 G40 G49 G80
+G0 X-120 Y-120 Z10
+(1 comment nesting: the inner pair is not allowed, the interpreter refuses it)
+G0 X-110 Y-120 (outer (inner) tail)
+(2 an unclosed comment takes the rest of the line)
+G0 X-100 Y-120 (no closing bracket
+(3 a word with no value: the F has nothing to apply)
+G1 X F300
+(4 the same letter twice in one block)
+G1 X-90 X-80 F300
+(5 a G number out of range)
+G123 X-70
+(6 an M number out of range)
+M1234
+(7 a negative feed)
+G1 X-60 F-100
+(8 the N word numbers the block only at its start)
+X-50 N100 G1 F200
+(9 an unbalanced bracket in an expression)
+G0 Z[#1+2
+(10 an assignment with no value)
+#2001 =
+G0 Z10
+M2

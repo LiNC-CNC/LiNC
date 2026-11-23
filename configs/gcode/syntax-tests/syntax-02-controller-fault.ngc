@@ -1,0 +1,15 @@
+(LiNC syntax-check fixture: faults no single block can prove)
+(Nothing here is wrong with one block on its own. The file never sets a feed)
+(rate, and it calls a tool the machine's table does not carry. Only the)
+(controller's own interpreter knows that, so this is what the load gate asks)
+(rs274 about before the file may be loaded.)
+O3002
+G21 G90 G54 G17 G40 G49 G80
+G0 X-120 Y-120 Z10
+(rs274 stops at the first fault it meets: the G1 below moves with no feed)
+(rate in effect. Fix that line and the missing tool is reported next.)
+G1 X-100 Y-120
+(no tool 77 in the table: the interpreter checks the M6 against it)
+T77 M6
+G0 Z10
+M2

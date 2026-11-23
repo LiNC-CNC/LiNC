@@ -1,0 +1,22 @@
+(LiNC syntax-check fixture: a clean program)
+(This one must load, open `linc.program-ok` and run on CYCLE START. It is the)
+(reverse of the other two fixtures: no fault is marked, the status row says)
+(PREVIEW VALID, and the panel key does something.)
+O3003
+G21 G90 G54 G17 G40 G49 G80
+T1 M6
+S4200 M3
+G0 X-120 Y-120 Z10
+(square contour, 40 mm, 2 mm deep)
+G1 Z-2 F300
+G1 X-80 Y-120 F600
+G1 X-80 Y-80
+G1 X-120 Y-80
+G1 X-120 Y-120
+(a 10 mm radius circle inside it: the end point equals the start point, so the)
+(arc closes on itself and the radius holds from every angle)
+G1 X-120 Y-110 F600
+G2 X-120 Y-110 I10 J0 F400
+G0 Z10
+M5
+M2
