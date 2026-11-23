@@ -45,6 +45,7 @@ addf and2.spindle0_sp_change servo-thread
 addf and2.spindle1_cw_change servo-thread
 addf and2.spindle1_ccw_change servo-thread
 addf and2.spindle1_sp_change servo-thread
+addf and2.cycle_permit servo-thread
 
 # Program cycle: CYCLE START runs the loaded program, CYCLE STOP pauses it.
 # The run goes through the program interlock, wired to `linc.program-ok` in

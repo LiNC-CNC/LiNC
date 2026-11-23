@@ -178,6 +178,56 @@ fn the_lathe_run_is_gated_and_the_instance_is_declared_before_the_net() {
     );
 }
 
+/// An `and2` that is created and netted but never added to a thread computes
+/// nothing: its output stays at its initial FALSE, so the run it was meant to
+/// permit never happens and cycle start looks dead. That was a real defect in
+/// this gate, so every instance these files create has to be in a thread.
+#[test]
+fn every_and2_these_files_create_is_added_to_a_thread() {
+    for name in ["linc.hal", "linc-lathe.hal", "baiermill-pb-postgui.hal"] {
+        let text = read(name);
+        // Continuations first: `loadrt and2 names=a,\` spans lines.
+        let code: String = text
+            .lines()
+            .map(|line| line.split('#').next().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace("\\\n", " ");
+        let mut created: Vec<String> = Vec::new();
+        for line in code.lines() {
+            let Some(rest) = line.split("loadrt").nth(1) else {
+                continue;
+            };
+            let rest = rest.trim_start().strip_prefix("and2").unwrap_or("");
+            let Some(names) = rest.trim_start().strip_prefix("names=") else {
+                continue;
+            };
+            created.extend(
+                names
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .split(',')
+                    .filter(|name| name.starts_with("and2."))
+                    .map(str::to_string),
+            );
+        }
+        let added: Vec<String> = code
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("addf "))
+            .filter_map(|rest| rest.split_whitespace().next())
+            .filter(|pin| pin.starts_with("and2."))
+            .map(str::to_string)
+            .collect();
+        for instance in &created {
+            assert!(
+                added.iter().any(|pin| pin == instance),
+                "{name} creates {instance} and never adds it to a thread: it computes nothing, so its output stays FALSE"
+            );
+        }
+    }
+}
+
 #[test]
 fn every_machine_hal_that_starts_a_program_is_gated() {
     // The list is explicit: a profile with its own cycle-start chain has to be
