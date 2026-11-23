@@ -18,8 +18,9 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use linuxcnc_nml::{
-    Command as NmlCommand, MessageKind, NmlClient, NmlError, SpindleDirection, Status as NmlStatus,
-    TaskMode as NmlTaskMode, TaskState as NmlTaskState, Tool as NmlTool,
+    Command as NmlCommand, InterpState as NmlInterpState, MessageKind, NmlClient, NmlError,
+    SpindleDirection, Status as NmlStatus, TaskMode as NmlTaskMode, TaskState as NmlTaskState,
+    Tool as NmlTool,
 };
 
 use linc_core::backend::MachineBackend;
@@ -97,6 +98,10 @@ pub struct NmlBackend {
     program_line_revision: u64,
     /// Said once per session: which source drives the displayed line.
     program_line_logged: bool,
+    /// A fault already held the program. One hold per fault: the error channel
+    /// repeats nothing, but a program that faults twice must be held twice, so
+    /// the flag clears when the interpreter is idle again.
+    held_for_error: bool,
 }
 
 /// How long the IO process may take to publish a reloaded tool table.
@@ -212,6 +217,7 @@ impl NmlBackend {
             program_line: 0,
             program_line_revision: 0,
             program_line_logged: false,
+            held_for_error: false,
             tool_table,
             tool_state,
             tool_restore,
@@ -231,7 +237,7 @@ impl NmlBackend {
             }
             Err(error) => return self.lost_status(error),
         };
-        self.poll_messages();
+        self.poll_messages(&status);
 
         let panel = self.panel.read(self.hal.as_ref(), &self.profile);
         let spindles = self.read_spindles(&status, &panel);
@@ -459,7 +465,12 @@ impl NmlBackend {
         info
     }
 
-    fn poll_messages(&mut self) {
+    fn poll_messages(&mut self, status: &NmlStatus) {
+        // A fault is only worth a hold while a program is in play: an idle
+        // interpreter has nothing to stop, and an HMI in MANUAL has no queue.
+        if status.task.interp_state == NmlInterpState::Idle {
+            self.held_for_error = false;
+        }
         loop {
             match self.client.poll_error() {
                 Ok(Some(message)) => {
@@ -469,7 +480,13 @@ impl NmlBackend {
                         self.builder.push_probe_value(parameter, value);
                     } else {
                         if message.kind.is_error() {
+                            // The controller explains refusals here and nowhere
+                            // else: without this line a press that the task
+                            // turned down ("Can't run a program when not homed")
+                            // left no trace outside the Messages page.
+                            log::warn!("controller: {}", message.text.trim());
                             self.builder.fail_probe();
+                            self.hold_after_error(status, &message.text);
                         }
                         self.builder.push_message(message.kind, &message.text);
                     }
@@ -480,6 +497,38 @@ impl NmlBackend {
                     break;
                 }
             }
+        }
+    }
+
+    /// Feed hold on an interpreter fault.
+    ///
+    /// LinuxCNC does not stop the motion itself: `emcTaskPlanRead` failing
+    /// clears the interpreter's command list and leaves `interpState` waiting —
+    /// see `emctaskmain.cc`, where an `INTERP_ERROR` in AUTO only reaches
+    /// `emcAbortCleanup`, whose `Interp::on_abort` resets the interpreter and
+    /// runs `ON_ABORT_COMMAND`, and nothing in it touches the trajectory. The
+    /// moves the planner already holds therefore run on to their end, which is
+    /// the last thing an operator wants from a program that has just died.
+    ///
+    /// `EMC_TASK_PLAN_PAUSE` is accepted unconditionally (`emctaskmain.cc`
+    /// pauses the trajectory and sets the paused state without a mode test), so
+    /// holding here stops the cut at the end of the block being cut instead. The
+    /// operator resumes or aborts from the panel as after any cycle stop.
+    fn hold_after_error(&mut self, status: &NmlStatus, text: &str) {
+        if !hold_wanted(
+            status.task.mode,
+            status.task.state,
+            status.task.interp_state,
+            self.held_for_error,
+        ) {
+            return;
+        }
+        match self.nml_send(&NmlCommand::AutoPause) {
+            Ok(()) => {
+                self.held_for_error = true;
+                log::warn!("holding the program after a fault: {}", text.trim());
+            }
+            Err(error) => log::warn!("could not hold the program after a fault: {error}"),
         }
     }
 
@@ -1013,6 +1062,34 @@ impl NmlBackend {
         Ok(snapshot)
     }
 
+    /// The gates a *resume* has to pass.
+    ///
+    /// A paused program is paused because the interpreter is not idle, so the
+    /// idle test inside [`Self::validate_write`] can never be part of resuming
+    /// one: it refused every resume with "interpreter is not idle" and left the
+    /// operator with a held program and no way to continue it. Everything else a
+    /// write needs - a live panel, a valid mode, no protect, the machine switched
+    /// on, no latched probe trip - still applies.
+    fn validate_resume(&mut self) -> Result<MachineSnapshot, MachineError> {
+        let snapshot = self.refresh();
+        if !snapshot.panel.connected || snapshot.panel.communication_error {
+            return Err(MachineError::PanelOffline);
+        }
+        if !snapshot.panel.mode.is_valid() {
+            return Err(MachineError::InvalidPanelMode);
+        }
+        if snapshot.panel.protect_effective() {
+            return Err(MachineError::ProgramProtected);
+        }
+        if snapshot.task.power != MachinePower::On {
+            return Err(MachineError::MachineOff);
+        }
+        if snapshot.probe_trip_active() {
+            return Err(MachineError::ProbeTripped);
+        }
+        Ok(snapshot)
+    }
+
     /// A controller write that must also fail closed on a latched probe trip.
     ///
     /// `SaveProgram` keeps using `validate_write`: writing the file and
@@ -1466,6 +1543,36 @@ impl NmlBackend {
                 self.parameters.record_active_index(index);
                 self.save_parameters()?;
                 Ok(())
+            }
+            MachineCommand::CycleStart => {
+                // The controller's own command, not a HAL edge: `halui` fires
+                // `halui.program.run` on *both* edges of its pin, so a pulse from
+                // the HMI produced two run commands per press - the second always
+                // refused. Two refusals per press is what made a press look dead,
+                // and is why a second press sometimes seemed to be needed. AXIS
+                // sends this same command.
+                //
+                // The key does two jobs, and they pass different gates: a paused
+                // program is resumed, and a paused program is not idle. Asking
+                // the idle gate about a resume refused every one of them.
+                let paused = self.refresh().program.paused;
+                if paused {
+                    self.validate_resume()?;
+                } else {
+                    self.validate_controller_write()?;
+                }
+                let status = self.poll_status()?;
+                if status.task.mode != NmlTaskMode::Auto {
+                    self.nml_send(&NmlCommand::SetMode(NmlTaskMode::Auto))?;
+                    self.wait_complete(Duration::from_secs(2))?;
+                }
+                if paused {
+                    log::info!("cycle start: resuming the paused program");
+                    self.nml_send(&NmlCommand::AutoResume)
+                } else {
+                    log::info!("cycle start: running the program from its first line");
+                    self.nml_send(&NmlCommand::AutoRun { line: 0 })
+                }
             }
             MachineCommand::RunFromLine { line } => {
                 self.validate_controller_write()?;
@@ -2162,6 +2269,24 @@ pub(crate) fn probe_write_blocked(block: &str, writes_allowed: bool) -> bool {
 }
 
 /// The modal-units code for the machine's linear units.
+/// Whether a fault should hold the program: it must be in AUTO, with the
+/// machine on and the interpreter still holding a program, and no hold must
+/// already be in place.
+pub(crate) fn hold_wanted(
+    mode: NmlTaskMode,
+    state: NmlTaskState,
+    interp: NmlInterpState,
+    already_held: bool,
+) -> bool {
+    if already_held || mode != NmlTaskMode::Auto || state != NmlTaskState::On {
+        return false;
+    }
+    matches!(
+        interp,
+        NmlInterpState::Reading | NmlInterpState::Waiting | NmlInterpState::Paused
+    )
+}
+
 fn machine_units_code(linear_units: &str) -> &'static str {
     match linear_units.trim().to_ascii_lowercase().as_str() {
         "inch" | "inches" | "in" => "G20",
@@ -2500,6 +2625,32 @@ mod tests {
             "/python/linc_bridge.py"
         ))
         .exists());
+    }
+
+    /// A fault holds the program only while there is a program to hold. The
+    /// interpreter is the authority: it is still reading, waiting for the
+    /// queue, or already paused, and AUTO and machine-on are what the pause
+    /// command needs anyway.
+    #[test]
+    fn a_fault_holds_only_a_running_program() {
+        use linuxcnc_nml::{InterpState as I, TaskMode as M, TaskState as S};
+        // The case this exists for: running an auto program when the fault
+        // arrives.
+        assert!(hold_wanted(M::Auto, S::On, I::Reading, false));
+        // The interpreter can already be waiting when the text reaches us: task
+        // clears its list and marks the state before the HMI polls.
+        assert!(hold_wanted(M::Auto, S::On, I::Waiting, false));
+        assert!(hold_wanted(M::Auto, S::On, I::Paused, false));
+        // One hold per fault, or a repeated message would re-pause a program
+        // the operator had just resumed.
+        assert!(!hold_wanted(M::Auto, S::On, I::Reading, true));
+        // Nothing to hold.
+        assert!(!hold_wanted(M::Auto, S::On, I::Idle, false));
+        // And the pause command is only meaningful in AUTO on a live machine.
+        assert!(!hold_wanted(M::Manual, S::On, I::Reading, false));
+        assert!(!hold_wanted(M::Mdi, S::On, I::Reading, false));
+        assert!(!hold_wanted(M::Auto, S::Off, I::Reading, false));
+        assert!(!hold_wanted(M::Auto, S::Estop, I::Reading, false));
     }
 
     /// The reload handshake asks the one question `G43` asks: does the
