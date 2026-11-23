@@ -289,6 +289,20 @@ impl LincApp {
                         items: view_items,
                     });
                 }
+                if self.main_matrix_active() {
+                    // The matrix is the readout the operator may write: its WORK
+                    // COORDINATES card takes the OFFSETS page's keys against the
+                    // active WCS.
+                    let mut dro_items = vec![Shortcut::hint("X/Y/Z", "EDIT DRO")];
+                    if self.offsets.dro_edit.is_some() {
+                        dro_items.push(Shortcut::hint("Enter", "SET"));
+                        dro_items.push(Shortcut::hint("Esc", "CANCEL"));
+                    }
+                    groups.push(ShortcutGroup {
+                        title: "DRO",
+                        items: dro_items,
+                    });
+                }
                 if self.mdi_pane_visible() {
                     // While the pane is up its keys replace the MAIN ones:
                     // Enter and the arrows act on the buffer, Ctrl+R runs the
@@ -559,7 +573,21 @@ impl LincApp {
                         "INCREMENT",
                     ));
                 }
-                key_items.push(Shortcut::hint("X/Y/Z", "ZERO AXIS"));
+                // X/Y/Z edit the active WCS on the matrix, the OFFSETS page's
+                // keys, and keep zeroing only where no matrix is drawn: HOME and
+                // PROG.HOME, whose page has nothing to write into.
+                if self.main_matrix_active() {
+                    key_items.push(Shortcut::hint("X/Y/Z", "EDIT DRO"));
+                    if self.offsets.dro_edit.is_some() {
+                        key_items.push(Shortcut::hint("Enter", "SET"));
+                        key_items.push(Shortcut::hint("Esc", "CANCEL"));
+                    }
+                } else if matches!(
+                    self.snapshot.panel.mode.mode(),
+                    Some(PanelMode::Home | PanelMode::ProgHome)
+                ) {
+                    key_items.push(Shortcut::hint("X/Y/Z", "ZERO AXIS"));
+                }
                 key_items.push(Shortcut::run(
                     "A",
                     "ZERO ALL",

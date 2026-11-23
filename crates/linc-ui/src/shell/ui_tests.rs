@@ -7652,6 +7652,65 @@ fn the_matrix_drops_the_view_shortcuts_on_the_manual_page() {
     assert_eq!(titles, ["SPINDLE", "MANUAL"], "{titles:?}");
 }
 
+/// MAIN's matrix is the WCS the operator may write, and it takes the OFFSETS
+/// page's keys: X/Y/Z open the in-place edit and Enter writes what was typed.
+/// The same letters no longer zero the axes in the manual modes.
+#[test]
+fn the_matrix_wcs_takes_the_offsets_page_keys() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.frame(&[]);
+
+    // The dashboard face keeps the graph: the letters are inert there now, so a
+    // stray X cannot re-zero the offset the operator is working from.
+    harness.sent.borrow_mut().clear();
+    harness.frame(&[egui::Key::X]);
+    assert!(
+        !harness.sent.borrow().iter().any(|command| matches!(
+            command,
+            MachineCommand::ZeroWorkOffset { .. } | MachineCommand::SetWorkPosition { .. }
+        )),
+        "{:?}",
+        harness.sent_debug()
+    );
+
+    harness.app.request_mode_page();
+    assert!(harness.app.main_matrix_active());
+    harness.frame(&[]);
+
+    // The matrix face is the readout: X opens the active WCS for editing.
+    harness.frame(&[egui::Key::X]);
+    let edit = harness
+        .app
+        .offsets
+        .dro_edit
+        .clone()
+        .expect("X opens the WCS edit on the matrix");
+    assert_eq!(edit.axis, "X");
+
+    // Enter writes it through the path the OFFSETS page's DRO uses.
+    harness.app.offsets.dro_edit = Some(crate::state::DroEdit {
+        buffer: "12+0.5".into(),
+        focus: false,
+        ..edit
+    });
+    harness.frame(&[egui::Key::Enter]);
+    harness.app.poll_backend();
+    assert!(
+        harness.app.offsets.dro_edit.is_none(),
+        "the edit closes on commit"
+    );
+    let work = harness
+        .app
+        .snapshot
+        .positions
+        .axes
+        .get("X")
+        .map(|position| position.work)
+        .unwrap_or(f64::NAN);
+    assert!((work - 12.5).abs() < 1e-6, "X shows {work}, expected 12.5");
+}
+
 /// AUTO keeps the spindle chords for itself: the page may be showing, but the
 /// panel mode decides, and nothing goes out.
 #[test]

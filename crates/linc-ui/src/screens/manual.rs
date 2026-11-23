@@ -408,6 +408,16 @@ pub(crate) fn handle_increment_keys(app: &mut LincApp, ui: &mut Ui) {
 /// Modes whose page advertises the `X`/`Y`/`Z` and `A` touch-off keys. AUTO,
 /// EDIT and MDI keep them inert on purpose, and an unknown panel mode fails
 /// closed.
+/// Modes whose page advertises the `X`/`Y`/`Z` touch-off keys.
+///
+/// JOG, INC and MPG are deliberately absent: in those modes the letters open the
+/// active WCS for editing on MAIN's coordinate matrix, the way they do on the
+/// OFFSETS page, and zeroing is left to the on-screen touch-off row and to `A`.
+/// An unknown panel mode fails closed.
+fn axis_keys_zero_axes(mode: Option<PanelMode>) -> bool {
+    matches!(mode, Some(PanelMode::Home | PanelMode::ProgHome))
+}
+
 fn zero_keys_active(mode: Option<PanelMode>) -> bool {
     matches!(
         mode,
@@ -447,15 +457,21 @@ pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
     // A SHORTCUTS row click runs the same zeroing code its key does. The
     // gates above still win: a dialog, a text field or an inactive mode.
     let clicked = app.take_shortcut_click();
+    let letters_zero = axis_keys_zero_axes(app.snapshot.panel.mode.mode());
     ui.input_mut(|input| {
-        for (key, axis) in [
-            (egui::Key::X, "X"),
-            (egui::Key::Y, "Y"),
-            (egui::Key::Z, "Z"),
-        ] {
-            if input.consume_key(egui::Modifiers::NONE, key) && axes.iter().any(|name| name == axis)
-            {
-                zero = Some(vec![axis.to_string()]);
+        // JOG, INC and MPG spend the letters on the WCS edit instead; see
+        // `axis_keys_zero_axes`. The zero-all and recovery keys stay.
+        if letters_zero {
+            for (key, axis) in [
+                (egui::Key::X, "X"),
+                (egui::Key::Y, "Y"),
+                (egui::Key::Z, "Z"),
+            ] {
+                if input.consume_key(egui::Modifiers::NONE, key)
+                    && axes.iter().any(|name| name == axis)
+                {
+                    zero = Some(vec![axis.to_string()]);
+                }
             }
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::A) {
@@ -514,6 +530,26 @@ mod tests {
             assert!(!zero_keys_active(Some(mode)), "{mode:?}");
         }
         assert!(!zero_keys_active(None));
+    }
+
+    /// X/Y/Z stop zeroing where the matrix can carry them into the WCS edit.
+    /// HOME and PROG.HOME have no matrix, so their letters keep the touch-off.
+    #[test]
+    fn the_axis_letters_zero_only_where_no_matrix_is_drawn() {
+        for mode in [PanelMode::Home, PanelMode::ProgHome] {
+            assert!(axis_keys_zero_axes(Some(mode)), "{mode:?}");
+        }
+        for mode in [
+            PanelMode::Jog,
+            PanelMode::Inc,
+            PanelMode::Mpg,
+            PanelMode::Auto,
+            PanelMode::Edit,
+            PanelMode::Mdi,
+        ] {
+            assert!(!axis_keys_zero_axes(Some(mode)), "{mode:?}");
+        }
+        assert!(!axis_keys_zero_axes(None));
     }
 
     /// The spindle keys belong to the manual family only: AUTO, EDIT and MDI

@@ -261,7 +261,12 @@ struct CoordLine {
 
 /// The alternate dashboard: four coordinate cards in the place the axis
 /// readouts and the toolpath take on the default one.
-pub(super) fn coordinate_matrix(app: &LincApp, ui: &mut Ui, width: f32, height: f32) {
+///
+/// The WORK COORDINATES card is the one the operator may write: it is the active
+/// WCS, so it takes the OFFSETS page's in-place edit — a click on a row or the
+/// axis's letter key, Enter to write, Escape to drop — and writes through the
+/// same `SetWorkPosition` path the page's DRO does.
+pub(super) fn coordinate_matrix(app: &mut LincApp, ui: &mut Ui, width: f32, height: f32) {
     const GAP: f32 = 8.0;
     let cell = Vec2::new(
         ((width - GAP) / 2.0).max(160.0),
@@ -269,6 +274,13 @@ pub(super) fn coordinate_matrix(app: &LincApp, ui: &mut Ui, width: f32, height: 
     );
     let axes = app.axes();
     let diameter = app.reads_x_as_diameter();
+    // The OFFSETS page's own handlers, against the same active WCS: the letters
+    // open the edit, Enter writes it, Escape drops it. Called here rather than by
+    // the page because the card only exists with the matrix in front — on the
+    // dashboard face those letters belong to nothing else either, and the zeroing
+    // they used to do on the manual page is gone.
+    crate::screens::offsets::handle_axis_keys(app, ui);
+    crate::screens::offsets::handle_dro_keys(app, ui);
     // One read of the snapshot for all four cards, so the matrix cannot show two
     // different frames.
     let positions: Vec<(f64, f64, f64)> = axes
@@ -314,13 +326,7 @@ pub(super) fn coordinate_matrix(app: &LincApp, ui: &mut Ui, width: f32, height: 
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         ui.horizontal_top(|ui| {
-            matrix_card(
-                ui,
-                cell,
-                "WORK COORDINATES",
-                Some(app.active_wcs_label()),
-                &work,
-            );
+            work_coordinates_card(app, ui, cell, &work, &axes);
             ui.add_space(GAP);
             matrix_card(ui, cell, "MACHINE COORDINATES", None, &machine);
         });
@@ -340,8 +346,7 @@ pub(super) fn coordinate_matrix(app: &LincApp, ui: &mut Ui, width: f32, height: 
 }
 
 /// One card of the matrix: a title, an optional badge at its right end (the
-/// active WCS, the loaded tool) and the lines under it.
-///
+/// active WCS, the loaded tool) and the lines under it.///
 /// The title is painted by [`common::value_card`], not laid out in a row: a
 /// laid-out title sat 14 px below the card's own margin, and that blank band
 /// was the first thing the eye met inside every card.
@@ -351,13 +356,141 @@ fn matrix_card(ui: &mut Ui, cell: Vec2, title: &str, badge: Option<String>, line
         ui.set_max_width(cell.x);
         let badge = badge.as_deref().map(|badge| (badge, theme::ACCENT));
         let body = common::value_card(ui, cell.y, title, badge);
-        paint_coordinate_lines(ui, body, lines);
+        paint_coordinate_lines(ui, body, lines, None);
     });
 }
 
+/// The matrix's one writable card: the active WCS.
+///
+/// A click on a row opens the same in-place edit the OFFSETS page's DRO uses,
+/// seeded from the controller's own work position, and Enter writes it back
+/// through `SetWorkPosition`; the keys are that page's (`handle_axis_keys`,
+/// `handle_dro_keys`), so the two cannot drift.
+fn work_coordinates_card(
+    app: &mut LincApp,
+    ui: &mut Ui,
+    cell: Vec2,
+    lines: &[CoordLine],
+    axes: &[String],
+) {
+    let writable = app.snapshot.writes_allowed() && app.snapshot.offsets.active_index.is_some();
+    let skip = app
+        .offsets
+        .dro_edit
+        .as_ref()
+        .and_then(|edit| axes.iter().position(|axis| *axis == edit.axis));
+    let mut start: Option<String> = None;
+
+    ui.allocate_ui_with_layout(cell, egui::Layout::top_down(egui::Align::Min), |ui| {
+        ui.set_min_width(cell.x);
+        ui.set_max_width(cell.x);
+        let wcs = app.active_wcs_label();
+        let badge = Some((wcs.as_str(), theme::ACCENT));
+        let body = common::value_card(ui, cell.y, "WORK COORDINATES", badge);
+        paint_coordinate_lines(ui, body, lines, skip);
+        let rows = lines.len().max(1);
+        let row_height = body.height() / rows as f32;
+        let size = theme::font_size(line_base(rows, body.height()));
+        for (index, axis) in axes.iter().enumerate() {
+            if index >= lines.len() {
+                break;
+            }
+            let row = egui::Rect::from_min_size(
+                egui::pos2(body.left(), body.top() + index as f32 * row_height),
+                egui::vec2(body.width(), row_height),
+            );
+            if skip == Some(index) {
+                matrix_edit_field(app, ui, row, size);
+                continue;
+            }
+            let response = ui.interact(
+                row,
+                egui::Id::unique(("matrix-work-row", index)),
+                egui::Sense::click(),
+            );
+            if writable && response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+            }
+            if writable && response.clicked() {
+                start = Some(axis.clone());
+            }
+        }
+    });
+
+    let Some(axis) = start else { return };
+    let work = common::axis_display(app, &axis)
+        .map(|(work, _, _)| work)
+        .unwrap_or(0.0);
+    app.offsets.dro_edit = Some(crate::state::DroEdit {
+        axis,
+        buffer: format!("{work:.3}"),
+        focus: true,
+    });
+}
+
+/// The in-place field over the edited row, pre-selecting the reading the way the
+/// OFFSETS page does: the operator is replacing a number, not appending to it.
+fn matrix_edit_field(app: &mut LincApp, ui: &mut Ui, row: egui::Rect, size: f32) {
+    let height = (row.height() * 0.8).clamp(20.0, 34.0);
+    let field = egui::Rect::from_min_max(
+        egui::pos2(
+            row.left() + row.width() * 0.28,
+            row.center().y - height * 0.5,
+        ),
+        egui::pos2(row.right(), row.center().y + height * 0.5),
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(field)
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+    );
+    let mut buffer = app
+        .offsets
+        .dro_edit
+        .as_ref()
+        .map(|edit| edit.buffer.clone())
+        .unwrap_or_default();
+    let id = egui::Id::unique("linc-matrix-dro");
+    let edit = child.add_sized(
+        [field.width(), height],
+        egui::TextEdit::singleline(&mut buffer)
+            .id(id)
+            .align(egui::Align2::RIGHT_CENTER)
+            .font(egui::FontId::monospace(size))
+            .margin(egui::Margin::symmetric(4, 0)),
+    );
+    if app
+        .offsets
+        .dro_edit
+        .as_ref()
+        .map(|edit| edit.focus)
+        .unwrap_or(false)
+    {
+        edit.request_focus();
+        if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(buffer.chars().count()),
+                )));
+            state.store(ui.ctx(), id);
+        }
+        if let Some(slot) = app.offsets.dro_edit.as_mut() {
+            slot.focus = false;
+        }
+    }
+    if edit.changed() {
+        if let Some(slot) = app.offsets.dro_edit.as_mut() {
+            slot.buffer = buffer;
+        }
+    }
+}
+
 /// Paint the lines of a matrix card: the axis name in the DRO's label colour at
-/// the left inset, its figure at the right edge.
-fn paint_coordinate_lines(ui: &Ui, rect: egui::Rect, lines: &[CoordLine]) {
+/// the left inset, its figure at the right edge. `skip` leaves one row's figure
+/// unpainted: the edit field covers it while that axis is being typed.
+fn paint_coordinate_lines(ui: &Ui, rect: egui::Rect, lines: &[CoordLine], skip: Option<usize>) {
     if lines.is_empty() {
         return;
     }
@@ -373,6 +506,9 @@ fn paint_coordinate_lines(ui: &Ui, rect: egui::Rect, lines: &[CoordLine]) {
             font.clone(),
             theme::C3,
         );
+        if skip == Some(index) {
+            continue;
+        }
         painter.text(
             egui::pos2(rect.right(), y),
             egui::Align2::RIGHT_CENTER,
