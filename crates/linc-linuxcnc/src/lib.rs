@@ -1820,13 +1820,24 @@ impl NmlBackend {
                             }
                         }
                     }
+                    LincOutput::ProgramOk => {
+                        // The interlock is decided in the HMI and published by the
+                        // backend loop from `snapshot.hal`, so all that happens
+                        // here is keeping the mirror. Dropping it on the floor -
+                        // which is what putting it with the worker-owned outputs
+                        // did - leaves the HAL pin FALSE and cycle start dead.
+                        if let HalValue::Bit(value) = value {
+                            if let Some(snapshot) = self.last_snapshot.as_mut() {
+                                snapshot.hal.program_ok = value;
+                            }
+                        }
+                    }
                     // The worker owns these: it publishes them from its own
                     // snapshot and nothing here has state to mirror.
                     LincOutput::HmiAlive
                     | LincOutput::StatusDisplay
                     | LincOutput::MachineOff
-                    | LincOutput::NetworkSafe
-                    | LincOutput::ProgramOk => {}
+                    | LincOutput::NetworkSafe => {}
                 }
                 Ok(())
             }

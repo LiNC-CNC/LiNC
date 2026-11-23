@@ -1476,6 +1476,10 @@ fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
 pub fn carry_hal_selections(converted: &mut MachineSnapshot, stored: &MachineSnapshot) {
     converted.hal.jog_increment = stored.hal.jog_increment;
     converted.hal.jog_speed = stored.hal.jog_speed;
+    // The program interlock is the HMI's decision, not the controller's: a
+    // rebuilt snapshot would otherwise reset it to FALSE on every poll and close
+    // cycle start again.
+    converted.hal.program_ok = stored.hal.program_ok;
     // The tool-change confirmation is owned by `SnapshotBuilder::tool_confirm`
     // and cleared when `iocontrol.0.tool-change` drops. Carrying the previous
     // level here would overwrite the first confirmation with `false`.
@@ -1531,6 +1535,19 @@ mod tests {
         carry_hal_selections(&mut converted, &stored);
         assert_eq!(converted.hal.jog_speed, Some(42.0));
         assert_eq!(converted.hal.jog_increment, Some(0.5));
+    }
+
+    /// The program interlock is the HMI's level, so a rebuilt snapshot must not
+    /// take it back to FALSE: the pin gates cycle start in the machine HAL, and a
+    /// level reset on every poll stops the program from ever starting.
+    #[test]
+    fn the_program_interlock_survives_a_rebuilt_snapshot() {
+        let mut stored = MachineSnapshot::empty(MachineVariant::Mill);
+        stored.hal.program_ok = true;
+        let mut converted = MachineSnapshot::empty(MachineVariant::Mill);
+        assert!(!converted.hal.program_ok);
+        carry_hal_selections(&mut converted, &stored);
+        assert!(converted.hal.program_ok);
     }
 
     #[test]

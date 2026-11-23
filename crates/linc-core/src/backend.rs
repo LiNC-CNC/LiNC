@@ -200,6 +200,10 @@ fn run_worker(
     // False so the first publish always opens the gate explicitly instead of
     // relying on the HAL pin's initial value.
     let mut last_net_safe = false;
+    // Same reason, and the same failure if it is skipped: `linc.program-ok` gates
+    // cycle start in the machine HAL, and a pin nobody writes reads FALSE, which
+    // looks exactly like a panel that does not work.
+    let mut last_program_ok = false;
 
     while !shared.shutdown.load(Ordering::Relaxed) {
         let request = rx.recv_timeout(Duration::from_millis(10));
@@ -355,6 +359,21 @@ fn run_worker(
                 }
             }
 
+            // The program interlock: the HMI decides it (the buffer on screen is
+            // the loaded program, it holds no fault, it is not dirty) and the
+            // backend only carries the level out, exactly as it carries net-safe.
+            let program_ok = snapshot.hal.program_ok;
+            if program_ok != last_program_ok {
+                last_program_ok = program_ok;
+                if let Some(writer) = hal.as_mut() {
+                    if let Err(error) =
+                        writer.write(LincOutput::ProgramOk, HalValue::Bit(program_ok))
+                    {
+                        log::warn!("HAL program-ok write failed: {error}");
+                    }
+                }
+            }
+
             *shared
                 .snapshot
                 .lock()
@@ -486,6 +505,51 @@ mod tests {
                 .any(|(output, value)| *output == LincOutput::JogIncrement
                     && *value == HalValue::Float(0.5)),
             "jog increment must reach the HAL: {writes:?}"
+        );
+    }
+
+    /// `linc.program-ok` gates cycle start in the machine HAL, so it has to reach
+    /// the writer. It was silently dropped once - grouped with the outputs the
+    /// worker was assumed to publish - and cycle start did nothing with a clean
+    /// program loaded, because the pin read FALSE.
+    #[test]
+    fn the_program_interlock_is_published_from_the_snapshot() {
+        use std::sync::{Arc, Mutex};
+        struct RecordingHal(Arc<Mutex<Vec<(LincOutput, HalValue)>>>);
+        impl HalWriter for RecordingHal {
+            fn write(&mut self, output: LincOutput, value: HalValue) -> Result<(), MachineError> {
+                self.0.lock().unwrap().push((output, value));
+                Ok(())
+            }
+        }
+        struct Fixed {
+            snapshot: MachineSnapshot,
+        }
+        impl MachineBackend for Fixed {
+            fn snapshot(&mut self) -> MachineSnapshot {
+                self.snapshot.clone()
+            }
+            fn send(&mut self, _command: MachineCommand) -> Result<(), MachineError> {
+                Ok(())
+            }
+        }
+        let recording = Arc::new(Mutex::new(Vec::new()));
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.hal.program_ok = true;
+        let _handle = BackendHandle::spawn(
+            Box::new(Fixed { snapshot }),
+            Some(Box::new(RecordingHal(recording.clone()))),
+            50,
+            StatusSource::Wcs,
+        );
+        thread::sleep(Duration::from_millis(200));
+        let writes = recording.lock().unwrap().clone();
+        assert!(
+            writes
+                .iter()
+                .any(|(output, value)| *output == LincOutput::ProgramOk
+                    && *value == HalValue::Bit(true)),
+            "the program interlock must reach the HAL: {writes:?}"
         );
     }
 
