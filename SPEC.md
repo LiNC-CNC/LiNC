@@ -486,9 +486,11 @@ Default page. The layout is selected by `machine.gui`.
   not a duplicated list.
 - Axis cards expand from 3 to 5: 3 large cards at 3-axis; compact cards at
   4/5-axis. Never invent an axis that the INI does not expose.
-- **Second dashboard (AUTO, MDI).** `MAIN` pressed again on MAIN walks between
-  the default layout and a coordinate matrix; the MAIN row in the navigation
-  list does the same. The alternate view drops the axis cards and the toolpath
+- **Second dashboard (AUTO, MDI, JOG, INC, MPG).** `MAIN` pressed again on
+  MAIN walks between the default layout and a coordinate matrix; the MAIN row in
+  the navigation list does the same, and on the manual page the same press walks
+  the same pair in place of its graph (§6.11). The alternate view drops the axis
+  cards and the toolpath
   and fills their column with four cards: `WORK COORDINATES`, named with the
   active WCS (`G54` …); `MACHINE COORDINATES`; `DISTANCE TO GO`; and
   `TOOL OFFSETS`, the loaded tool's offsets plus the radius cutter
@@ -497,9 +499,9 @@ Default page. The layout is selected by `machine.gui`.
   offsets `TOOL_TABLE_COLUMNS` declares, and shows a dash for one the tool's row
   does not carry (LinuxCNC reads a missing word as zero). The feed strip and
   the program or MDI card keep their places. The choice is a preference
-  (`main_view` in the preferences file), so the next start opens the dashboard
-  the operator left and a page or mode change does not undo it; only AUTO and
-  MDI offer the cycle, and EDIT/JOG/INC/MPG/HOME keep the key's single meaning.
+  (`main_view` in the preferences file), so the next start opens the view the
+  operator left and a page or mode change does not undo it. One choice covers
+  MAIN and the manual page. EDIT and HOME keep the key's single meaning.
 - Large 3D toolpath: stock, loaded program path, live tool trail in a distinct
   color, rapid path, tool marker, axes, zoom, program/machine bounds and
   selected-line highlight. `CLEAR TRAIL` clears only the live trail.
@@ -1583,6 +1585,12 @@ item is added. The screen is read-only: all jog, increment, handwheel, mode and
 override input stays on the physical panel, with the WHB pendant used only for
 jog in JOG mode.
 
+- **Two faces.** The page carries the same pair as MAIN and reads the same
+  `main_view`: the graph, or the coordinate matrix in its place. MAIN pressed on
+  the page when nothing else in front holds the keyboard walks them; the sidebar
+  row opens the matrix on MAIN. The matrix is a DRO, so in that face the column
+  drops its own `WORK COORDINATES` card rather than print the same title twice,
+  and keeps the increment row and the servo load.
 - **Large graph window** is the dominant element: mill 3D or lathe XZ
   toolpath, axes, grid, stock/program bounds where available, the loaded
   program path, live tool marker and a short position trail in a distinct
@@ -1765,7 +1773,9 @@ etc.
   and the HMI issues them itself (§6.10), one per press, because the halui
   alternative needed a task mode the dial must not ask for.
 - JOG/INC/MPG open the Manual screen with the large graph and coordinate
-  readout. Jog, increment and handwheel motion remain panel/pendant input only.
+  readout, or the coordinate matrix in the graph's place; the choice is MAIN's
+  own (`main_view`). Jog, increment and handwheel motion remain panel/pendant
+  input only.
   **Increment selection**: `INC` steps come from the machine INI's
   `[DISPLAY] INCREMENTS` list, so the HMI offers exactly the values LinuxCNC was
   configured with (the same list Axis and Probe Basic use). The selector lives

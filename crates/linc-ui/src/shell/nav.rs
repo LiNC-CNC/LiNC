@@ -290,6 +290,12 @@ impl LincApp {
             return;
         }
         if page == self.nav.page {
+            // MAIN pressed on the page it already opened. The manual page has
+            // the same two faces as MAIN — the live graph, or the coordinate
+            // matrix in its place — so the press walks them there too.
+            if page == Page::Manual {
+                self.toggle_main_view();
+            }
             return;
         }
         self.request_page(page);
@@ -307,23 +313,33 @@ impl LincApp {
             self.request_page(Page::Machine);
             return;
         }
-        if self.main_alternate_available() {
-            self.main_view = self.main_view.flipped();
-            // The choice is the operator's, so it outlives the session: the next
-            // start opens the dashboard they left.
-            self.remember_main_view(self.main_view);
-        }
+        self.toggle_main_view();
     }
 
-    /// True in the modes whose screen MAIN is, which are the modes the
-    /// alternate dashboard exists in, on the machine whose screen has a toolpath
-    /// to replace. An unknown, zero or offline mode answers false: the matrix
-    /// would be a guess about a machine the shell cannot see.
+    /// Walk the two faces: the axis readouts with the toolpath, or the
+    /// coordinate matrix. MAIN and the manual page share the one choice, and it
+    /// is the operator's: the next start opens the view they left.
+    pub(super) fn toggle_main_view(&mut self) {
+        if !self.main_alternate_available() {
+            return;
+        }
+        self.main_view = self.main_view.flipped();
+        self.remember_main_view(self.main_view);
+    }
+
+    /// True in the modes whose screens carry a toolpath the matrix can replace,
+    /// on the machine whose screen has one: AUTO, MDI, and the manual family,
+    /// whose page draws the live graph. An unknown, zero or offline mode answers
+    /// false: the matrix would be a guess about a machine the shell cannot see.
     pub fn main_alternate_available(&self) -> bool {
         self.profile.variant != MachineVariant::Lathe
             && matches!(
                 self.snapshot.panel.mode.mode(),
-                Some(PanelMode::Auto) | Some(PanelMode::Mdi)
+                Some(PanelMode::Auto)
+                    | Some(PanelMode::Mdi)
+                    | Some(PanelMode::Jog)
+                    | Some(PanelMode::Inc)
+                    | Some(PanelMode::Mpg)
             )
     }
 

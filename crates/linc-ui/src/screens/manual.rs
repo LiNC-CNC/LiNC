@@ -5,6 +5,11 @@
 //! coordinates sit the INC step row (INC only) and the SERVO LOAD card from
 //! MAIN, so the operator reads axis load without leaving the jog page.
 //!
+//! The page carries the same two faces as MAIN, chosen with the one `main_view`
+//! the operator set there: the graph, or the coordinate matrix in its place. The
+//! matrix is the DRO, so the column keeps only what the matrix does not carry —
+//! the step row and the servo load.
+//!
 //! No mode context card and no limit-override button: the [keys] chord covers
 //! the override and the status line shows when it is on.
 
@@ -13,6 +18,7 @@ use linc_core::command::{MachineCommand, SpindleStep};
 use linc_core::model::{MachineVariant, PanelMode};
 
 use crate::screens::common::{self, LiveAxisRow};
+use crate::screens::machine;
 use crate::shell::LincApp;
 use crate::state::ShortcutCommand;
 use crate::theme;
@@ -34,38 +40,51 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // INC fills this column with its step row, so the servo card is for JOG and
     // MPG only. One secondary card under the DRO, not a stack.
     let show_servo = !increment_keys_active(app.snapshot.panel.mode.mode());
+    // Read before the split borrows `app`: the same choice MAIN carries, drawn
+    // in place of the graph. Its WORK COORDINATES card is the DRO the column
+    // would otherwise repeat, so the column keeps only the cards it does not.
+    let alternate = machine::alternate_active(app);
     common::live_split(
         app,
         ui,
         "manual-live-right",
         |app, ui| {
-            // Leave a gap so the card's bottom border is not flush with the
-            // edge of the page.
-            common::live_graph_card(app, ui, ui.available_height() - 6.0);
+            // Leave a gap so the bottom border is not flush with the edge of
+            // the page.
+            let height = ui.available_height() - 6.0;
+            if alternate {
+                machine::coordinate_matrix(app, ui, ui.available_width(), height);
+            } else {
+                common::live_graph_card(app, ui, height);
+            }
         },
         |app, ui| {
-            common::live_coordinates_card(
-                ui,
-                "WORK COORDINATES",
-                &format!(
-                    "{} / {}{}",
-                    app.active_wcs_label(),
-                    app.snapshot.positions.units,
-                    if app.profile.variant == MachineVariant::Lathe {
-                        " / RADIUS"
-                    } else {
-                        ""
-                    }
-                ),
-                &readout,
-            );
+            if !alternate {
+                common::live_coordinates_card(
+                    ui,
+                    "WORK COORDINATES",
+                    &format!(
+                        "{} / {}{}",
+                        app.active_wcs_label(),
+                        app.snapshot.positions.units,
+                        if app.profile.variant == MachineVariant::Lathe {
+                            " / RADIUS"
+                        } else {
+                            ""
+                        }
+                    ),
+                    &readout,
+                );
+            }
             // The step is a jog setting, so it sits under the coordinates it
             // moves, not above them: the DRO is what the operator reads first.
             // INC is the mode that uses the `[DISPLAY] INCREMENTS` step; JOG is
             // continuous and MPG picks its step on the handwheel, so for both
             // the row would be a value the machine is not reading.
             if increment_keys_active(app.snapshot.panel.mode.mode()) {
-                ui.add_space(8.0);
+                if !alternate {
+                    ui.add_space(8.0);
+                }
                 common::increment_row(app, ui);
             }
             // The same card MAIN draws under the toolpath. It shares the
@@ -74,7 +93,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             // margin. Absent on a profile with no `[ui] servo_load` list, and
             // absent in INC, where the step row is the card this column carries.
             if show_servo && !servo_rows.is_empty() {
-                ui.add_space(8.0);
+                // Under the coordinates the card needs the gap; in the matrix
+                // face it is the column's first card.
+                if !alternate {
+                    ui.add_space(8.0);
+                }
                 common::servo_load_card(
                     &servo_rows,
                     ui,

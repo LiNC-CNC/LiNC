@@ -248,7 +248,7 @@ fn bottom_card(
 
 /// True when the alternate dashboard is both asked for and offered: the
 /// operator pressed MAIN on MAIN, and the mode is one whose screen MAIN is.
-fn alternate_active(app: &LincApp) -> bool {
+pub(super) fn alternate_active(app: &LincApp) -> bool {
     app.main_view == MainView::Coordinates && app.main_alternate_available()
 }
 
@@ -262,7 +262,7 @@ struct CoordLine {
 
 /// The alternate dashboard: four coordinate cards in the place the axis
 /// readouts and the toolpath take on the default one.
-fn coordinate_matrix(app: &LincApp, ui: &mut Ui, width: f32, height: f32) {
+pub(super) fn coordinate_matrix(app: &LincApp, ui: &mut Ui, width: f32, height: f32) {
     const GAP: f32 = 8.0;
     let cell = Vec2::new(
         ((width - GAP) / 2.0).max(160.0),

@@ -2749,22 +2749,79 @@ fn main_walks_the_two_dashboards_and_remembers_the_choice() {
     app.request_mode_page();
     assert_eq!(app.main_view, MainView::Coordinates);
 
-    // JOG has its own page and no second face: the press opens MAIN and stops,
-    // and the stored choice is not thrown away by the trip.
+    // JOG opens a page of its own, and that page carries the same two faces:
+    // MAIN pressed there walks them instead of doing nothing.
     switch_mode(&mut app, PanelMode::Jog);
-    app.request_machine_page();
-    assert_eq!(app.nav.page, Page::Machine);
-    assert_eq!(app.main_view, MainView::Coordinates, "no cycle in JOG");
+    assert_eq!(app.nav.page, Page::Manual);
+    app.request_mode_page();
+    assert_eq!(app.nav.page, Page::Manual, "the press stays on the page");
+    assert_eq!(app.main_view, MainView::Dashboard, "and it walks the views");
     assert_eq!(
         app.prefs.preferences.main_view.as_deref(),
-        Some("coordinates")
+        Some("dashboard")
     );
+    app.request_mode_page();
+    assert_eq!(app.main_view, MainView::Coordinates);
+    // Opening MAIN from there keeps the choice, and the row walks it again.
+    app.request_machine_page();
+    assert_eq!(app.nav.page, Page::Machine);
+    assert_eq!(app.main_view, MainView::Coordinates);
+    app.request_machine_page();
+    assert_eq!(app.main_view, MainView::Dashboard);
 
-    // A mode whose screen is not MAIN keeps its single meaning, and coming back
-    // to AUTO restores the chosen dashboard.
+    // A mode whose screen is neither page leaves the choice alone.
     switch_mode(&mut app, PanelMode::Edit);
     switch_mode(&mut app, PanelMode::Auto);
-    assert_eq!(app.main_view, MainView::Coordinates);
+    assert_eq!(app.nav.page, Page::Machine);
+    assert_eq!(app.main_view, MainView::Dashboard);
+}
+
+/// The manual page carries the same two faces as MAIN: the live graph, or the
+/// coordinate matrix in its place. The matrix is the DRO, so the column drops
+/// its own WORK COORDINATES card rather than print the same title twice.
+#[test]
+fn the_manual_page_swaps_its_graph_for_the_same_matrix() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    assert_eq!(harness.app.nav.page, Page::Manual, "JOG opens its own page");
+    let texts = |harness: &mut ProbeHarness| -> Vec<String> {
+        painted_text(&harness.frame_full(Vec::new()))
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect()
+    };
+    let count = |texts: &[String], title: &str| texts.iter().filter(|text| *text == title).count();
+
+    let default = texts(&mut harness);
+    assert_eq!(count(&default, "TOOLPATH"), 1, "{default:?}");
+    assert_eq!(
+        count(&default, "WORK COORDINATES"),
+        1,
+        "the graph's own DRO: {default:?}"
+    );
+
+    // The same press MAIN carries walks the pair here too.
+    harness.app.request_mode_page();
+    assert_eq!(harness.app.nav.page, Page::Manual);
+    assert_eq!(harness.app.main_view, MainView::Coordinates);
+    let alternate = texts(&mut harness);
+    assert_eq!(count(&alternate, "TOOLPATH"), 0, "the graph is gone");
+    for title in [
+        "WORK COORDINATES",
+        "MACHINE COORDINATES",
+        "DISTANCE TO GO",
+        "TOOL OFFSETS",
+    ] {
+        assert_eq!(
+            count(&alternate, title),
+            1,
+            "{title} appears once, not beside a second copy: {alternate:?}"
+        );
+    }
+
+    // And the choice is the one MAIN shares, not a second setting.
+    harness.app.request_machine_page();
+    assert_eq!(harness.app.nav.page, Page::Machine);
+    assert_eq!(harness.app.main_view, MainView::Coordinates);
 }
 
 /// The chosen dashboard is written to the preferences file, so a restart opens
@@ -2949,8 +3006,10 @@ fn a_file_with_a_syntax_fault_is_not_loaded_into_the_interpreter() {
                 MachineCommand::SetHalOutput { output, value } => Some((*output, *value)),
                 _ => None,
             })
-            .any(|(output, value)| output == linc_core::command::LincOutput::ProgramOk
-                && value == linc_core::command::HalValue::Bit(true)),
+            .any(
+                |(output, value)| output == linc_core::command::LincOutput::ProgramOk
+                    && value == linc_core::command::HalValue::Bit(true)
+            ),
         "the interlock was opened for a file the check refused"
     );
 }

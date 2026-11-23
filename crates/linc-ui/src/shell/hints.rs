@@ -172,6 +172,18 @@ impl LincApp {
                 }
                 view_items.push(Shortcut::hint(k.view_zoom_hint(), "ZOOM"));
                 view_items.extend(lathe_hints.clone());
+                // The manual page has the same two faces as MAIN, and the same
+                // press walks them: the hint names what the next one brings.
+                if self.nav.page == Page::Manual && self.main_alternate_available() {
+                    view_items.push(Shortcut::hint(
+                        k.machine.label(),
+                        if self.main_view == MainView::Coordinates {
+                            "DASHBOARD"
+                        } else {
+                            "COORDS"
+                        },
+                    ));
+                }
                 groups.push(ShortcutGroup {
                     title: "VIEW",
                     items: view_items,
@@ -242,8 +254,9 @@ impl LincApp {
                 // A second press of the key that opened MAIN swaps the whole
                 // dashboard in AUTO and MDI. The hint names what the next press
                 // brings, like the square's does, and is absent where the key
-                // has one meaning.
-                if self.main_alternate_available() {
+                // has one meaning — including the manual modes, whose MAIN page
+                // is not the mode's screen, so their key opens that instead.
+                if self.main_alternate_available() && self.mode_screen() == Page::Machine {
                     view_items.push(Shortcut::hint(
                         k.machine.label(),
                         if self.main_view == MainView::Coordinates {

@@ -669,13 +669,16 @@ meters use.
 
 ### The second MAIN dashboard
 
-MAIN is the screen AUTO and MDI own. In those two modes it has a second face,
+MAIN is the screen AUTO and MDI own, and the manual page (JOG, INC, MPG) carries
+the same pair (§6.11 of the specification). In those modes MAIN has a second
+face,
 and `MAIN` pressed again while the page is already in front walks between them —
 the `F5` key and the MAIN row in the navigation list do the same thing. The
 choice is remembered like the toolpath view: it is written to the preferences
-file, so the next start opens the dashboard the operator left, and a page or
-mode change does not undo it. Only AUTO and MDI offer the cycle; in EDIT,
-JOG/INC/MPG and HOME the key keeps its single meaning, because those screens
+file, so the next start opens the view the operator left, and a page or mode
+change does not undo it. One choice covers MAIN and the manual page: there it
+replaces the live graph, and MAIN pressed on that page walks it instead of doing
+nothing. EDIT and HOME keep the key's single meaning, because those screens
 carry their own coordinates.
 
 | view | what it shows |
