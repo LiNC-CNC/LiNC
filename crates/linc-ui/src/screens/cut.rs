@@ -130,7 +130,15 @@ pub fn cut_card(app: &LincApp, ui: &mut Ui, height: f32) {
     common::paint_value_rows(ui, body, &rows);
 }
 
-fn card_rows(cut: &CutReadout) -> Vec<ValueRow> {
+/// Width the CUT card needs for its own figures.
+///
+/// Three short rows: the strip gives it exactly this much and no more, and
+/// FEED / SPINDLE - whose bars read as bars - takes whatever is left.
+pub fn natural_width(ui: &Ui, app: &LincApp) -> f32 {
+    crate::screens::machine::value_card_width(ui, "CUT", &card_rows(&readout(&app.snapshot)))
+}
+
+pub(crate) fn card_rows(cut: &CutReadout) -> Vec<ValueRow> {
     let per_rev = cut.per_rev.map(|value| ValueRow {
         label: "CHIP".into(),
         lead: None,

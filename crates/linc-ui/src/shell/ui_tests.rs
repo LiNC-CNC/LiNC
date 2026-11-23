@@ -1117,28 +1117,43 @@ fn the_cut_card_takes_the_servo_cards_slot_without_load_feedback() {
             "{label} is on the card: {texts:?}"
         );
     }
-    // The pair takes the meters' slot: TLO ends where the meters ended and reads
-    // at the same top line, and CUT is narrower than the half the meters used to
-    // take. The strip itself is as tall as TLO's own rows ask for.
-    let tlo = card_of(&output, "TLO");
+    // The row fills the column and ends where the toolpath column does. TOOL
+    // OFFSETS takes the width its figures need and is pinned to that right edge;
+    // FEED / SPINDLE and CUT divide what is left between them. The strip is as
+    // tall as the offsets card's own rows ask for.
+    let tlo = card_of(&output, "TOOL OFFSETS");
+    let feed = card_of(&output, "FEED / SPINDLE");
     assert!(
         (tlo.bottom() - servo.bottom()).abs() <= 4.0 && tlo.top() <= servo.top() + 1.0,
-        "the strip keeps the meters' bottom edge and grows for TLO's rows: {tlo:?} vs {servo:?}"
+        "the strip keeps the meters' bottom edge and grows for the offsets rows: {tlo:?} vs {servo:?}"
     );
     assert!(
         (tlo.right() - servo.right()).abs() <= 1.0,
-        "the pair ends where the meters ended: {tlo:?} vs {servo:?}"
+        "the offsets card ends where the toolpath column ends: {tlo:?} vs {servo:?}"
     );
     assert!(
-        cut.width() < servo.width() * 0.75 && (tlo.left() - cut.right()) <= 9.0,
-        "CUT is narrower and TLO sits beside it: {cut:?} {tlo:?}"
+        cut.left() > feed.right() && tlo.left() > cut.right(),
+        "the strip reads feed, cut, offsets in that order: {feed:?} {cut:?} {tlo:?}"
+    );
+    assert!(
+        cut.width() < feed.width() * 0.75,
+        "CUT takes only the width its rows need: {cut:?} vs {feed:?}"
+    );
+    assert!(
+        tlo.width() < feed.width() * 0.75 && cut.width() < feed.width() * 0.75,
+        "the offsets and cut cards keep their own narrow widths: {cut:?} {tlo:?} vs {feed:?}"
+    );
+    assert!(
+        (feed.right() + 8.0 - cut.left()).abs() <= 1.0
+            && (cut.right() + 8.0 - tlo.left()).abs() <= 1.0,
+        "the three cards fill the row without a gap left over: {feed:?} {cut:?} {tlo:?}"
     );
     // TLO shows the loaded tool's offsets, one row per configured axis plus the
     // radius. The fixture's table has no X or Y word, so those rows say so
     // rather than showing a zero the controller would add anyway. Every row has
     // to land inside the card: a fourth line must not spill over the strip the
     // meters set.
-    for label in ["TLO", "T1"] {
+    for label in ["TOOL OFFSETS", "T1"] {
         assert!(
             texts.iter().any(|text| text == label),
             "{label} is on the TLO card: {texts:?}"
@@ -2807,13 +2822,13 @@ fn the_alternate_main_dashboard_replaces_the_toolpath_with_four_cards() {
     );
 
     // A machine with no load feedback puts CUT in the strip, which brings the
-    // small TLO card with it.
+    // small offsets card with it.
     harness.app.profile.config.ui.servo_load.clear();
     harness.frame(&[]);
     let default = texts(&mut harness);
     assert!(
-        default.iter().any(|text| text == "TLO"),
-        "the default dashboard's strip carries the small TLO card: {default:?}"
+        default.iter().any(|text| text == "TOOL OFFSETS"),
+        "the default dashboard's strip carries the offsets card: {default:?}"
     );
 
     harness.app.request_mode_page();
@@ -2845,12 +2860,14 @@ fn the_alternate_main_dashboard_replaces_the_toolpath_with_four_cards() {
         "the feed strip stays: {matrix:?}"
     );
     // The matrix's own TOOL OFFSETS card is the readout here, so the strip
-    // does not repeat it in a second, smaller card.
-    assert!(
-        !matrix.iter().any(|text| text == "TLO"),
-        "the strip's small TLO card is gone: {matrix:?}"
+    // does not repeat it in a second, smaller card: one title, and the matrix
+    // already names four cards.
+    assert_eq!(
+        matrix.iter().filter(|text| *text == "TOOL OFFSETS").count(),
+        1,
+        "the strip's offsets card is gone: {matrix:?}"
     );
-    // CUT gets the half the meters take, because it no longer shares with TLO.
+    // CUT then takes the free half of the strip, because it no longer shares it.
     assert!(
         matrix.iter().any(|text| text == "CUT"),
         "CUT is still in the strip: {matrix:?}"
@@ -5292,7 +5309,7 @@ fn the_tool_offset_columns_follow_the_ini() {
     // The fixture declares TXYZDR, so the card lists all three offsets.
     harness.frame(&[]);
     let output = harness.frame_full(Vec::new());
-    let tlo = card_of(&painted_text(&output), &output, "TLO");
+    let tlo = card_of(&painted_text(&output), &output, "TOOL OFFSETS");
     for label in ["X", "Y", "Z", "RAD"] {
         assert!(
             painted_text(&output)
@@ -5307,7 +5324,7 @@ fn the_tool_offset_columns_follow_the_ini() {
     harness.frame(&[]);
     let output = harness.frame_full(Vec::new());
     let painted = painted_text(&output);
-    let tlo = card_of(&painted, &output, "TLO");
+    let tlo = card_of(&painted, &output, "TOOL OFFSETS");
     let on_card = |label: &str| {
         painted
             .iter()

@@ -179,6 +179,21 @@ pub fn card_height(lines: usize) -> f32 {
 }
 
 /// The card, in MAIN's bottom strip beside FEED and CUT.
+/// What the card calls itself. `TLO` was an abbreviation the operator had to
+/// decode; the figures it holds are the tool offsets the table carries.
+pub const TITLE: &str = "TOOL OFFSETS";
+
+/// Width the card needs for its widest row, so it takes no more of the strip
+/// than its figures do.
+pub fn natural_width(ui: &Ui, app: &LincApp) -> f32 {
+    let lengths = read(
+        &app.snapshot,
+        &app.profile.machine_ini.tool_offset_columns(),
+        app.profile.variant,
+    );
+    crate::screens::machine::value_card_width(ui, TITLE, &lengths.rows(&app.snapshot))
+}
+
 pub fn tlo_card(app: &LincApp, ui: &mut Ui, height: f32) {
     let lengths = read(
         &app.snapshot,
@@ -187,7 +202,7 @@ pub fn tlo_card(app: &LincApp, ui: &mut Ui, height: f32) {
     );
     let rows = lengths.rows(&app.snapshot);
     let badge = format!("T{}", lengths.tool);
-    let body = common::value_card(ui, height, "TLO", Some((&badge, theme::MUTED)));
+    let body = common::value_card(ui, height, TITLE, Some((&badge, theme::MUTED)));
     common::paint_value_rows(ui, body, &rows);
 }
 

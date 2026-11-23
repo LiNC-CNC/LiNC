@@ -81,45 +81,51 @@ fn mill(app: &mut LincApp, ui: &mut Ui) {
                     // alternate dashboard already shows those offsets in its own
                     // card, so its strip keeps CUT at the half the meters use.
                     let with_tlo = second == Some(Second::Cut) && !alternate;
-                    let cards = match second {
-                        None => 1.0,
-                        Some(Second::Load) => 2.0,
-                        Some(Second::Cut) if with_tlo => 3.0,
-                        Some(Second::Cut) => 2.0,
-                    };
-                    let card_width = bottom_row_card_width(graph_width, cards, 150.0);
+                    // FEED / SPINDLE keeps half the strip; CUT and TOOL OFFSETS
+                    // take only the width their figures need, measured here so a
+                    // card with three short rows is not given a third of the bar
+                    // to fill with air.
+                    let (feed_width, second_width, tlo_width) = bottom_strip_widths(
+                        graph_width,
+                        second,
+                        with_tlo,
+                        if second == Some(Second::Cut) {
+                            crate::screens::cut::natural_width(ui, app)
+                        } else {
+                            0.0
+                        },
+                        if with_tlo {
+                            crate::screens::tlo::natural_width(ui, app)
+                        } else {
+                            0.0
+                        },
+                        common::feed_speed_natural_width(ui, app),
+                    );
                     ui.horizontal_top(|ui| {
                         // The explicit gap below is the whole gap: the default
                         // item spacing would add 8 more per card and push the
                         // servo card past the graph's right edge.
                         ui.spacing_mut().item_spacing.x = 0.0;
-                        bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
+                        bottom_card(app, ui, feed_width, bottom_height, "feed", |app, ui, _h| {
                             common::feed_speed_card(app, ui, bottom_height);
                         });
                         let Some(second) = second else {
                             return;
                         };
-                        ui.add_space(8.0);
+                        ui.add_space(CARD_GAP);
                         bottom_card(
                             app,
                             ui,
-                            card_width,
+                            second_width,
                             bottom_height,
                             second.id(),
                             |app, ui, _h| second.draw(app, ui, bottom_height),
                         );
                         if with_tlo {
-                            ui.add_space(8.0);
-                            bottom_card(
-                                app,
-                                ui,
-                                card_width,
-                                bottom_height,
-                                "tlo",
-                                |app, ui, _h| {
-                                    crate::screens::tlo::tlo_card(app, ui, bottom_height);
-                                },
-                            );
+                            ui.add_space(CARD_GAP);
+                            bottom_card(app, ui, tlo_width, bottom_height, "tlo", |app, ui, _h| {
+                                crate::screens::tlo::tlo_card(app, ui, bottom_height);
+                            });
                         }
                     });
                 }
@@ -223,6 +229,98 @@ fn bottom_cards_height(app: &LincApp, alternate: bool) -> f32 {
 /// them fill `column` exactly. `min` is the smallest usable card.
 fn bottom_row_card_width(column: f32, cards: f32, min: f32) -> f32 {
     ((column - 8.0 * (cards - 1.0)) / cards).max(min)
+}
+
+/// Gap the strip leaves between two cards.
+const CARD_GAP: f32 = 8.0;
+
+/// Share of the strip FEED / SPINDLE keeps when it is alone with one other card.
+const FEED_SHARE: f32 = 0.5;
+
+/// Width a value card needs for its rows and its title, margins included.
+///
+/// A row puts its label at the left, its value and units at the right, so the
+/// card is as wide as the widest of `label + value + units`, or as its title if
+/// that is wider. Anything more is empty border.
+pub(super) fn value_card_width(ui: &Ui, title: &str, rows: &[common::ValueRow]) -> f32 {
+    let label_font = egui::FontId::monospace(theme::font_size(9.0));
+    let value_font = egui::FontId::monospace(theme::font_size(11.0));
+    let title_font = egui::FontId::proportional(theme::font_size(12.0));
+    let width = |text: &str, font: &egui::FontId| {
+        ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(text.to_string(), font.clone(), theme::FG)
+                .size()
+                .x
+        })
+    };
+    // The badge beside the title (CUT has none, TOOL OFFSETS its tool number)
+    // takes the title's own right end; adding it to the title's width keeps the
+    // header from crowding the first row.
+    let mut widest = width(title, &title_font) + 28.0;
+    for row in rows {
+        let mut row_width = width(&row.label, &label_font) + 10.0;
+        if let Some(lead) = &row.lead {
+            row_width += width(lead, &label_font) + 5.0;
+        }
+        row_width += width(&row.value, &value_font);
+        if !row.units.is_empty() {
+            row_width += width(&row.units, &label_font) + 5.0;
+        }
+        widest = widest.max(row_width);
+    }
+    (widest + 2.0 * theme::CARD_MARGIN).ceil()
+}
+
+/// The strip's three widths: FEED / SPINDLE, the second card, and TOOL OFFSETS.
+///
+/// The row fills the column and ends where the toolpath does, because the offsets
+/// card is pinned to that right edge - it is the card the eye compares against
+/// the graph above, so the two must end together. CUT takes the width its three
+/// short rows need and no more. FEED / SPINDLE absorbs the remainder: its bars
+/// read as bars, and it is the one card that gets better with the space.
+fn bottom_strip_widths(
+    column: f32,
+    second: Option<Second>,
+    with_tlo: bool,
+    cut_width: f32,
+    tlo_width: f32,
+    feed_width_needed: f32,
+) -> (f32, f32, f32) {
+    let gaps = match (second, with_tlo) {
+        (None, _) => 0.0,
+        (Some(_), true) => 2.0 * CARD_GAP,
+        (Some(_), false) => CARD_GAP,
+    };
+    let usable = (column - gaps).max(0.0);
+    // Alone in the row, the feed card fills it.
+    if second.is_none() {
+        return (usable.max(180.0), 0.0, 0.0);
+    }
+    // FEED / SPINDLE keeps what its padded figures need; the other two give way
+    // to it rather than the reverse, because its numbers are the ones that grow.
+    let feed_floor = feed_width_needed.max(150.0);
+    // The offsets card keeps its own width, but never so much that the cards
+    // beside it fall below a readable minimum.
+    let tlo = if with_tlo {
+        tlo_width.clamp(0.0, (usable - feed_floor - 150.0).max(0.0))
+    } else {
+        0.0
+    };
+    let shared = (usable - tlo).max(0.0);
+    match second {
+        // The load meters are bars, not rows: they keep the even split.
+        Some(Second::Load) => {
+            let feed = (shared * FEED_SHARE).max(150.0).min(shared);
+            (feed, shared - feed, tlo)
+        }
+        // CUT takes what its rows need; the feed card gets the rest of the row.
+        Some(Second::Cut) => {
+            let cut = cut_width.clamp(0.0, (shared - feed_floor).max(0.0));
+            (shared - cut, cut, tlo)
+        }
+        None => (shared, 0.0, tlo),
+    }
 }
 
 fn bottom_card(
@@ -747,21 +845,32 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                 // The bottom cards share the TOOLPATH column's width, so the
                 // servo card's right edge lines up with the graph's. Measure
                 // the column itself, not the pre-layout estimate.
-                let cards = if second.is_some() { 2.0 } else { 1.0 };
-                let card_width = bottom_row_card_width(ui.available_width(), cards, 180.0);
+                let column = ui.available_width();
+                let (feed_width, second_width, _) = bottom_strip_widths(
+                    column,
+                    second,
+                    false,
+                    if second == Some(Second::Cut) {
+                        crate::screens::cut::natural_width(ui, app)
+                    } else {
+                        0.0
+                    },
+                    0.0,
+                    common::feed_speed_natural_width(ui, app),
+                );
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    bottom_card(app, ui, card_width, bottom_height, "feed", |app, ui, _h| {
+                    bottom_card(app, ui, feed_width, bottom_height, "feed", |app, ui, _h| {
                         common::feed_speed_card(app, ui, bottom_height);
                     });
                     let Some(second) = second else {
                         return;
                     };
-                    ui.add_space(8.0);
+                    ui.add_space(CARD_GAP);
                     bottom_card(
                         app,
                         ui,
-                        card_width,
+                        second_width,
                         bottom_height,
                         second.id(),
                         |app, ui, _h| second.draw(app, ui, bottom_height),

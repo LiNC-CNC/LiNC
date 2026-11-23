@@ -1708,6 +1708,90 @@ fn feed_speed_block(
     }
 }
 
+/// The spindle block's two rows: commanded speed with its override, then the
+/// measured speed with a yes/no for whether it is turning.
+fn spindle_rows(app: &LincApp) -> [(String, String, String); 2] {
+    let (commanded, actual, override_factor, on) = app
+        .snapshot
+        .spindles
+        .first()
+        .map(|spindle| {
+            (
+                spindle.commanded_speed,
+                spindle.actual_speed,
+                spindle.override_factor,
+                spindle.on,
+            )
+        })
+        .unwrap_or((0.0, 0.0, 1.0, false));
+    [
+        (
+            format!("{commanded:.0}"),
+            "RPM".to_string(),
+            format!("{:.0}%", override_factor * 100.0),
+        ),
+        (
+            format!("{actual:.0}"),
+            "RPM".to_string(),
+            format!("({})", yes_no(on)),
+        ),
+    ]
+}
+
+/// Width the feed/spindle card needs to show its two blocks at the value face's
+/// full size.
+///
+/// The block shrinks its numbers to 10 pt and then runs out of room, and past
+/// that it cuts the override and the `(True)` flag off the right edge - which is
+/// what a strip sized by an even split of the leftovers did to a machine reading
+/// `2000 mm/min 150%`. Measuring the widest block at the size it is meant to be
+/// read at is the difference between dividing the space and dividing the
+/// readable text.
+pub fn feed_speed_natural_width(ui: &Ui, app: &LincApp) -> f32 {
+    const LANE: f32 = 42.0;
+    const GAP: f32 = 6.0;
+    const VALUE_SIZE: f32 = 14.0;
+    let detail = FontId::monospace(theme::font_size(9.0));
+    let value_font = FontId::monospace(theme::font_size(VALUE_SIZE));
+    let measure = |text: &str, font: &FontId| {
+        ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(text.to_string(), font.clone(), theme::FG)
+                .size()
+                .x
+        })
+    };
+    let block = |rows: &[(String, String, String); 2]| -> f32 {
+        // Padded to four figures: the values are readouts, and a machine that
+        // reaches `1000` must not find the override or the `(True)` cut off the
+        // right edge of a card that was sized for three.
+        const PADDED_DIGITS: usize = 4;
+        let widest_value = rows
+            .iter()
+            .map(|(text, _, _)| {
+                let padded = format!(
+                    "{:>width$}",
+                    text,
+                    width = PADDED_DIGITS.max(text.chars().count())
+                );
+                measure(&padded, &value_font)
+            })
+            .fold(0.0f32, f32::max);
+        let widest_units = rows
+            .iter()
+            .map(|(_, units, _)| measure(units, &detail))
+            .fold(0.0f32, f32::max);
+        let widest_extra = rows
+            .iter()
+            .map(|(_, _, extra)| measure(extra, &detail))
+            .fold(0.0f32, f32::max);
+        LANE + widest_value + GAP + widest_units + GAP + widest_extra
+    };
+    let widest = block(&feed_rows(&app.snapshot.feed)).max(block(&spindle_rows(app)));
+    // Both blocks, the divider between them, and the card's own margins.
+    (2.0 * widest + 24.0 + 2.0 * theme::CARD_MARGIN).ceil()
+}
+
 pub fn feed_speed_card(app: &LincApp, ui: &mut Ui, height: f32) {
     theme::card(ui, |ui| {
         ui.set_min_height((height - 24.0).max(0.0));
@@ -1734,31 +1818,7 @@ pub fn feed_speed_card(app: &LincApp, ui: &mut Ui, height: f32) {
         let feed_rows = feed_rows(&app.snapshot.feed);
         feed_speed_block(ui, left, "F", &feed_rows, None);
 
-        let (commanded, actual, override_factor, on) = app
-            .snapshot
-            .spindles
-            .first()
-            .map(|spindle| {
-                (
-                    spindle.commanded_speed,
-                    spindle.actual_speed,
-                    spindle.override_factor,
-                    spindle.on,
-                )
-            })
-            .unwrap_or((0.0, 0.0, 1.0, false));
-        let spindle_rows = [
-            (
-                format!("{commanded:.0}"),
-                "RPM".to_string(),
-                format!("{:.0}%", override_factor * 100.0),
-            ),
-            (
-                format!("{actual:.0}"),
-                "RPM".to_string(),
-                format!("({})", yes_no(on)),
-            ),
-        ];
+        let spindle_rows = spindle_rows(app);
         let direction = app
             .snapshot
             .spindles
