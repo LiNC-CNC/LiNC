@@ -289,10 +289,13 @@ impl LincApp {
                         items: view_items,
                     });
                 }
-                if self.main_matrix_active() {
+                if self.matrix_dro_keys_active() {
                     // The matrix is the readout the operator may write: its WORK
                     // COORDINATES card takes the OFFSETS page's keys against the
-                    // active WCS.
+                    // active WCS. The manual modes' only: AUTO and MDI keep the
+                    // letters for the block, and the pane's own group names
+                    // them, so a DRO row there would promise a key that types
+                    // its letter into the block instead.
                     let mut dro_items = vec![Shortcut::hint("X/Y/Z", "EDIT DRO")];
                     if self.offsets.dro_edit.is_some() {
                         dro_items.push(Shortcut::hint("Enter", "SET"));
@@ -576,11 +579,12 @@ impl LincApp {
                         "INCREMENT",
                     ));
                 }
-                // X/Y/Z edit the active WCS on the matrix, the OFFSETS page's
-                // keys, and keep zeroing only where no matrix is drawn: HOME and
-                // PROG.HOME, whose page has nothing to write into. `A` goes with
-                // them: the manual modes have no zero-all key at all.
-                if self.main_matrix_active() {
+                // X/Y/Z edit the active WCS on the matrix in the manual modes,
+                // the OFFSETS page's keys, and keep zeroing only where no matrix
+                // is drawn: HOME and PROG.HOME, whose page has nothing to write
+                // into. `A` goes with them: the manual modes have no zero-all key
+                // at all.
+                if self.matrix_dro_keys_active() {
                     key_items.push(Shortcut::hint("X/Y/Z", "EDIT DRO"));
                     if self.offsets.dro_edit.is_some() {
                         key_items.push(Shortcut::hint("Enter", "SET"));

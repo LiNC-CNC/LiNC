@@ -7993,6 +7993,124 @@ fn the_matrix_wcs_takes_the_offsets_page_keys() {
     assert!((work - 12.5).abs() < 1e-6, "X shows {work}, expected 12.5");
 }
 
+/// The matrix's `X`/`Y`/`Z` are the manual modes' keys. AUTO and MDI put a block
+/// in front of the operator, so `X` there is the X word of that block rather than
+/// a shortcut into the offset: the letters are neither consumed nor listed, and
+/// the card stays a readout they can still click.
+#[test]
+fn only_the_manual_modes_give_the_matrix_its_letters() {
+    fn labels(harness: &ProbeHarness) -> Vec<&'static str> {
+        harness
+            .app
+            .key_hints()
+            .into_iter()
+            .flat_map(|group| group.items.into_iter().map(|item| item.label).collect::<Vec<_>>())
+            .collect()
+    }
+
+    // AUTO: the program is what is in front, and a letter must not open an offset
+    // field over it.
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.frame(&[]);
+    harness.app.request_mode_page();
+    assert!(harness.app.main_matrix_active(), "the matrix is in front");
+    assert!(!harness.app.matrix_dro_keys_active());
+    harness.frame(&[]);
+    for key in [egui::Key::X, egui::Key::Y, egui::Key::Z] {
+        harness.frame(&[key]);
+        assert!(
+            harness.app.offsets.dro_edit.is_none(),
+            "{key:?} belongs to the program in AUTO"
+        );
+    }
+    let auto = labels(&harness);
+    assert!(!auto.contains(&"EDIT DRO"), "{auto:?}");
+
+    // JOG: the same card, and there the letter opens the WCS edit and the pane
+    // names it.
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.frame(&[]);
+    harness.app.request_mode_page();
+    assert!(harness.app.main_matrix_active());
+    assert!(harness.app.matrix_dro_keys_active());
+    harness.frame(&[egui::Key::X]);
+    assert_eq!(
+        harness
+            .app
+            .offsets
+            .dro_edit
+            .as_ref()
+            .map(|edit| edit.axis.as_str()),
+        Some("X"),
+        "X opens the WCS edit in the manual modes"
+    );
+    let manual = labels(&harness);
+    assert!(manual.contains(&"EDIT DRO"), "{manual:?}");
+}
+
+/// MDI's block is G-code, so its letters are text and not shortcuts: on MAIN the
+/// pane replaces the program card and its input takes the keyboard, which means
+/// the matrix's `X`/`Y`/`Z` cannot open the WCS edit behind the operator's back
+/// — the field would take the focus and the rest of the block would land in the
+/// offset instead of the input. The SHORTCUTS pane says what the keys do, so the
+/// untouched DRO group goes with them.
+#[test]
+fn the_mdi_input_owns_the_matrix_letters() {
+    let mut harness = mdi_harness();
+    harness.frame(&[]);
+    assert!(harness.app.mdi_pane_visible());
+    harness.app.request_mode_page();
+    assert!(harness.app.main_matrix_active(), "the matrix is in front");
+    harness.frame(&[]);
+
+    for key in [egui::Key::X, egui::Key::Y, egui::Key::Z] {
+        harness.frame(&[key]);
+        assert!(
+            harness.app.offsets.dro_edit.is_none(),
+            "{key:?} is the block's letter, not a DRO shortcut"
+        );
+    }
+    assert!(!harness.app.snapshot.positions.axes.is_empty());
+    assert!(
+        harness
+            .ctx
+            .memory(|memory| memory.has_focus(egui::Id::unique("linc-mdi-input"))),
+        "the input keeps the keyboard"
+    );
+
+    let labels: Vec<&str> = harness
+        .app
+        .key_hints()
+        .into_iter()
+        .flat_map(|group| group.items.into_iter().map(|item| item.label).collect::<Vec<_>>())
+        .collect();
+    assert!(!labels.contains(&"EDIT DRO"), "{labels:?}");
+    assert!(
+        labels.contains(&"ISSUE"),
+        "the MDI group still names the pane's keys: {labels:?}"
+    );
+
+    // A field the operator opened with the mouse still owns Enter: the block is
+    // not issued over the value being typed beside it.
+    harness.app.mdi.input = "G0 X1".into();
+    harness.app.offsets.dro_edit = Some(crate::state::DroEdit {
+        axis: "X".into(),
+        buffer: "1.5".into(),
+        focus: true,
+    });
+    harness.frame(&[egui::Key::Enter]);
+    assert!(
+        harness.mdi_sent().is_empty(),
+        "Enter writes the field, not the block: {:?}",
+        harness.mdi_sent()
+    );
+    assert!(
+        harness.app.offsets.dro_edit.is_none(),
+        "the value is written and the field closes"
+    );
+}
+
 /// The in-place edit owns the keyboard, so Escape must reach the field that was
 /// opened rather than the shell. When it closes, the focus has to come back with
 /// it: a text-edit id left focused makes `text_edit_focused` true for the rest of

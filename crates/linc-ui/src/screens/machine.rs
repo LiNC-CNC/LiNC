@@ -361,9 +361,9 @@ struct CoordLine {
 /// readouts and the toolpath take on the default one.
 ///
 /// The WORK COORDINATES card is the one the operator may write: it is the active
-/// WCS, so it takes the OFFSETS page's in-place edit — a click on a row or the
-/// axis's letter key, Enter to write, Escape to drop — and writes through the
-/// same `SetWorkPosition` path the page's DRO does.
+/// WCS, so it takes the OFFSETS page's in-place edit — a click on a row, or in
+/// the manual modes the axis's letter key, Enter to write, Escape to drop — and
+/// writes through the same `SetWorkPosition` path the page's DRO does.
 pub(super) fn coordinate_matrix(app: &mut LincApp, ui: &mut Ui, width: f32, height: f32) {
     const GAP: f32 = 8.0;
     let cell = Vec2::new(
@@ -377,7 +377,14 @@ pub(super) fn coordinate_matrix(app: &mut LincApp, ui: &mut Ui, width: f32, heig
     // the page because the card only exists with the matrix in front — on the
     // dashboard face those letters belong to nothing else either, and the zeroing
     // they used to do on the manual page is gone.
-    crate::screens::offsets::handle_axis_keys(app, ui);
+    //
+    // The letters are the manual modes' only: in AUTO and MDI the thing being
+    // typed is a block, and `X` there is the block's X word rather than a
+    // shortcut into the offset. Enter and Escape still reach a field the operator
+    // opened with the mouse, in every mode.
+    if app.matrix_dro_keys_active() {
+        crate::screens::offsets::handle_axis_keys(app, ui);
+    }
     crate::screens::offsets::handle_dro_keys(app, ui);
     // One read of the snapshot for all four cards, so the matrix cannot show two
     // different frames.
@@ -463,7 +470,9 @@ fn matrix_card(ui: &mut Ui, cell: Vec2, title: &str, badge: Option<String>, line
 /// A click on a row opens the same in-place edit the OFFSETS page's DRO uses,
 /// seeded from the controller's own work position, and Enter writes it back
 /// through `SetWorkPosition`; the keys are that page's (`handle_axis_keys`,
-/// `handle_dro_keys`), so the two cannot drift.
+/// `handle_dro_keys`), so the two cannot drift. The letter keys are the manual
+/// modes' (`matrix_dro_keys_active`); the click is the pointer's own request, so
+/// it opens the edit in every mode the card is drawn in.
 fn work_coordinates_card(
     app: &mut LincApp,
     ui: &mut Ui,

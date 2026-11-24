@@ -355,6 +355,22 @@ impl LincApp {
         self.main_view == MainView::Coordinates && self.main_alternate_available()
     }
 
+    /// True where the matrix's WORK COORDINATES card takes the OFFSETS page's
+    /// `X`/`Y`/`Z` letters against the active WCS.
+    ///
+    /// Only the manual modes: that is where the matrix is the readout the
+    /// operator touches off from. AUTO and MDI keep the letters for the block —
+    /// a program or an MDI line is G-code text, and a letter that opened an
+    /// offset field took the keyboard from it — so the card is a readout there,
+    /// and the SHORTCUTS pane does not offer keys the page will not take.
+    pub fn matrix_dro_keys_active(&self) -> bool {
+        self.main_matrix_active()
+            && matches!(
+                self.snapshot.panel.mode.mode(),
+                Some(PanelMode::Jog | PanelMode::Inc | PanelMode::Mpg)
+            )
+    }
+
     pub fn set_page(&mut self, page: Page) {
         self.remember_page(page);
         if page == Page::Help && self.nav.page != Page::Help {

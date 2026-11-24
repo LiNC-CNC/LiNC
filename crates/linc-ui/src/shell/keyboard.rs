@@ -250,7 +250,12 @@ impl LincApp {
                 // Enter issues the block. The binding is configurable, so the
                 // pane test comes first and the mode flag second: consume_key
                 // swallows the key whatever the rest of the condition says.
+                //
+                // An in-place WCS edit drawn beside the pane owns Enter first: it
+                // was opened by a click on the matrix card, so the key writes its
+                // value rather than issuing a block the operator was not typing.
                 if self.profile.config.mdi.execute_on_enter
+                    && self.offsets.dro_edit.is_none()
                     && input.consume_key(
                         self.prefs.keymap.mdi_issue.modifiers,
                         self.prefs.keymap.mdi_issue.key,

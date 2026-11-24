@@ -204,8 +204,18 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
 ///
 /// Shared with MAIN's coordinate matrix: the WORK COORDINATES card there is the
 /// same reading of the same active WCS, so the keys and the write are one path.
+/// Which modes offer the matrix's letters is the caller's decision
+/// (`matrix_dro_keys_active`); this page is the DRO itself, so it keeps them
+/// wherever it is drawn.
+///
+/// A field that holds the keyboard keeps its letters: they are text there, not a
+/// shortcut, and consuming them would open an edit over the line being typed.
 pub(crate) fn handle_axis_keys(app: &mut LincApp, ui: &mut Ui) {
-    if app.overlay_open() || app.offsets.dro_edit.is_some() || app.offsets.editing {
+    if app.overlay_open()
+        || app.offsets.dro_edit.is_some()
+        || app.offsets.editing
+        || ui.ctx().text_edit_focused()
+    {
         return;
     }
     let axes = app.axes();
