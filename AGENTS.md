@@ -99,6 +99,8 @@ the pin exists at all.
 - Run `rs274` one at a time. Two instances started at the same moment crash with `SIGBUS`; `linc_core::verify` serialises them behind a process-wide
   lock, and a crash is reported as `Crashed`, never as "no faults".
 - `docs/solutions/` — documented solutions to past problems (bugs, best practices, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`); check it when working in a documented area.
+- `CODING_STANDARDS.md` — the rules code here follows, one condition per past defect; read it before writing or reviewing code, and update it when a change establishes or retires a rule.
+- `REVIEW.md` — how review behaves here; it carries `@CODING_STANDARDS.md`, so a reviewer that reads only this file still reaches the rules.
 
 ## Hard invariants
 
