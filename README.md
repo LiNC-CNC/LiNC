@@ -254,20 +254,28 @@ around, and each one exists to keep the software and the machine in agreement.
 
 ## Screenshots
 
-These are captures of the current build in the simulator, at 1600×1000, with the
-demonstration part loaded. Click any image to open the full-size PNG.
+These are captures of the current build in the simulator, at 1600×1000, with
+`configs/gcode/3D_Chips.ngc` loaded — the LinuxCNC finishing example that cuts a
+sculpted part out of a 100 mm block. Click any image to open the full-size PNG.
 
-| **CNC control panel** (separate window) | **MDI** |
+The CNC control panel runs in its own window, with the keys, dials and lamps the
+mill's panel has:
+
+[![The simulated control panel: power keys, E-stop, mode and override dials, status lamps, 7-segment displays and program protect](docs/screenshots/panel.png)](docs/screenshots/panel.png)
+
+The HMI pages:
+
+| **Machine** | **MAIN — the DRO matrix** |
 |:---:|:---:|
-| [![The simulated control panel: power keys, E-stop, mode and override dials, status lamps and 7-segment displays](docs/screenshots/panel.png)](docs/screenshots/panel.png) | [![The MDI pane: issued blocks in the buffer, the block being edited and its toolpath preview on the machine page](docs/screenshots/mdi.png)](docs/screenshots/mdi.png) |
-| **Machine** | **Program** |
-| [![The machine page: digital readout, toolpath with the live trail, program listing, feed and spindle, servo load](docs/screenshots/machine.png)](docs/screenshots/machine.png) | [![The program page: G-code beside the toolpath preview](docs/screenshots/program.png)](docs/screenshots/program.png) |
+| [![The machine page: axis readout, the surfacing toolpath, the program listing, feed and spindle, the cut and the tool offsets](docs/screenshots/machine.png)](docs/screenshots/machine.png) | [![MAIN's second face: work coordinates, machine coordinates, distance to go and tool offsets as one matrix, with the program beside it](docs/screenshots/matrix.png)](docs/screenshots/matrix.png) |
+| **Program** | **Files** |
+| [![The program page: a 4 700-line surfacing program beside its toolpath preview](docs/screenshots/program.png)](docs/screenshots/program.png) | [![The files page: removable USB media beside the NC files directory, with 3D_Chips.ngc selected](docs/screenshots/files.png)](docs/screenshots/files.png) |
 | **Tools** | **Offsets** |
 | [![The tool table with offsets, diameters and descriptions](docs/screenshots/tools.png)](docs/screenshots/tools.png) | [![Work offsets: coordinate systems, rotation and the part preview](docs/screenshots/offsets.png)](docs/screenshots/offsets.png) |
-| **Diagnostics** | **G-code help** |
-| [![The diagnostics page: control, panel link, NML and motion health, with active alarms and messages](docs/screenshots/diagnostics.png)](docs/screenshots/diagnostics.png) | [![The G-code help index, with a code selected and its parameters listed](docs/screenshots/help.png)](docs/screenshots/help.png) |
-| **Touch probe** | **Files** |
-| [![The touch probe page: probing parameters, illustrated routines and results](docs/screenshots/probe.png)](docs/screenshots/probe.png) | [![The files page: removable USB media beside the NC files directory](docs/screenshots/files.png)](docs/screenshots/files.png) |
+| **Touch probe** | **Diagnostics** |
+| [![The touch probe page: probing parameters, illustrated routines and results](docs/screenshots/probe.png)](docs/screenshots/probe.png) | [![The diagnostics page: control, panel link, NML and motion health, with active alarms and messages](docs/screenshots/diagnostics.png)](docs/screenshots/diagnostics.png) |
+| **G-code help** | **MDI** |
+| [![The G-code help index, with a code selected and its parameters listed](docs/screenshots/help.png)](docs/screenshots/help.png) | [![The MDI pane: issued blocks in the buffer, the block being edited and its toolpath preview on the machine page](docs/screenshots/mdi.png)](docs/screenshots/mdi.png) |
 
 ## Try it
 
