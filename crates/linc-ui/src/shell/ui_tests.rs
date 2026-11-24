@@ -1930,6 +1930,86 @@ fn the_manual_page_stacks_the_servo_load_under_the_work_coordinates() {
     }
 }
 
+/// With the matrix in front the manual page keeps the toolpath, in a third
+/// column beside the matrix's top row: two matrix cells plus the gap across the
+/// matrix column, one cell across the graph column, so the three cards read as
+/// one band. The servo load moves under the toolpath rather than being the
+/// column's first card.
+#[test]
+fn the_matrix_face_puts_the_toolpath_beside_the_top_row() {
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    harness.app.request_mode_page();
+    assert!(harness.app.main_matrix_active());
+    let output = harness.frame_full(Vec::new());
+    let texts = painted_text(&output);
+    let cards = painted_cards(&output);
+    let anchor = |label: &str| {
+        let (_, text) = texts
+            .iter()
+            .find(|(text, _)| text == label)
+            .unwrap_or_else(|| panic!("{label} is painted"));
+        cards
+            .iter()
+            .copied()
+            .find(|card| card.contains(text.center()))
+            .unwrap_or_else(|| panic!("{label} sits in a card"))
+    };
+    let work = anchor("WORK COORDINATES");
+    let machine = anchor("MACHINE COORDINATES");
+    let toolpath = anchor("TOOLPATH");
+    let servo = anchor("SERVO LOAD");
+
+    // The graph card's frame stroke is painted outside its rect and the matrix
+    // cards paint theirs inside, so two frames of one size differ by that
+    // stroke. The rects the page allotted are the same size.
+    const STROKE: f32 = 2.0;
+    assert!(
+        (toolpath.left() - machine.right() - 8.0).abs() <= 1.5,
+        "the toolpath takes the matrix's own gap to the right of it: {machine:?} vs {toolpath:?}"
+    );
+    assert!(
+        (toolpath.top() - machine.top()).abs() <= 0.5,
+        "it shares the matrix's top row: {machine:?} vs {toolpath:?}"
+    );
+    assert!(
+        (toolpath.width() - machine.width()).abs() <= STROKE
+            && (toolpath.height() - machine.height()).abs() <= STROKE,
+        "the toolpath card is the size of the matrix cell beside it: {machine:?} vs {toolpath:?}"
+    );
+    assert!(
+        (toolpath.height() - work.height()).abs() <= STROKE,
+        "and of the cell to its left: {work:?} vs {toolpath:?}"
+    );
+    assert!(
+        servo.top() >= toolpath.bottom(),
+        "the servo card moves under the toolpath: {toolpath:?} vs {servo:?}"
+    );
+    assert!(
+        (servo.left() - toolpath.left()).abs() <= STROKE
+            && (servo.right() - toolpath.right()).abs() <= STROKE,
+        "the two share the column's edges: {servo:?} vs {toolpath:?}"
+    );
+
+    // INC and MPG carry the same face: the toolpath stays, with the step row or
+    // the servo load in the column under it.
+    for mode in [PanelMode::Inc, PanelMode::Mpg] {
+        let mut harness = ProbeHarness::new(mode, false, true);
+        harness.app.set_page(Page::Manual);
+        harness.app.request_mode_page();
+        assert!(harness.app.main_matrix_active(), "{mode:?}");
+        let texts: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect();
+        assert_eq!(
+            texts.iter().filter(|text| *text == "TOOLPATH").count(),
+            1,
+            "{mode:?} keeps the toolpath beside the matrix: {texts:?}"
+        );
+    }
+}
+
 /// The style, not the page: REMAINING is what stops the trail being drawn,
 /// and the eaten line reaches the view as it is.
 #[test]
@@ -2994,8 +3074,9 @@ fn main_walks_the_two_dashboards_and_remembers_the_choice() {
 }
 
 /// The manual page carries the same two faces as MAIN: the live graph, or the
-/// coordinate matrix in its place. The matrix is the DRO, so the column drops
-/// its own WORK COORDINATES card rather than print the same title twice.
+/// coordinate matrix. The matrix is the DRO, so the column drops its own WORK
+/// COORDINATES card rather than print the same title twice; the toolpath stays,
+/// moved to the column beside the matrix.
 #[test]
 fn the_manual_page_swaps_its_graph_for_the_same_matrix() {
     let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
@@ -3021,7 +3102,11 @@ fn the_manual_page_swaps_its_graph_for_the_same_matrix() {
     assert_eq!(harness.app.nav.page, Page::Manual);
     assert_eq!(harness.app.main_view, MainView::Coordinates);
     let alternate = texts(&mut harness);
-    assert_eq!(count(&alternate, "TOOLPATH"), 0, "the graph is gone");
+    assert_eq!(
+        count(&alternate, "TOOLPATH"),
+        1,
+        "the toolpath moves beside the matrix rather than leaving: {alternate:?}"
+    );
     for title in [
         "WORK COORDINATES",
         "MACHINE COORDINATES",
@@ -7914,22 +7999,38 @@ fn the_coordinate_matrix_drops_the_view_shortcuts() {
     );
 }
 
-/// The manual page draws the same matrix in place of its live graph, so its
-/// view group goes the same way.
+/// The manual page draws the same matrix as MAIN, but keeps its toolpath beside
+/// it, so the VIEW group stays: FIT, BOUNDS, CLEAR TRAIL and the pan/zoom hints
+/// all act on a graph the operator can see. MAIN's matrix face, which has no
+/// toolpath, still drops the group.
 #[test]
-fn the_matrix_drops_the_view_shortcuts_on_the_manual_page() {
+fn the_manual_matrix_keeps_the_view_shortcuts() {
     let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
     harness.app.set_page(Page::Manual);
     harness.app.request_mode_page();
     harness.frame(&[]);
     assert!(harness.app.main_matrix_active());
+    assert!(!harness.app.matrix_replaces_the_toolpath());
     let titles: Vec<&str> = harness
         .app
         .key_hints()
         .iter()
         .map(|group| group.title)
         .collect();
-    assert_eq!(titles, ["SPINDLE", "MANUAL"], "{titles:?}");
+    assert_eq!(titles, ["VIEW", "SPINDLE", "MANUAL"], "{titles:?}");
+
+    // The same matrix on MAIN has no graph beside it, so the group goes there.
+    harness.app.request_machine_page();
+    harness.frame(&[]);
+    assert!(harness.app.main_matrix_active());
+    assert!(harness.app.matrix_replaces_the_toolpath());
+    let titles: Vec<&str> = harness
+        .app
+        .key_hints()
+        .iter()
+        .map(|group| group.title)
+        .collect();
+    assert!(!titles.contains(&"VIEW"), "{titles:?}");
 }
 
 /// MAIN's matrix is the WCS the operator may write, and it takes the OFFSETS
@@ -8004,7 +8105,13 @@ fn only_the_manual_modes_give_the_matrix_its_letters() {
             .app
             .key_hints()
             .into_iter()
-            .flat_map(|group| group.items.into_iter().map(|item| item.label).collect::<Vec<_>>())
+            .flat_map(|group| {
+                group
+                    .items
+                    .into_iter()
+                    .map(|item| item.label)
+                    .collect::<Vec<_>>()
+            })
             .collect()
     }
 
@@ -8083,7 +8190,13 @@ fn the_mdi_input_owns_the_matrix_letters() {
         .app
         .key_hints()
         .into_iter()
-        .flat_map(|group| group.items.into_iter().map(|item| item.label).collect::<Vec<_>>())
+        .flat_map(|group| {
+            group
+                .items
+                .into_iter()
+                .map(|item| item.label)
+                .collect::<Vec<_>>()
+        })
         .collect();
     assert!(!labels.contains(&"EDIT DRO"), "{labels:?}");
     assert!(

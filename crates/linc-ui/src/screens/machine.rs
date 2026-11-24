@@ -357,6 +357,23 @@ struct CoordLine {
     muted: bool,
 }
 
+/// The gap between the matrix's cards. The manual page's third column takes it
+/// too, so the toolpath beside the matrix lines up with the cells.
+pub(super) const MATRIX_GAP: f32 = 8.0;
+
+/// One cell of a matrix drawn into a `width` × `height` column.
+///
+/// The manual page reads it to size the toolpath card it draws in the column
+/// beside the matrix: two cells across the matrix column plus the gap, one cell
+/// across the graph column, and all three cards on the top row are the same
+/// size.
+pub(super) fn matrix_cell(width: f32, height: f32) -> Vec2 {
+    Vec2::new(
+        ((width - MATRIX_GAP) / 2.0).max(160.0),
+        ((height - MATRIX_GAP) / 2.0).max(120.0),
+    )
+}
+
 /// The alternate dashboard: four coordinate cards in the place the axis
 /// readouts and the toolpath take on the default one.
 ///
@@ -365,11 +382,7 @@ struct CoordLine {
 /// the manual modes the axis's letter key, Enter to write, Escape to drop — and
 /// writes through the same `SetWorkPosition` path the page's DRO does.
 pub(super) fn coordinate_matrix(app: &mut LincApp, ui: &mut Ui, width: f32, height: f32) {
-    const GAP: f32 = 8.0;
-    let cell = Vec2::new(
-        ((width - GAP) / 2.0).max(160.0),
-        ((height - GAP) / 2.0).max(120.0),
-    );
+    let cell = matrix_cell(width, height);
     let axes = app.axes();
     let diameter = app.reads_x_as_diameter();
     // The OFFSETS page's own handlers, against the same active WCS: the letters
@@ -432,13 +445,13 @@ pub(super) fn coordinate_matrix(app: &mut LincApp, ui: &mut Ui, width: f32, heig
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         ui.horizontal_top(|ui| {
             work_coordinates_card(app, ui, cell, &work, &axes);
-            ui.add_space(GAP);
+            ui.add_space(MATRIX_GAP);
             matrix_card(ui, cell, "MACHINE COORDINATES", None, &machine);
         });
-        ui.add_space(GAP);
+        ui.add_space(MATRIX_GAP);
         ui.horizontal_top(|ui| {
             matrix_card(ui, cell, "DISTANCE TO GO", None, &to_go);
-            ui.add_space(GAP);
+            ui.add_space(MATRIX_GAP);
             matrix_card(
                 ui,
                 cell,

@@ -6,9 +6,11 @@
 //! MAIN, so the operator reads axis load without leaving the jog page.
 //!
 //! The page carries the same two faces as MAIN, chosen with the one `main_view`
-//! the operator set there: the graph, or the coordinate matrix in its place. The
-//! matrix is the DRO, so the column keeps only what the matrix does not carry —
-//! the step row and the servo load.
+//! the operator set there: the graph, or the coordinate matrix. The matrix is the
+//! DRO, so the column drops its own WORK COORDINATES card; the toolpath moves to
+//! the third column beside the matrix instead of going with it, because a jog is
+//! read against the part it moves over. The step row and the servo load sit under
+//! that toolpath.
 //!
 //! No mode context card and no limit-override button: the [keys] chord covers
 //! the override and the status line shows when it is on.
@@ -41,25 +43,38 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // MPG only. One secondary card under the DRO, not a stack.
     let show_servo = !increment_keys_active(app.snapshot.panel.mode.mode());
     // Read before the split borrows `app`: the same choice MAIN carries, drawn
-    // in place of the graph. Its WORK COORDINATES card is the DRO the column
+    // in the matrix face. Its WORK COORDINATES card is the DRO the column
     // would otherwise repeat, so the column keeps only the cards it does not.
     let alternate = machine::alternate_active(app);
+    // The matrix face reads three cards across its top row: WORK COORDINATES,
+    // MACHINE COORDINATES and the live toolpath beside them. The split is sized
+    // from that — the matrix column keeps two cells and the graph column is the
+    // third — so the toolpath card is the size of the cell it sits next to and
+    // its bottom edge is the top row's.
+    let page_height = ui.available_height() - 6.0;
+    let matrix_width = (((ui.available_width() - 2.0 * machine::MATRIX_GAP) / 3.0).max(160.0))
+        * 2.0
+        + machine::MATRIX_GAP;
+    let toolpath_height = machine::matrix_cell(matrix_width, page_height).y;
     common::live_split(
         app,
         ui,
         "manual-live-right",
+        alternate.then_some(matrix_width),
         |app, ui| {
-            // Leave a gap so the bottom border is not flush with the edge of
-            // the page.
-            let height = ui.available_height() - 6.0;
             if alternate {
-                machine::coordinate_matrix(app, ui, ui.available_width(), height);
+                machine::coordinate_matrix(app, ui, ui.available_width(), page_height);
             } else {
-                common::live_graph_card(app, ui, height);
+                common::live_graph_card(app, ui, page_height);
             }
         },
         |app, ui| {
-            if !alternate {
+            if alternate {
+                // The toolpath the matrix would otherwise hide. It keeps the
+                // graph face's own card, header and all, so the legend and the
+                // view keys read the same on both faces.
+                common::live_graph_card(app, ui, toolpath_height);
+            } else {
                 common::live_coordinates_card(
                     ui,
                     "WORK COORDINATES",
@@ -81,10 +96,11 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             // INC is the mode that uses the `[DISPLAY] INCREMENTS` step; JOG is
             // continuous and MPG picks its step on the handwheel, so for both
             // the row would be a value the machine is not reading.
+            //
+            // Both faces open this column with a card — the coordinates, or the
+            // matrix face's toolpath — so the card under it takes the gap.
             if increment_keys_active(app.snapshot.panel.mode.mode()) {
-                if !alternate {
-                    ui.add_space(8.0);
-                }
+                ui.add_space(8.0);
                 common::increment_row(app, ui);
             }
             // The same card MAIN draws under the toolpath. It shares the
@@ -93,11 +109,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             // margin. Absent on a profile with no `[ui] servo_load` list, and
             // absent in INC, where the step row is the card this column carries.
             if show_servo && !servo_rows.is_empty() {
-                // Under the coordinates the card needs the gap; in the matrix
-                // face it is the column's first card.
-                if !alternate {
-                    ui.add_space(8.0);
-                }
+                ui.add_space(8.0);
                 common::servo_load_card(
                     &servo_rows,
                     ui,

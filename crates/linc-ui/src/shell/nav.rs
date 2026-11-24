@@ -346,13 +346,26 @@ impl LincApp {
             )
     }
 
-    /// True when the coordinate matrix is drawn in place of the toolpath.
+    /// True when the coordinate matrix is the chosen face: on MAIN it takes the
+    /// axis readouts and the toolpath, on the manual page it takes the left
+    /// column and the toolpath moves to the column beside it.
     ///
-    /// The view commands have no subject then: the matrix takes the graph's
-    /// place, so FIT, BOUNDS and the view cycle would change state the operator
-    /// cannot see until the dashboard comes back.
+    /// Whether the view commands still have a subject is
+    /// [`Self::matrix_replaces_the_toolpath`].
     pub fn main_matrix_active(&self) -> bool {
         self.main_view == MainView::Coordinates && self.main_alternate_available()
+    }
+
+    /// True where the matrix is drawn in the toolpath's place, with no live
+    /// graph sharing the page.
+    ///
+    /// The view commands have no subject then: FIT, BOUNDS and the view cycle
+    /// would change state the operator cannot see until the graph comes back.
+    /// MAIN's matrix face is that page. The manual page's matrix face is not: it
+    /// keeps the toolpath in the column beside the matrix, so the keys still
+    /// have a subject there, and the Homing page draws no matrix at all.
+    pub fn matrix_replaces_the_toolpath(&self) -> bool {
+        self.main_matrix_active() && !matches!(self.nav.page, Page::Manual | Page::Homing)
     }
 
     /// True where the matrix's WORK COORDINATES card takes the OFFSETS page's

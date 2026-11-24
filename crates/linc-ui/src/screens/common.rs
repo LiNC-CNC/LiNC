@@ -2334,16 +2334,25 @@ pub struct LiveAxisRow {
 /// Two-column live split: dominant graph on the left, scrollable readout on
 /// the right. `salt` keeps the scroll state separate per screen. Both panes
 /// receive `app` as an argument, so the caller never needs two live borrows.
+///
+/// `left_width` names the left column's width; `None` takes the split's own
+/// share of the page. The manual page names it on the matrix face, where the
+/// left column keeps two matrix cells and the right column is the third, so the
+/// toolpath it draws there is the size of the card beside it.
 pub fn live_split<R1, R2>(
     app: &mut LincApp,
     ui: &mut Ui,
     salt: &str,
+    left_width: Option<f32>,
     left: impl FnOnce(&mut LincApp, &mut Ui) -> R1,
     right: impl FnOnce(&mut LincApp, &mut Ui) -> R2,
 ) {
     let available = ui.available_size();
-    let graph_width = (available.x * 0.68).max(560.0);
+    let graph_width = left_width.unwrap_or_else(|| (available.x * 0.68).max(560.0));
     ui.horizontal_top(|ui| {
+        // The explicit gap below is the whole gap: the default item spacing would
+        // add 8 more beside it and push the right column past the page's edge.
+        ui.spacing_mut().item_spacing.x = 0.0;
         ui.allocate_ui_with_layout(
             Vec2::new(graph_width, available.y),
             egui::Layout::top_down(egui::Align::Min),

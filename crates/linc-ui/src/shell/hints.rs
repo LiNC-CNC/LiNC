@@ -234,7 +234,7 @@ impl LincApp {
                 // rather than advertising keys that would change state
                 // nobody can see. MAIN stays on the navigation row, so
                 // the way back is still in view.
-                if !self.main_matrix_active() {
+                if !self.matrix_replaces_the_toolpath() {
                     // MAIN shows the same toolpath, so it carries the same view
                     // commands, plus the two program actions that do not need the
                     // editor in front (run from line and go to line).
@@ -514,9 +514,10 @@ impl LincApp {
                 // Three groups: the toolpath, the spindle, and the keys the page
                 // itself owns. The spindle group is manual modes only: HOME and
                 // PROG.HOME share this page family without a spindle control.
-                // The matrix replaces the live graph here too, so the view
-                // commands lose their subject exactly as they do on MAIN.
-                if !self.main_matrix_active() {
+                // The matrix takes the toolpath's place on MAIN, but the manual
+                // page keeps the toolpath beside its matrix, so the view commands
+                // only lose their subject where no graph is drawn.
+                if !self.matrix_replaces_the_toolpath() {
                     let mut view_items = vec![
                         Shortcut::run(k.graph_fit.label(), "FIT", ShortcutCommand::FitGraph),
                         Shortcut::run(view_cycle.clone(), "VIEW", ShortcutCommand::CycleView),

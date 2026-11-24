@@ -1605,11 +1605,13 @@ override input stays on the physical panel, with the WHB pendant used only for
 jog in JOG mode.
 
 - **Two faces.** The page carries the same pair as MAIN and reads the same
-  `main_view`: the graph, or the coordinate matrix in its place. MAIN pressed on
-  the page when nothing else in front holds the keyboard walks them; the sidebar
-  row opens the matrix on MAIN. The matrix is a DRO, so in that face the column
-  drops its own `WORK COORDINATES` card rather than print the same title twice,
-  and keeps the increment row and the servo load.
+  `main_view`: the live graph, or the coordinate matrix. MAIN pressed on the
+  page when nothing else in front holds the keyboard walks them; the sidebar
+  row opens the matrix on MAIN. The matrix is a DRO, so in that face the right
+  column drops its own `WORK COORDINATES` card rather than print the same title
+  twice. The toolpath does not go with it: it moves to a third column to the
+  right of the matrix, one matrix cell wide and tall so the three cards read as
+  one top row, and the increment row and the servo load sit under it.
 - **Large graph window** is the dominant element: mill 3D or lathe XZ
   toolpath, axes, grid, stock/program bounds where available, the loaded
   program path, live tool marker and a short position trail in a distinct
@@ -1792,9 +1794,9 @@ etc.
   and the HMI issues them itself (§6.10), one per press, because the halui
   alternative needed a task mode the dial must not ask for.
 - JOG/INC/MPG open the Manual screen with the large graph and coordinate
-  readout, or the coordinate matrix in the graph's place; the choice is MAIN's
-  own (`main_view`). Jog, increment and handwheel motion remain panel/pendant
-  input only.
+  readout, or the coordinate matrix with the toolpath beside it; the choice is
+  MAIN's own (`main_view`). Jog, increment and handwheel motion remain
+  panel/pendant input only.
   **Increment selection**: `INC` steps come from the machine INI's
   `[DISPLAY] INCREMENTS` list, so the HMI offers exactly the values LinuxCNC was
   configured with (the same list Axis and Probe Basic use). The selector lives

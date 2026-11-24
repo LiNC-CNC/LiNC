@@ -38,6 +38,9 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         app,
         ui,
         "homing-live-right",
+        // The graph column takes the split's own share here: this page has no
+        // matrix to line the card up with.
+        None,
         |app, ui| {
             // Leave a gap so the card's bottom border is not flush with the
             // edge of the page.
