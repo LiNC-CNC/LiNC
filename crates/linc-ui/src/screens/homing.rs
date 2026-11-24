@@ -44,7 +44,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         |app, ui| {
             // Leave a gap so the card's bottom border is not flush with the
             // edge of the page.
-            common::live_graph_card(app, ui, ui.available_height() - 6.0);
+            common::live_graph_card(app, ui, ui.available_height() - 6.0, true);
         },
         |app, ui| {
             common::live_coordinates_card(

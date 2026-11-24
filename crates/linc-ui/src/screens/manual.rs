@@ -65,15 +65,16 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
             if alternate {
                 machine::coordinate_matrix(app, ui, ui.available_width(), page_height);
             } else {
-                common::live_graph_card(app, ui, page_height);
+                common::live_graph_card(app, ui, page_height, true);
             }
         },
         |app, ui| {
             if alternate {
-                // The toolpath the matrix would otherwise hide. It keeps the
-                // graph face's own card, header and all, so the legend and the
-                // view keys read the same on both faces.
-                common::live_graph_card(app, ui, toolpath_height);
+                // The toolpath the matrix would otherwise hide. The card is one
+                // column wide, so its header keeps only the title and the
+                // view/zoom status: the line-style legend does not fit beside the
+                // title here, and the marks would sit over a picture a cell tall.
+                common::live_graph_card(app, ui, toolpath_height, false);
             } else {
                 common::live_coordinates_card(
                     ui,

@@ -1991,6 +1991,30 @@ fn the_matrix_face_puts_the_toolpath_beside_the_top_row() {
         "the two share the column's edges: {servo:?} vs {toolpath:?}"
     );
 
+    // The card is one column wide, so the header carries the title and the
+    // view/zoom status only. The line-style legend stays with the full-width
+    // card on the graph face.
+    let header: Vec<String> = texts
+        .iter()
+        .filter(|(_, rect)| toolpath.contains(rect.center()))
+        .map(|(text, _)| text.clone())
+        .collect();
+    assert_eq!(
+        header.iter().filter(|text| *text == "TOOLPATH").count(),
+        1,
+        "the title stays: {header:?}"
+    );
+    for legend in ["— CUT", "-- RAPID", "— LIVE", "TOOL"] {
+        assert!(
+            !header.iter().any(|text| text == legend),
+            "{legend:?} is not drawn on the narrow card: {header:?}"
+        );
+    }
+    assert!(
+        header.iter().any(|text| text.contains('•')),
+        "the view and zoom status stays at the header's right end: {header:?}"
+    );
+
     // INC and MPG carry the same face: the toolpath stays, with the step row or
     // the servo load in the column under it.
     for mode in [PanelMode::Inc, PanelMode::Mpg] {
@@ -2006,6 +2030,24 @@ fn the_matrix_face_puts_the_toolpath_beside_the_top_row() {
             texts.iter().filter(|text| *text == "TOOLPATH").count(),
             1,
             "{mode:?} keeps the toolpath beside the matrix: {texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|text| text == "— CUT"),
+            "{mode:?} hides the legend too: {texts:?}"
+        );
+    }
+
+    // The graph face keeps the legend: only the narrow card goes without it.
+    let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
+    harness.app.set_page(Page::Manual);
+    let texts: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    for legend in ["— CUT", "-- RAPID", "— LIVE", "TOOL"] {
+        assert!(
+            texts.iter().any(|text| text == legend),
+            "the graph face keeps {legend:?}: {texts:?}"
         );
     }
 }

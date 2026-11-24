@@ -205,6 +205,19 @@ pub fn card_title(ui: &mut Ui, text: &str) {
     );
 }
 
+/// The toolpath card's title row alone, without the line-style legend.
+///
+/// The manual page's matrix face draws this card one column wide: the legend
+/// does not fit there, and the marks would sit over a picture only a cell tall.
+/// The row still runs to the card's right edge, where `toolpath_status` paints
+/// the view and the zoom — the two things that card keeps.
+pub fn toolpath_title(ui: &mut Ui) -> egui::Rect {
+    let top = ui.cursor().min;
+    let right = ui.available_rect_before_wrap().right();
+    card_title(ui, "TOOLPATH");
+    egui::Rect::from_min_max(top, egui::pos2(right, ui.cursor().min.y))
+}
+
 /// Toolpath status line: keys on the left. Every toolpath card draws it, so no
 /// card needs a legend over the drawing.
 ///
@@ -2382,14 +2395,22 @@ pub fn live_split<R1, R2>(
 /// `FIT` and `CLEAR TRAIL` are keyboard commands, so the header carries no
 /// buttons. The fit frames the program and the tool head together, so the page
 /// opens (and `Ctrl+0` re-frames) with both the part and the head in view.
-pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32) {
+///
+/// `legend` draws the line-style key beside the title. The manual page's matrix
+/// face passes `false`: its card is one column wide, so the header keeps the
+/// title and the view/zoom status and nothing else.
+pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32, legend: bool) {
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), card_height.max(160.0)),
         egui::Sense::hover(),
     );
     shell_card(ui, rect, |ui| {
         let body_top = ui.cursor().top();
-        let header = toolpath_header(ui, app.graph_style.remaining);
+        let header = if legend {
+            toolpath_header(ui, app.graph_style.remaining)
+        } else {
+            toolpath_title(ui)
+        };
         let header_height = ui.cursor().top() - body_top;
         let graph_height = (rect.height() - 8.0 - header_height - 2.0).max(60.0);
         let preview = app.program.last_valid_preview.clone();
