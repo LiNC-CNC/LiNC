@@ -1,3 +1,46 @@
+linc (0.4.0-1) unstable; urgency=medium
+
+  * A modelled cycle time: the bar's remainder is planned from the program's
+    own words - each block's feed, arcs by sweep, rapids at the INI's
+    MAX_VELOCITY, dwells as holds - with the overrides applied where the figure
+    is read, so a knob turned mid-run moves it on that frame. Each finished
+    stretch is measured against the plan and kept per move in
+    <profile>.cycletime.toml, so the next run of the same program starts
+    calibrated. The clock reads elapsed over the estimate, `CYCLE 0:01:12 /
+    ~0:04:52`.
+  * A program has to pass a syntax check before the interpreter is given it,
+    in three layers: a block-by-block lint that reports every fault at once,
+    the preview parser's single fault, and the controller's own `rs274 -g`
+    against the machine INI. A refused file still opens in the editor with
+    each fault marked and its full message in a box under the line, walked
+    with Ctrl+PageUp/Ctrl+PageDown. A toolpath that leaves the machine's
+    travel box is a fault on the same list, and `linc.program-ok` closes the
+    HAL side of the gate.
+  * Cycle start is the HMI's command now: checked against the machine and the
+    program, sent as EMC_TASK_PLAN_RUN or as EMC_TASK_PLAN_RESUME when the
+    program is held, and refused with the one thing to fix. The panel holds
+    cnc_panel.cycle_start for 200 ms, so a tap shorter than the 20 Hz snapshot
+    still arrives. A program that dies mid-run holds the machine instead of
+    running out the moves the planner already held.
+  * A coordinate matrix as MAIN's second face, in AUTO, MDI and the manual
+    screens: WORK COORDINATES under the active WCS, MACHINE COORDINATES,
+    DISTANCE TO GO and TOOL OFFSETS. The active WCS edits in place - click a
+    row or its letter, type an expression, Enter writes it back - the toolpath
+    keeps a column beside it, and the chosen face survives a restart.
+  * Tool offsets in X and Y, not only Z, from the offset words the INI's tool
+    table declares. Work offsets are written behind G90 and the machine's own
+    units, so a keypad value means what the screen says whatever the
+    interpreter was left in.
+  * Machine fixes: `E-STOP ?` only on a chain that loses its power with the
+    cabinet, the session kept through the machine-on drop E-stop causes, the
+    limits override armed from MANUAL where task accepts it, every interlock
+    gate added to a thread, flood and lube gated on machine-on, and a panel
+    link that resyncs instead of closing on a late reply.
+  * Debian packages built for bookworm by default, from the tree on disk
+    rather than cargo's mtimes, reusing an unchanged build image.
+
+ -- Hans Baier <foss@hans-baier.de>  Tue, 24 Nov 2026 12:40:00 +0700
+
 linc (0.3.0-1) unstable; urgency=medium
 
   * A profile logo in the top bar: [ui] logo draws a PNG or GIF in place of
