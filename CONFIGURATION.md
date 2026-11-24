@@ -728,6 +728,30 @@ offset to it, so the two frames stay consistent. Distance-to-go always stays the
 controller's own value. `--check-config` rejects any value other than the two
 names.
 
+### E-stop field with the cabinet switched off
+
+`[ui] estop_unknown_when_cabinet_off` (default `false`) decides what the bottom
+bar's E-stop field says when the cabinet machine-on switch (`linc.machine-on`) is
+off and `halui.machine.is-on` is off with it.
+
+On a machine whose E-stop chain is powered from the machine's own supply, that
+switch removes the power the chain is read with, so LinuxCNC reports E-stop
+active while the mushroom is released and untouched. Printing `E-STOP ACTIVE`
+there blames the operator for a power-off and hides a state that is unknown until
+the cabinet is powered again. Such a machine sets the key to `true` and the field
+reads `E-STOP ?` for as long as the cabinet switch is off:
+
+```toml
+[ui]
+estop_unknown_when_cabinet_off = true
+```
+
+A machine whose mushroom stays hardwired to a live rail - the baiermill keeps its
+input rail powered - leaves the default, so a real latch still reads `E-STOP
+ACTIVE` with the cabinet switched off. Stale snapshot data reads `E-STOP ?`
+regardless, because the controller may be latched while the last snapshot does
+not say so.
+
 ### Keyboard legends
 
 `[ui] keyboard` chooses how the legends name the keys. `"panel"` (the default)
@@ -757,7 +781,7 @@ The bindings do not change: the panel's navigation keys already send `F5` to
 | `[machine]` | `name`, `kind`, `gui`, `linuxcnc_ini` |
 | `[mill]` | optional `max_axes` |
 | `[lathe]` | optional `turret_stations`, `power_turret`, `live_tooling`, `live_tool_max_rpm`, `c_axis`, `y_axis`, `sub_spindle` |
-| `[ui]` | `theme`, `start_page`, `window_title`, `logo`, `scale`, `axis_order`, `pages`, `servo_load`, `second_card`, `window_mode`, `decorations`, `dro_position`, `keyboard` |
+| `[ui]` | `theme`, `start_page`, `window_title`, `logo`, `scale`, `axis_order`, `pages`, `servo_load`, `second_card`, `window_mode`, `decorations`, `dro_position`, `estop_unknown_when_cabinet_off`, `keyboard` |
 | `[program]` | `default_view`, `load_view`, `views`, `edit_view`, `line_numbers`, `highlight_current_line`, `autosave`, `live_preview`, `preview_requires_syntax_ok`, `preview_debounce_ms`, `tab_width`, `block_run_on_syntax_error`, `verify_on_load`, `verify_timeout_ms` |
 | `[files]` | `nc_files`, `usb_backend`, `usb_automount`, `usb_mount_options`, `load_extensions`, `overwrite`, `copy_while_running`, `show_parent_above_root` |
 | `[probe]` | `enabled`, `tool_number`, `wcs`, `subroutines`, `clearance`, `probe_depth`, `fast_feed`, `slow_feed`, `probe_diameter`, `max_travel`, `calibration_diameter` |

@@ -420,11 +420,11 @@ fn the_machine_field_is_red_when_the_machine_is_off() {
     );
 }
 
-/// The cabinet's E-stop chain is powered from the machine, so with the cabinet
-/// switched off the controller reads E-stop active with the mushroom released.
-/// The bar must not blame the operator for a power-off: it asks instead.
+/// The field asks when the chain cannot be read: stale data, or a profile that
+/// says its cabinet switch removes the power the chain is read with. A chain
+/// that keeps its own supply reports its latch, cabinet switch or not.
 #[test]
-fn the_estop_field_asks_when_the_cabinet_is_off() {
+fn the_estop_field_asks_when_the_chain_cannot_be_read() {
     assert_eq!(
         estop_status_field(true, false, false),
         ("E-STOP ACTIVE".to_string(), theme::ERROR)
@@ -447,6 +447,38 @@ fn the_estop_field_asks_when_the_cabinet_is_off() {
         estop_status_field(false, false, true),
         ("E-STOP ?".to_string(), theme::WARNING),
         "stale data asks instead of guessing"
+    );
+}
+
+/// The cabinet switch only silences the E-stop field on a machine whose chain
+/// loses its power with it. A machine whose mushroom stays hardwired to a live
+/// rail reads that latch with the cabinet off and must go on saying so.
+#[test]
+fn the_cabinet_switch_asks_only_where_the_chain_needs_its_power() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.snapshot.meta.stale = false;
+    harness.app.snapshot.machine.on = false;
+    harness.app.snapshot.machine.estop = true;
+    harness.app.snapshot.cabinet_on = Some(false);
+
+    // A chain with its own supply: the cabinet switch does not hide the latch.
+    harness.app.profile.config.ui.estop_unknown_when_cabinet_off = false;
+    let texts = bottom_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        texts.iter().any(|text| text == "E-STOP ACTIVE"),
+        "a readable chain keeps its latch with the cabinet off: {texts:?}"
+    );
+
+    // A chain powered from the machine: with the cabinet off it cannot be read.
+    harness.app.profile.config.ui.estop_unknown_when_cabinet_off = true;
+    let texts = bottom_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        texts.iter().any(|text| text == "E-STOP ?"),
+        "an unpowered chain asks instead of claiming a latch: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text == "E-STOP ACTIVE"),
+        "the bar carries one E-stop field: {texts:?}"
     );
 }
 

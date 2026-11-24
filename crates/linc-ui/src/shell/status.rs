@@ -22,19 +22,21 @@ pub fn fps_step(previous: f32, dt: f32) -> f32 {
 /// full of green does not hide it. Stale data claims neither, and asks.
 /// The E-stop field of the bottom bar.
 ///
-/// The cabinet's E-stop chain is powered from the machine, so with the cabinet
-/// switched off LinuxCNC reads E-stop active even though nobody pressed the
-/// mushroom. Saying `E-STOP ACTIVE` there blames the operator for a power-off
-/// and hides the real state, which is unknown until the cabinet is powered
-/// again: `?` is what the bar can honestly claim.
+/// `chain_unreadable` is the profile's claim that the cabinet switch also removes
+/// the power the E-stop chain is read with (`[ui] estop_unknown_when_cabinet_off`),
+/// together with the machine being off. On that machine LinuxCNC reads E-stop
+/// active with the mushroom released, and saying `E-STOP ACTIVE` blames the
+/// operator for a power-off while hiding a state that is unknown until the
+/// cabinet is powered again: `?` is what the bar can claim. Machines whose chain
+/// keeps its own supply never pass `true`, so their latch still reads `ACTIVE`.
 pub(super) fn estop_status_field(
     active: bool,
-    cabinet_off: bool,
+    chain_unreadable: bool,
     stale: bool,
 ) -> (String, egui::Color32) {
     if stale {
         ("E-STOP ?".to_string(), theme::WARNING)
-    } else if cabinet_off {
+    } else if chain_unreadable {
         ("E-STOP ?".to_string(), theme::WARNING)
     } else if active {
         ("E-STOP ACTIVE".to_string(), theme::ERROR)

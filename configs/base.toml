@@ -36,6 +36,13 @@ window_mode = "auto"
 # driving toward, the default) or "actual" (the feedback position, which is
 # what an operator compares against a cut).
 dro_position = "commanded"
+# The cabinet switch also removes the power the E-stop chain is read with: with
+# it off the controller reads E-stop active with the mushroom released, and the
+# bottom bar says "E-STOP ?" instead of blaming the operator for a power-off.
+# Only a machine whose chain loses its supply that way sets this to true. A
+# machine whose mushroom stays hardwired to a live rail keeps false, so a real
+# latch still reads "E-STOP ACTIVE" with the cabinet switched off.
+estop_unknown_when_cabinet_off = false
 # How the keyboard legends name the keys: "panel" (the default) prints the CNC
 # panel's keycaps (MAIN, FILE, TOOL, PROBE, ▢). "pc" names the key a normal
 # keyboard sends in every legend; the navigation pairs it with the panel name

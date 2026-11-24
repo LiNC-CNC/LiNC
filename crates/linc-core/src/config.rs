@@ -158,6 +158,17 @@ pub struct UiConfig {
     /// operator compares against a cut). Defaults to `"commanded"`.
     #[serde(default = "default_dro_position")]
     pub dro_position: String,
+    /// Whether the cabinet switch being off leaves the E-stop chain unreadable.
+    ///
+    /// On a machine whose E-stop chain is powered from the machine's own supply,
+    /// switching the cabinet off drops the chain and the controller reads E-stop
+    /// active with the mushroom released. Such a machine sets this to `true` and
+    /// the bottom bar says `E-STOP ?` there instead of blaming the operator for a
+    /// power-off. A machine whose mushroom stays hardwired to a live rail - the
+    /// baiermill - keeps the default, so a real latch still reads `E-STOP ACTIVE`
+    /// with the cabinet switched off.
+    #[serde(default)]
+    pub estop_unknown_when_cabinet_off: bool,
     /// How the keyboard legends name the keys: `"panel"` (the default) prints
     /// the CNC panel's keycaps (`MAIN`, `FILE`, `TOOL`, `PROBE`, `▢`), `"pc"`
     /// prints what a normal keyboard sends (`F5`..`F8`, `F10`). The bindings
@@ -1996,6 +2007,53 @@ enabled = true
         );
         let profile = Profile::load(&profile_path, None).unwrap();
         assert!(profile.config.files.show_parent_above_root);
+    }
+
+    /// A machine whose cabinet switch also removes the E-stop chain's power opts
+    /// into `E-STOP ?`. The default keeps the plain reading, so a mushroom
+    /// hardwired to a live rail still reports its latch with the cabinet off.
+    #[test]
+    fn the_estop_field_only_asks_with_the_cabinet_off_where_the_profile_says_so() {
+        let dir = temp_dir();
+        write(&dir.path().join("base.toml"), base_config());
+        make_fixture(dir.path(), false);
+        let profile_path = dir.path().join("sim.toml");
+        let profile_text = |ui: &str| {
+            format!(
+                r#"schema_version = 1
+profile = "sim"
+extends = "base.toml"
+[ui]
+{ui}
+[machine]
+name = "Test"
+kind = "sim"
+gui = "mill"
+linuxcnc_ini = "probe_basic.ini"
+[panel]
+kind = "simulated"
+driver = "cnc-panel-sim"
+[panel.link]
+kind = "virtual"
+[simulation]
+enabled = true
+"#
+            )
+        };
+
+        // base.toml carries the key, and it is off: a readable chain keeps
+        // telling the truth about its latch with the cabinet switched off.
+        write(&profile_path, &profile_text(""));
+        let profile = Profile::load(&profile_path, None).unwrap();
+        assert!(!profile.config.ui.estop_unknown_when_cabinet_off);
+
+        // A machine whose chain loses its power with the cabinet asks instead.
+        write(
+            &profile_path,
+            &profile_text("estop_unknown_when_cabinet_off = true"),
+        );
+        let profile = Profile::load(&profile_path, None).unwrap();
+        assert!(profile.config.ui.estop_unknown_when_cabinet_off);
     }
 
     #[test]

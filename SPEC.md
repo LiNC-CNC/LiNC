@@ -449,6 +449,12 @@ Fixed shell, no right-hand status column:
   status line (E-stop, machine on/off, the wired probe input, `OVR F/S/R`,
   program protect, alarm count). `MACHINE OFF` is a fault and blinks at 2 Hz
   between the error colour and a dimmed error colour; `MACHINE ON` stays steady.
+  `E-STOP ACTIVE` is reserved for a chain that can be read: a profile whose
+  cabinet switch also removes the power its E-stop chain is read with sets
+  `[ui] estop_unknown_when_cabinet_off`, and the field then reads `E-STOP ?`
+  while the cabinet is off instead of blaming the operator for a power-off. A
+  machine whose chain keeps its own supply leaves the key `false` and goes on
+  saying `E-STOP ACTIVE` with the cabinet switched off.
   The probe field reads `PROBE READY`,
   `PROBE TRIPPED` or `PROBE ?` from `probe.input_tripped` and asks on stale
   data; it is a readout like MACHINE ON, with no click target and no command.

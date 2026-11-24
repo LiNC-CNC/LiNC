@@ -473,17 +473,21 @@ impl LincApp {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // Never claim OK on stale data: the controller may be latched
                 // while the last snapshot still says otherwise.
-                // With the cabinet switched off the E-stop chain has no power
-                // and the controller reads E-stop active with the mushroom
-                // released; `E-STOP ?` says the state is unknown instead of
-                // claiming the operator pressed it.
-                let cabinet_off = matches!(
-                    (self.snapshot.cabinet_on, self.snapshot.machine.on),
-                    (Some(false), false)
-                );
+                // On a machine whose E-stop chain is powered from the machine
+                // itself, the cabinet switch off leaves the chain unreadable and
+                // the controller reads E-stop active with the mushroom released;
+                // `E-STOP ?` then says the state is unknown instead of claiming
+                // the operator pressed it. Machines whose chain keeps its own
+                // supply do not set `[ui] estop_unknown_when_cabinet_off`, and
+                // keep reading their latch truthfully with the cabinet off.
+                let chain_unreadable = self.profile.config.ui.estop_unknown_when_cabinet_off
+                    && matches!(
+                        (self.snapshot.cabinet_on, self.snapshot.machine.on),
+                        (Some(false), false)
+                    );
                 let (estop_text, estop_color) = crate::shell::status::estop_status_field(
                     self.snapshot.machine.estop,
-                    cabinet_off,
+                    chain_unreadable,
                     self.snapshot.meta.stale,
                 );
                 field(ui, estop_text, estop_color);
