@@ -48,6 +48,11 @@ const COMMIT_ECHO: [u8; 4] = [0xEB, 0x02, 0x81, 0xCE];
 /// twelve bytes, so a longer hunt means the panel is not answering this cycle.
 const RESYNC_LIMIT: usize = 48;
 
+/// Dropped frames in a row before the link is declared down. At the 20 Hz poll
+/// cadence five cycles is 250 ms, which a healthy panel never misses and a dead
+/// one cannot escape.
+const PROTOCOL_FAILURE_LIMIT: u32 = 5;
+
 /// Walks the input stream looking for the reply header, one byte at a time.
 ///
 /// The panel answers a poll with `EB 01 ...`, but it also echoes the LED commit
@@ -172,6 +177,9 @@ pub struct CncPanelDriver {
     outputs: PanelOutputs,
     connected: bool,
     error: bool,
+    /// Consecutive cycles that failed their CRC or never completed a frame. One
+    /// is a resync; a run of them means the panel stopped answering.
+    protocol_failures: u32,
     status_transport_warned: bool,
     frames: Option<Arc<Mutex<linc_diag::PanelBus>>>,
 }
@@ -208,6 +216,7 @@ impl CncPanelDriver {
             outputs: PanelOutputs::default(),
             connected: false,
             error: false,
+            protocol_failures: 0,
             status_transport_warned: false,
             frames: None,
         }
@@ -459,6 +468,7 @@ impl PanelDriver for CncPanelDriver {
                 self.outputs = self.build_outputs(raw);
                 self.connected = true;
                 self.error = false;
+                self.protocol_failures = 0;
                 self.stats.last_rx_age_ms = Some(0);
                 Ok(make_snapshot(
                     true,
@@ -474,9 +484,32 @@ impl PanelDriver for CncPanelDriver {
             // single lost reply cost a second of panel input on a 20 Hz link.
             Err(error @ PanelError::Protocol(_)) => {
                 self.stats.timeouts += 1;
+                self.protocol_failures += 1;
                 log::debug!("panel frame dropped this cycle: {error}");
+                // A panel that stops answering while the port still writes fails
+                // here on every cycle. Reporting the previous good state would
+                // keep the link green and leave every command that fails closed
+                // on `!connected || communication_error` permitted, so a run of
+                // dropped frames drops the link the way any other failure does.
                 self.stats.last_rx_age_ms =
                     self.last_rx.map(|last| last.elapsed().as_millis() as u64);
+                if self.protocol_failures >= PROTOCOL_FAILURE_LIMIT {
+                    log::warn!(
+                        "panel stopped answering after {} dropped frames: {error}",
+                        self.protocol_failures
+                    );
+                    self.protocol_failures = 0;
+                    self.connected = false;
+                    self.error = true;
+                    self.port = None;
+                    return Ok(make_snapshot(
+                        false,
+                        true,
+                        &self.outputs,
+                        self.caps.clone(),
+                        self.stats.clone(),
+                    ));
+                }
                 Ok(make_snapshot(
                     self.connected,
                     self.error,
