@@ -2359,11 +2359,7 @@ pub(crate) fn hold_wanted(
 /// state that then waits for a machine-on nothing sends any more. `armed` means
 /// "the machine was on when the E-stop came", and `cabinet_on` is the same level
 /// `halui.machine.on` samples: an unread switch fails closed.
-pub(crate) fn power_on_wanted(
-    state: NmlTaskState,
-    cabinet_on: Option<bool>,
-    armed: bool,
-) -> bool {
+pub(crate) fn power_on_wanted(state: NmlTaskState, cabinet_on: Option<bool>, armed: bool) -> bool {
     armed && cabinet_on == Some(true) && state == NmlTaskState::EstopReset
 }
 
