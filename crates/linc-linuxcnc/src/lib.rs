@@ -486,7 +486,15 @@ impl NmlBackend {
                             // left no trace outside the Messages page.
                             log::warn!("controller: {}", message.text.trim());
                             self.builder.fail_probe();
-                            self.hold_after_error(status, &message.text);
+                            // Not every error on this channel is a program
+                            // fault: a refused jog, tool change, coolant or
+                            // override arrives here too, and LinuxCNC gives
+                            // them no distinguishing kind. An interpreter that
+                            // still reads has not died, so holding on one of
+                            // those stops a cut that was running fine.
+                            if status.task.interp_state != NmlInterpState::Reading {
+                                self.hold_after_error(status, &message.text);
+                            }
                         }
                         self.builder.push_message(message.kind, &message.text);
                     }
@@ -1568,7 +1576,15 @@ impl NmlBackend {
                 }
                 if paused {
                     log::info!("cycle start: resuming the paused program");
-                    self.nml_send(&NmlCommand::AutoResume)
+                    // A resumed program goes `Paused -> Reading`, never through
+                    // `Idle`, so the flag `poll_messages` clears only on `Idle`
+                    // would stay set and swallow the next fault: the program
+                    // would run to the end of its queue instead of being held.
+                    let sent = self.nml_send(&NmlCommand::AutoResume);
+                    if sent.is_ok() {
+                        self.held_for_error = false;
+                    }
+                    sent
                 } else {
                     log::info!("cycle start: running the program from its first line");
                     self.nml_send(&NmlCommand::AutoRun { line: 0 })
