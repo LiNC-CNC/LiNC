@@ -14,12 +14,13 @@ net linc-tool-confirm linc.tool-change-confirm => iocontrol.0.tool-changed
 # to drive motion or panel controls.
 net linc-hmi-heartbeat linc.hmi-alive
 
-# The program interlock. A file with a syntax fault is not loaded into the
-# interpreter, and a program that is not loaded must not start, so the panel's
-# CYCLE START and RESUME are gated on this level. It is created by the HMI, which
-# is why the net lives here and not in the machine HAL; an unconnected input
-# reads FALSE, so the gate is closed until the HMI has looked at the program.
-net linc-program-ok linc.program-ok => and2.cycle_permit.in1 and2.resume_permit.in1
+# `linc.program-ok` is published here as state, not as a gate. CYCLE START used
+# to be a HAL edge gated on it; the HMI now takes the key itself, runs its own
+# refusal checks and sends the run over NML, so nothing in this tree consumes the
+# pin. It stays declared (`LincOutput::ALLOWED`, SPEC §5/§11) for a profile that
+# wants to interlock a machine-side path of its own, and the Diagnostics page
+# shows it.
+net linc-program-ok linc.program-ok
 
 # Jog speed, scaled in the HMI from [DISPLAY] DEFAULT_LINEAR_VELOCITY.
 net jog-speed linc.jog-speed => halui.axis.jog-speed halui.joint.jog-speed

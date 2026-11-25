@@ -1,10 +1,14 @@
-//! The program interlock, checked against the HAL files themselves.
+//! The cycle-start wiring, checked against the HAL files themselves.
 //!
-//! `linc.program-ok` only closes a gate if something routes the pin into the
-//! cycle-start chain, and that chain crosses two files: the machine HAL creates
-//! the `and2` instance, the post-GUI file nets the pin into it. A rename on either
-//! side would leave a gate reading FALSE forever, which looks like a dead panel
-//! rather than a broken net, so the wiring is asserted here.
+//! CYCLE START belongs to the HMI: it reads `cnc_panel.cycle_start`, runs its own
+//! refusal checks and sends the run over NML. The HAL used to carry the same key
+//! into `halui.program.run` as well, which issued two commands per press and ran
+//! a press the HMI had refused. That path is gone, and this file is what keeps it
+//! gone: nothing may connect the panel key to halui's program pins again.
+//!
+//! `linc.program-ok` is still published as state. It no longer gates a HAL path,
+//! so this file does not assert that it reaches halui; it asserts the opposite of
+//! what it used to, and keeps the two checks that are still true.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -102,86 +106,53 @@ impl Nets {
         }
         false
     }
+}
 
-    /// The `and2` instance whose input carries the interlock and whose output
-    /// still reaches `destination`.
-    fn gate_for(&self, destination: &str) -> Option<String> {
-        let interlock = self
-            .on_signal
-            .iter()
-            .find(|(_, pins)| pins.contains("linc.program-ok"))
-            .map(|(signal, _)| signal)?;
-        for pin in self.on_signal.get(interlock)? {
-            let Some((instance, _)) = pin.rsplit_once('.') else {
-                continue;
-            };
-            if !instance.starts_with("and2.") {
-                continue;
-            }
-            let out = format!("{instance}.out");
-            if self.connected(&out, destination) {
-                return Some(instance.to_string());
-            }
+/// The key that used to be a HAL edge must not reach halui's program pins again.
+///
+/// The assertion is reachability, not a net name: the old lathe net was called
+/// `lathe-cycle-start`, and in the mill the key reached `halui` two `and2` gates
+/// downstream, so a name-based check would pass on the very wiring it is meant to
+/// forbid.
+#[test]
+fn no_hal_file_wires_the_panel_key_into_halui() {
+    const FILES: [&str; 6] = [
+        "linc.hal",
+        "linc-postgui.hal",
+        "linc-sim-postgui.hal",
+        "linc-lathe.hal",
+        "linc-lathe-postgui.hal",
+        "baiermill-pb-postgui.hal",
+    ];
+    const DESTINATIONS: [&str; 2] = ["halui.program.run", "halui.program.resume"];
+
+    for name in FILES {
+        let nets = Nets::parse(&read(name));
+        for destination in DESTINATIONS {
+            assert!(
+                !nets.connected("cnc_panel.cycle_start", destination),
+                "{name} carries cnc_panel.cycle_start to {destination}: the HMI owns cycle start, \
+                 and a HAL path runs a press the HMI refused"
+            );
         }
-        None
     }
-}
 
-#[test]
-fn the_mill_cycle_start_and_resume_pass_through_the_program_interlock() {
-    let nets = Nets::merge(&["linc.hal", "linc-postgui.hal"]);
-    for destination in ["halui.program.run", "halui.program.resume"] {
+    // A chain may also cross files: the machine HAL creates the instance, a
+    // post-GUI file nets it. Check the merged graph as well.
+    let merged = Nets::merge(&FILES);
+    for destination in DESTINATIONS {
         assert!(
-            nets.connected("linc.program-ok", destination),
-            "linc.program-ok does not reach {destination}"
-        );
-        // The interlock has to close a gate, not sit on the pin that drives
-        // halui: an `and2` instance carries it.
-        assert!(
-            nets.gate_for(destination).is_some(),
-            "{destination} is not gated by an and2 carrying linc.program-ok"
+            !merged.connected("cnc_panel.cycle_start", destination),
+            "cnc_panel.cycle_start reaches {destination} across these files: the HMI owns cycle start"
         );
     }
-}
-
-#[test]
-fn the_simulation_wires_the_same_gate() {
-    let nets = Nets::merge(&["linc.hal", "linc-sim-postgui.hal"]);
-    for destination in ["halui.program.run", "halui.program.resume"] {
-        assert!(
-            nets.connected("linc.program-ok", destination),
-            "the simulation does not route linc.program-ok to {destination}"
-        );
-    }
-}
-
-#[test]
-fn the_lathe_run_is_gated_and_the_instance_is_declared_before_the_net() {
-    let machine = read("linc-lathe.hal");
-    let nets = Nets::merge(&["linc-lathe.hal", "linc-lathe-postgui.hal"]);
-    let gate = nets
-        .gate_for("halui.program.run")
-        .expect("the lathe run is gated");
-    let loadrt = machine
-        .lines()
-        .position(|line| line.starts_with("loadrt and2 names=") && line.contains(&gate))
-        .unwrap_or_else(|| panic!("{gate} is used but never created"));
-    let net = machine
-        .lines()
-        .position(|line| line.starts_with("net ") && line.contains(&format!("{gate}.in0")))
-        .expect("the cycle net uses the gate");
-    assert!(
-        loadrt < net,
-        "{gate} is netted at line {} before HAL creates it at line {}",
-        net + 1,
-        loadrt + 1
-    );
 }
 
 /// An `and2` that is created and netted but never added to a thread computes
 /// nothing: its output stays at its initial FALSE, so the run it was meant to
-/// permit never happens and cycle start looks dead. That was a real defect in
-/// this gate, so every instance these files create has to be in a thread.
+/// permit never happens. That was a real defect in the old cycle-start gate, and
+/// the same shape remains a load error in the other direction — an `addf` naming
+/// an instance no file creates fails at that line.
 #[test]
 fn every_and2_these_files_create_is_added_to_a_thread() {
     let names = ["linc.hal", "linc-lathe.hal", "baiermill-pb-postgui.hal"];
@@ -243,29 +214,10 @@ fn every_and2_these_files_create_is_added_to_a_thread() {
     }
 }
 
-#[test]
-fn every_machine_hal_that_starts_a_program_is_gated() {
-    // The list is explicit: a profile with its own cycle-start chain has to be
-    // added here, which is the reminder to wire the gate into it.
-    for files in [
-        vec!["linc.hal", "linc-postgui.hal"],
-        vec!["linc.hal", "linc-sim-postgui.hal"],
-        vec!["linc-lathe.hal", "linc-lathe-postgui.hal"],
-    ] {
-        let nets = Nets::merge(&files);
-        assert!(
-            nets.connected("linc.program-ok", "halui.program.run"),
-            "{files:?} starts a program without the interlock"
-        );
-    }
-}
-
 /// `baiermill-pb-postgui.hal` is the INI's POSTGUI_HALFILE, loaded before the HMI
-/// creates `linc.*`, so it cannot carry the interlock net itself. Its machine
-/// hallib has to net `linc.program-ok` into `and2.cycle-permit` from a file
-/// loaded after the HMI starts; until it does, that machine's panel key is gated
-/// by `halui`'s own checks and by LiNC's load gate only. This asserts the reason
-/// the file is exempt, so nobody "fixes" it by adding a net that cannot load.
+/// creates `linc.*`, so it cannot carry a `linc.*` net itself. This asserts the
+/// reason the file is exempt, so nobody "fixes" it by adding a net that cannot
+/// load.
 #[test]
 fn the_baiermill_postgui_file_cannot_carry_the_net() {
     let text = read("baiermill-pb-postgui.hal");

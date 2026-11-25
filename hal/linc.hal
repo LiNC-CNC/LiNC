@@ -16,27 +16,18 @@ loadusr -Wn cnc_panel linc-panel --no-ipc
 # ---------------------------------------------------------------------------
 # Logic and conversion components
 # ---------------------------------------------------------------------------
-loadrt and2 names=and2.cycle_gate,and2.cycle_resume,and2.cycle_run,and2.cycle_permit,and2.resume_permit,and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint,and2.spindle_cw_change,and2.spindle_ccw_change,and2.spindle_sp_change,and2.jog-teleop-homed-xy,and2.jog-teleop-homed-all,and2.jog-teleop,and2.coolant-off,and2.lube-off
+loadrt and2 names=and2.xn_axis,and2.xn_cont,and2.xn_inc,and2.xn_joint,and2.xn_step_axis,and2.xn_step_joint,and2.xp_axis,and2.xp_cont,and2.xp_inc,and2.xp_joint,and2.xp_step_axis,and2.xp_step_joint,and2.yn_axis,and2.yn_cont,and2.yn_inc,and2.yn_joint,and2.yn_step_axis,and2.yn_step_joint,and2.yp_axis,and2.yp_cont,and2.yp_inc,and2.yp_joint,and2.yp_step_axis,and2.yp_step_joint,and2.zn_axis,and2.zn_cont,and2.zn_inc,and2.zn_joint,and2.zn_step_axis,and2.zn_step_joint,and2.zp_axis,and2.zp_cont,and2.zp_inc,and2.zp_joint,and2.zp_step_axis,and2.zp_step_joint,and2.spindle_cw_change,and2.spindle_ccw_change,and2.spindle_sp_change,and2.jog-teleop-homed-xy,and2.jog-teleop-homed-all,and2.jog-teleop,and2.coolant-off,and2.lube-off
 # `or2` is loaded once here; a second `loadrt or2` in another HAL file fails
 # with "or2: already exists". Instances only used by the simulation
 # (or2.estop_reset, or2.machine_off, or2.probe_sim3d) are created here and wired
 # in the simulation-only HAL files (linc-sim.hal, linc-sim3d.hal,
 # linc-sim-postgui.hal).
 loadrt or2 names=or2.estop_reset,or2.jog_a,or2.jog_b,or2.machine_off,or2.manual_req,or2.pause,or2.probe_sim3d
-loadrt not names=not.bdt,not.coolant,not.is_joint,not.lube,not.opt,not.paused,not.spindle_on,not.tool_changing
+loadrt not names=not.bdt,not.coolant,not.is_joint,not.lube,not.opt,not.spindle_on,not.tool_changing
 loadrt toggle names=toggle.coolant,toggle.lube,toggle.opt,toggle.bdt,toggle.sbk,toggle.worklamp
 loadrt scale names=scale.feed,scale.rapid,scale.spindle
 loadrt conv_float_s32 names=conv.feed,conv.rapid,conv.spindle
 
-addf and2.cycle_gate servo-thread
-addf and2.cycle_resume servo-thread
-addf and2.cycle_run servo-thread
-# The interlock gates are functions too: an instance that is loaded and netted
-# but never added to a thread computes nothing, so its output sits at FALSE and
-# the run it was supposed to permit never happens. That is what cycle start does
-# when these two lines are missing.
-addf and2.cycle_permit servo-thread
-addf and2.resume_permit servo-thread
 addf and2.xn_axis servo-thread
 addf and2.xn_cont servo-thread
 addf and2.xn_inc servo-thread
@@ -88,7 +79,6 @@ addf not.coolant servo-thread
 addf not.is_joint servo-thread
 addf not.lube servo-thread
 addf not.opt servo-thread
-addf not.paused servo-thread
 addf not.spindle_on servo-thread
 # The tool-change inhibit: without this line the instance never runs, its output
 # stays FALSE, and the spindle gates are shut for every session.
@@ -158,26 +148,14 @@ net mode-manual-request or2.manual_req.out => halui.mode.manual
 setp halui.mode.joint 1
 
 # ---------------------------------------------------------------------------
-# Cycle start / pause / stop
+# Cycle pause / stop
+#
+# Cycle start is not wired here. The HMI reads `cnc_panel.cycle_start`, runs its
+# own refusal checks (E-stop, machine on, AUTO, homing, a live panel, the program
+# interlock) and sends `EMC_TASK_PLAN_RUN`/`_RESUME` over NML, the way AXIS does.
+# A HAL edge from the same key used to reach `halui.program.run` as well, so one
+# press issued two commands and a press the HMI refused still ran the program.
 # ---------------------------------------------------------------------------
-net is-auto halui.mode.is-auto => and2.cycle_gate.in0
-net is-paused halui.program.is-paused => not.paused.in and2.cycle_resume.in0
-net not-paused not.paused.out => and2.cycle_gate.in1
-net cycle-gate and2.cycle_gate.out => and2.cycle_run.in0
-net cycle-start cnc_panel.cycle_start => and2.cycle_run.in1 and2.cycle_resume.in1
-# The program interlock sits between the panel key and halui: `linc.program-ok`
-# is high only while the interpreter holds the program on screen and that
-# program holds no syntax fault. It is wired in the post-GUI file because the
-# pin exists only once the HMI has started; an unconnected input reads false, so
-# cycle start is dead until the HMI says the program is fit to run. Both cycle
-# start and resume pass through it: resuming a program that has become invalid
-# is the same fault as starting one.
-net cycle-run and2.cycle_run.out => and2.cycle_permit.in0
-net cycle-permit and2.cycle_permit.out => halui.program.run
-
-net cycle-resume and2.cycle_resume.out => and2.resume_permit.in0
-net resume-permit and2.resume_permit.out => halui.program.resume
-
 # linc-panel normalizes the panel bit: cnc_panel.cycle_stop is TRUE only while
 # the key is pressed (the hardware key itself is normally closed). halui pauses
 # on the rising edge, so this fires on press, not on release.
@@ -379,7 +357,7 @@ setp halui.spindle.0.override.scale .01
 # ---------------------------------------------------------------------------
 net sig_halui_machine_is-on => cnc_panel.led_ready
 net program-running halui.program.is-running => cnc_panel.led_run cnc_panel.led_cycle_on cnc_panel.led_k4
-net is-paused => cnc_panel.led_cycle_off
+net is-paused halui.program.is-paused => cnc_panel.led_cycle_off
 net machine-estop halui.estop.is-activated => cnc_panel.led_mc_alarm
 
 net axis-x-homed halui.joint.0.is-homed => cnc_panel.led_x
