@@ -115,15 +115,24 @@ fn main() -> Result<()> {
         log::warn!("the PROBE CONTACT key is ignored: this panel is not a simulator");
     }
     let simulated = args.sim || profile.config.panel.kind == "simulated";
+    // Pause between panel transactions, from the profile's [panel.link]
+    // cycle_time_ms. A physical panel used to be floored at 20 ms (a simulator
+    // at 10) with no reason recorded; the driver's own floor is 10 ms
+    // (serial.rs), which is also what these machines ran under Probe Basic, so
+    // the profile may ask for it on real hardware too. The floor only stops a
+    // typo (0 or 1 ms) from spinning the loop: one transaction already costs
+    // more than 10 ms (4 ms settle, the reply, 5 ms, the LED frame, 5 ms, the
+    // commit echo drain), so the achieved period is transaction time + cycle.
+    let minimum_cycle = Duration::from_millis(10);
     let cycle = Duration::from_millis(
         profile
             .config
             .panel
             .link
             .cycle_time_ms
-            .unwrap_or(if simulated { 20 } else { 50 })
-            .max(if simulated { 10 } else { 20 }),
-    );
+            .unwrap_or(if simulated { 20 } else { 50 }),
+    )
+    .max(minimum_cycle);
 
     log::info!(
         "linc-panel: profile={} driver={} simulated={} cycle={:?}",
