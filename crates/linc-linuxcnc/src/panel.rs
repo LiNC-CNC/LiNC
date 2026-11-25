@@ -371,16 +371,44 @@ impl PanelReader {
         state.pendant_jog_enable = state.pendant_connected;
         state.pendant_scale = hal.float("whb.axis.x.jog-scale");
 
-        if self.bitmap_at.elapsed() >= Duration::from_secs(1) {
+        // Buttons are read on every snapshot. A momentary key is held on its pin
+        // for 200 ms (`MIN_KEY_HOLD` in the panel service), so the one-second
+        // cache this used to share with the slow words sampled that window about
+        // five times less often than it lasts: most presses never reached the
+        // HMI at all. The LED, segment and tool words change slowly, cost 46 pin
+        // reads between them, and keep the cache.
+        state.buttons = read_buttons(hal, &prefix);
+        if self.bitmap_at.elapsed() >= SLOW_WORD_CACHE {
             self.bitmap = read_bitmap(hal, &prefix);
             self.bitmap_at = now;
         }
-        state.buttons = self.bitmap.buttons;
         state.leds = self.bitmap.leds;
         state.sseg_tool = self.bitmap.sseg_tool;
         state.sseg_next = self.bitmap.sseg_next;
         state
     }
+}
+
+/// How long the slow words (LEDs, segments, tool numbers) stay cached. The
+/// button word is never cached: see `read_buttons`.
+const SLOW_WORD_CACHE: Duration = Duration::from_secs(1);
+
+/// The button word, read from HAL on every snapshot.
+///
+/// `decode_buttons` is the whole of it, so a test can drive the pin lookup
+/// without a live HAL library.
+fn read_buttons(hal: &HalReader, prefix: &str) -> u64 {
+    decode_buttons(&|pin| hal.bit(&format!("{prefix}{pin}")))
+}
+
+fn decode_buttons(read: &dyn Fn(&str) -> Option<bool>) -> u64 {
+    let mut buttons = 0u64;
+    for (pin, bit_index) in BUTTON_PINS {
+        if read(pin).unwrap_or(false) {
+            buttons |= 1u64 << bit_index;
+        }
+    }
+    buttons
 }
 
 fn read_bitmap(hal: &HalReader, prefix: &str) -> Bitmap {
@@ -410,4 +438,34 @@ fn bit(hal: &HalReader, name: &str, default: bool) -> bool {
 
 fn first_float(hal: &HalReader, names: &[&str]) -> Option<f64> {
     names.iter().find_map(|name| hal.float(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_buttons, BUTTON_PINS};
+    use std::cell::Cell;
+
+    /// The defect this guards: the button word was cached for a second while a
+    /// momentary key lives on its pin for 200 ms, so a press could land between
+    /// two reads and never reach the HMI. The decoder holds no state, so the
+    /// second call must already report the press the first call could not see.
+    #[test]
+    fn the_button_word_is_read_afresh_on_every_call() {
+        let (pin, bit_index) = BUTTON_PINS[0];
+        let pressed = Cell::new(false);
+        let read = |name: &str| Some(name == pin && pressed.get());
+        assert_eq!(decode_buttons(&read), 0, "nothing has been pressed yet");
+        pressed.set(true);
+        assert_eq!(
+            decode_buttons(&read),
+            1u64 << bit_index,
+            "the same decoder must see the press on its next call: the button word is not cached"
+        );
+    }
+
+    /// An absent pin is not a pressed key.
+    #[test]
+    fn a_missing_pin_reads_as_not_pressed() {
+        assert_eq!(decode_buttons(&|_| None), 0);
+    }
 }
