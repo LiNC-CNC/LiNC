@@ -22,7 +22,6 @@ use linc_core::model::{MachineVariant, PanelMode};
 use crate::screens::common::{self, LiveAxisRow};
 use crate::screens::machine;
 use crate::shell::LincApp;
-use crate::state::ShortcutCommand;
 use crate::theme;
 
 pub fn show(app: &mut LincApp, ui: &mut Ui) {
@@ -30,7 +29,7 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // stand down behind it and the window is drawn last, over the page.
     spindle_speed_dialog_keys(app, ui);
     handle_spindle_keys(app, ui);
-    handle_zero_keys(app, ui);
+    handle_limit_recovery_key(app, ui);
     handle_increment_keys(app, ui);
     // No mode banner: the panel's mode key and the navigation already say which
     // mode this is, and the row cost vertical space on a 720-line screen. The
@@ -411,98 +410,39 @@ pub(crate) fn handle_increment_keys(app: &mut LincApp, ui: &mut Ui) {
     }
 }
 
-/// `X`, `Y`, `Z` zero that axis and `A` zeroes all of them.
+/// Modes whose keys the manual page owns: the jog family alone.
 ///
-/// The Manual (JOG / INC / MPG) and Homing (HOME / PROG.HOME) pages share one
-/// key row, so both mode families must accept these keys — gating on
-/// `is_manual()` alone left them advertised on the Homing page and dead there.
-/// AUTO, EDIT and MDI keep them inert on purpose.
-///
-/// Modes whose page advertises the `X`/`Y`/`Z` and `A` touch-off keys. AUTO,
-/// EDIT and MDI keep them inert on purpose, and an unknown panel mode fails
-/// closed.
-/// Modes whose page advertises the zeroing letters, `X`/`Y`/`Z` and `A`.
-///
-/// JOG, INC and MPG are deliberately absent: in those modes the letters open the
-/// active WCS for editing on MAIN's coordinate matrix, the way they do on the
-/// OFFSETS page, and zeroing is left to the on-screen touch-off row. An unknown
-/// panel mode fails closed.
-fn zero_letter_keys_active(mode: Option<PanelMode>) -> bool {
-    matches!(mode, Some(PanelMode::Home | PanelMode::ProgHome))
+/// HOME and PROG.HOME share the page family but own no key at all. Their screen
+/// is a readout the physical panel drives, so the touch-off letters and the
+/// recovery walk are inert there rather than acting on a page that advertises
+/// nothing — AUTO, EDIT and MDI keep them inert for the same reason, and an
+/// unknown panel mode fails closed.
+fn recovery_key_active(mode: Option<PanelMode>) -> bool {
+    matches!(mode, Some(PanelMode::Jog | PanelMode::Inc | PanelMode::Mpg))
 }
 
-fn zero_keys_active(mode: Option<PanelMode>) -> bool {
-    matches!(
-        mode,
-        Some(
-            PanelMode::Jog
-                | PanelMode::Inc
-                | PanelMode::Mpg
-                | PanelMode::Home
-                | PanelMode::ProgHome
-        )
-    )
-}
-
-/// The same gate as the on-screen touch-off row: writes must be allowed, which
-/// covers machine ON, idle, homed, program protect and an E-stopped or offline
-/// panel.
-pub(crate) fn handle_zero_keys(app: &mut LincApp, ui: &mut Ui) {
-    // A dialog or the manual tool-change prompt owns the keyboard. Without
-    // this, `A` could zero every axis behind the prompt.
-    if app.overlay_open() {
+/// `O` opens the limit-switch recovery dialog.
+///
+/// The dialog also opens itself the moment a limit trips, so this is a second
+/// entrance, not the only one; the keys are the manual family's, because the
+/// homing page has no key row to advertise it in.
+pub(crate) fn handle_limit_recovery_key(app: &mut LincApp, ui: &mut Ui) {
+    // A dialog or the manual tool-change prompt owns the keyboard.
+    if app.overlay_open() || !recovery_key_active(app.snapshot.panel.mode.mode()) {
         return;
     }
-    let zeroable = zero_keys_active(app.snapshot.panel.mode.mode());
-    // Only a text field keeps these keys for itself. The page holds focus on an
+    // Only a text field keeps the key for itself. The page holds focus on an
     // anchor widget for arrow navigation, so any focus at all is too broad a
-    // test and made the keys dead.
+    // test and made the key dead.
     let text_focused = ui.memory(|memory| {
         memory.has_focus(egui::Id::unique("linc-program-editor"))
             || memory.has_focus(egui::Id::unique("linc-tool-cell"))
     });
-    if !zeroable || text_focused || ui.ctx().text_edit_focused() {
+    if text_focused || ui.ctx().text_edit_focused() {
         return;
     }
-    let axes = app.axes();
-    let mut zero: Option<Vec<String>> = None;
-    let mut open_recovery = false;
-    // A SHORTCUTS row click runs the same zeroing code its key does. The
-    // gates above still win: a dialog, a text field or an inactive mode.
-    let clicked = app.take_shortcut_click();
-    let letters = zero_letter_keys_active(app.snapshot.panel.mode.mode());
-    ui.input_mut(|input| {
-        // JOG, INC and MPG spend the letters on the WCS edit instead — including
-        // `A`, which used to zero every axis from here; see
-        // `zero_letter_keys_active`. The recovery key stays.
-        if letters {
-            for (key, axis) in [
-                (egui::Key::X, "X"),
-                (egui::Key::Y, "Y"),
-                (egui::Key::Z, "Z"),
-            ] {
-                if input.consume_key(egui::Modifiers::NONE, key)
-                    && axes.iter().any(|name| name == axis)
-                {
-                    zero = Some(vec![axis.to_string()]);
-                }
-            }
-            if input.consume_key(egui::Modifiers::NONE, egui::Key::A) {
-                zero = Some(axes.clone());
-            }
-        }
-        if input.consume_key(egui::Modifiers::NONE, egui::Key::O) {
-            open_recovery = true;
-        }
-    });
-    if open_recovery {
+    if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::O)) {
         app.open_limit_recovery();
-    }
-    if clicked == Some(ShortcutCommand::ManualZeroAll) && zero.is_none() {
-        zero = Some(axes);
-    }
-    if let Some(axes) = zero {
-        common::zero_axes(app, axes);
     }
 }
 
@@ -529,42 +469,23 @@ mod tests {
         assert!(!increment_keys_active(None));
     }
 
+    /// The recovery key is the manual page's own: HOME and PROG.HOME share the
+    /// page family but advertise no key, so `O` stays inert there too.
     #[test]
-    fn touch_off_keys_are_live_in_manual_and_homing_modes() {
-        for mode in [
-            PanelMode::Jog,
-            PanelMode::Inc,
-            PanelMode::Mpg,
-            PanelMode::Home,
-            PanelMode::ProgHome,
-        ] {
-            assert!(zero_keys_active(Some(mode)), "{mode:?}");
-        }
-        for mode in [PanelMode::Auto, PanelMode::Edit, PanelMode::Mdi] {
-            assert!(!zero_keys_active(Some(mode)), "{mode:?}");
-        }
-        assert!(!zero_keys_active(None));
-    }
-
-    /// X/Y/Z and A stop zeroing where the matrix can carry the letters into the
-    /// WCS edit. HOME and PROG.HOME have no matrix, so their letters keep the
-    /// touch-off.
-    #[test]
-    fn the_zero_letters_are_home_only() {
-        for mode in [PanelMode::Home, PanelMode::ProgHome] {
-            assert!(zero_letter_keys_active(Some(mode)), "{mode:?}");
+    fn the_recovery_key_belongs_to_the_jog_modes() {
+        for mode in [PanelMode::Jog, PanelMode::Inc, PanelMode::Mpg] {
+            assert!(recovery_key_active(Some(mode)), "{mode:?}");
         }
         for mode in [
-            PanelMode::Jog,
-            PanelMode::Inc,
-            PanelMode::Mpg,
             PanelMode::Auto,
             PanelMode::Edit,
             PanelMode::Mdi,
+            PanelMode::Home,
+            PanelMode::ProgHome,
         ] {
-            assert!(!zero_letter_keys_active(Some(mode)), "{mode:?}");
+            assert!(!recovery_key_active(Some(mode)), "{mode:?}");
         }
-        assert!(!zero_letter_keys_active(None));
+        assert!(!recovery_key_active(None));
     }
 
     /// The spindle keys belong to the manual family only: AUTO, EDIT and MDI

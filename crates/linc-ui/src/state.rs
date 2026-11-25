@@ -197,7 +197,6 @@ pub enum ShortcutCommand {
     DiagFaster,
     DiagSlower,
     DiagClearFilters,
-    ManualZeroAll,
     OffsetsActivate,
     ProbeRun,
     ProbeApply,

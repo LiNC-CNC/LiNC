@@ -511,9 +511,10 @@ impl LincApp {
                 _ => hints.push(Shortcut::hint("PgUp/PgDn", "TABS")),
             },
             Page::Manual | Page::Homing => {
-                // Three groups: the toolpath, the spindle, and the keys the page
-                // itself owns. The spindle group is manual modes only: HOME and
-                // PROG.HOME share this page family without a spindle control.
+                // Two groups at most: the toolpath, and the keys the page itself
+                // owns. The homing pages lose both halves of the second — the
+                // spindle control is manual-modes only, and HOME / PROG.HOME own
+                // no key at all — so they advertise the view and nothing else.
                 // The matrix takes the toolpath's place on MAIN, but the manual
                 // page keeps the toolpath beside its matrix, so the view commands
                 // only lose their subject where no graph is drawn.
@@ -570,7 +571,8 @@ impl LincApp {
                 let mut key_items: Vec<Shortcut> = Vec::new();
                 // Only INC takes the digits: a continuous JOG has no increment
                 // to pick, MPG selects its step on the handwheel, and
-                // HOME/PROG.HOME share this page family without a step row.
+                // HOME/PROG.HOME share this page family without a key row at
+                // all.
                 if self.nav.page == Page::Manual
                     && self.snapshot.panel.mode.mode() == Some(PanelMode::Inc)
                     && !self.increments().is_empty()
@@ -581,40 +583,31 @@ impl LincApp {
                     ));
                 }
                 // X/Y/Z edit the active WCS on the matrix in the manual modes,
-                // the OFFSETS page's keys, and keep zeroing only where no matrix
-                // is drawn: HOME and PROG.HOME, whose page has nothing to write
-                // into. `A` goes with them: the manual modes have no zero-all key
-                // at all.
+                // the way the OFFSETS page's keys do.
                 if self.matrix_dro_keys_active() {
                     key_items.push(Shortcut::hint("X/Y/Z", "EDIT DRO"));
                     if self.offsets.dro_edit.is_some() {
                         key_items.push(Shortcut::hint("Enter", "SET"));
                         key_items.push(Shortcut::hint("Esc", "CANCEL"));
                     }
-                } else if matches!(
-                    self.snapshot.panel.mode.mode(),
-                    Some(PanelMode::Home | PanelMode::ProgHome)
-                ) {
-                    key_items.push(Shortcut::hint("X/Y/Z", "ZERO AXIS"));
+                }
+                // `O` is the manual page's own. The homing pages own no key:
+                // the physical panel drives HOME and PROG.HOME, and the page
+                // itself is a readout, so nothing here names a letter the
+                // screen would have to act on.
+                if self.nav.page == Page::Manual {
                     key_items.push(Shortcut::run(
-                        "A",
-                        "ZERO ALL",
-                        ShortcutCommand::ManualZeroAll,
+                        "O",
+                        "LIMIT RECOVERY",
+                        ShortcutCommand::LimitRecovery,
                     ));
                 }
-                key_items.push(Shortcut::run(
-                    "O",
-                    "LIMIT RECOVERY",
-                    ShortcutCommand::LimitRecovery,
-                ));
-                groups.push(ShortcutGroup {
-                    title: if self.nav.page == Page::Homing {
-                        "HOMING"
-                    } else {
-                        "MANUAL"
-                    },
-                    items: key_items,
-                });
+                if !key_items.is_empty() {
+                    groups.push(ShortcutGroup {
+                        title: "MANUAL",
+                        items: key_items,
+                    });
+                }
             }
             Page::Offsets => {
                 hints.push(Shortcut::hint("Arrows", "SELECT"));

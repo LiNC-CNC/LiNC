@@ -8001,8 +8001,9 @@ fn the_manual_shortcuts_are_grouped_by_subject() {
         spindle.items[0].key,
         harness.app.prefs.keymap.spindle_speed_up.label()
     );
-    // The arrows act on neither page, so the group advertises only the keys it
-    // owns: the limit-recovery walk, and on the homing pages the touch-off ones.
+    // The arrows act on neither page, so the group advertises only the key it
+    // owns: the limit-recovery walk. The zeroing letters left it with the
+    // homing pages' key row.
     let manual = groups
         .iter()
         .find(|group| group.title == "MANUAL")
@@ -8014,7 +8015,9 @@ fn the_manual_shortcuts_are_grouped_by_subject() {
     );
     assert_eq!(labels, ["LIMIT RECOVERY"], "{labels:?}");
 
-    // HOME / PROG.HOME share the page family without a spindle control.
+    // HOME / PROG.HOME carry no shortcuts of their own: no spindle control, no
+    // touch-off letters, no zero-all key, no recovery walk. The toolpath view is
+    // the whole of the bar, and the panel drives the screen.
     let mut harness = ProbeHarness::new(PanelMode::Home, false, true);
     harness.app.set_page(Page::Homing);
     harness.frame(&[]);
@@ -8024,7 +8027,7 @@ fn the_manual_shortcuts_are_grouped_by_subject() {
         .iter()
         .map(|group| group.title)
         .collect();
-    assert_eq!(titles, ["VIEW", "HOMING"], "{titles:?}");
+    assert_eq!(titles, ["VIEW"], "{titles:?}");
 }
 
 /// The coordinate matrix takes the toolpath's place, so the view group goes with
@@ -8338,36 +8341,44 @@ fn escape_closes_the_matrix_dro_and_hands_the_keyboard_back() {
     );
 }
 
-/// The homing pages have no matrix to edit, so they keep the touch-off letters
-/// the manual modes gave up — `X` for one axis and `A` for all of them.
+/// The homing pages have no matrix to edit, but they do not fall back to the
+/// touch-off letters either: HOME and PROG.HOME are a readout the physical panel
+/// drives, so `X`/`Y`/`Z`, `A` and the recovery walk `O` all stay inert there.
 #[test]
-fn the_home_page_keeps_the_zero_letters() {
+fn the_home_page_sends_no_letter_of_its_own() {
     let mut harness = ProbeHarness::new(PanelMode::Home, false, true);
     assert_eq!(harness.app.nav.page, Page::Homing);
 
     harness.sent.borrow_mut().clear();
     harness.frame(&[egui::Key::X]);
-    let single = harness.sent.borrow().iter().any(|command| {
-        matches!(
-            command,
-            MachineCommand::ZeroWorkOffset { axes, .. } if axes == &vec!["X".to_string()]
-        )
-    });
+    harness.frame(&[egui::Key::A]);
+    harness.frame(&[egui::Key::O]);
     assert!(
-        single,
-        "X still touches off one axis: {:?}",
+        !harness.sent.borrow().iter().any(|command| matches!(
+            command,
+            MachineCommand::ZeroWorkOffset { .. } | MachineCommand::SetWorkPosition { .. }
+        )),
+        "no touch-off leaves the homing page: {:?}",
         harness.sent_debug()
     );
+    assert!(
+        !matches!(harness.app.overlay.modal, Some(Modal::LimitRecovery(_))),
+        "O opens no recovery dialog here"
+    );
 
+    // PROG.HOME shares the screen and the silence.
+    switch_mode(&mut harness.app, PanelMode::ProgHome);
+    assert_eq!(harness.app.nav.page, Page::Homing);
     harness.sent.borrow_mut().clear();
     harness.frame(&[egui::Key::A]);
-    let all = harness.sent.borrow().iter().any(|command| {
-        matches!(
+    assert!(
+        !harness.sent.borrow().iter().any(|command| matches!(
             command,
-            MachineCommand::ZeroWorkOffset { axes, .. } if axes.len() == harness.app.axes().len()
-        )
-    });
-    assert!(all, "A still zeroes every axis: {:?}", harness.sent_debug());
+            MachineCommand::ZeroWorkOffset { .. } | MachineCommand::SetWorkPosition { .. }
+        )),
+        "PROG.HOME zeroes nothing: {:?}",
+        harness.sent_debug()
+    );
 }
 
 /// AUTO keeps the spindle chords for itself: the page may be showing, but the
