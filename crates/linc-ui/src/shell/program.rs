@@ -220,6 +220,16 @@ impl LincApp {
                         .unwrap_or("the interpreter refused it")
                 ))
             }
+            // A crash is not a verdict either way, and the one thing it must
+            // never be read as is "the file is fine": the interpreter died
+            // before it finished reading, so the load is refused and the
+            // interlock stays shut.
+            linc_core::verify::CheckOutcome::Crashed => Some(format!(
+                "NOT LOADED  {}: the interpreter crashed before it read the program",
+                check
+                    .line
+                    .map_or_else(|| "MACHINE".to_string(), |line| format!("LN {line}"))
+            )),
             // Ok, Timeout and Unavailable all let the load through.
             _ => None,
         }

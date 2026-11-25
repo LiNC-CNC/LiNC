@@ -324,9 +324,13 @@ impl LincApp {
     ///
     /// A line number is the one program-start input the panel cannot supply,
     /// so the HMI issues it; everything else that guards a program start is
-    /// still checked here rather than assumed.
-    pub fn run_from_line_block(&self) -> Option<&'static str> {
-        self.start_gate(PanelMode::Auto, true)
+    /// still checked here rather than assumed. The program interlock belongs in
+    /// that set: CYCLE START asks it, and a restart is a start.
+    pub fn run_from_line_block(&self) -> Option<String> {
+        if let Some(reason) = self.start_gate(PanelMode::Auto, true) {
+            return Some(reason.to_string());
+        }
+        self.program_block_reason()
     }
 
     /// The MDI pane's "run the selected block" gate.

@@ -200,11 +200,12 @@ impl LincApp {
         // editor: a refusal holds the gate even when the message names no line,
         // which is every fault the interpreter raises inside a subroutine. The
         // issue list cannot carry those, so the verdict is read directly.
-        let controller_ok = !self
-            .program
-            .machine_check
-            .as_ref()
-            .is_some_and(|check| check.outcome == linc_core::verify::CheckOutcome::Refused);
+        let controller_ok = !self.program.machine_check.as_ref().is_some_and(|check| {
+            matches!(
+                check.outcome,
+                linc_core::verify::CheckOutcome::Refused | linc_core::verify::CheckOutcome::Crashed
+            )
+        });
         loaded && !self.program.editor.dirty && self.program.issues.is_empty() && controller_ok
     }
 
@@ -231,12 +232,12 @@ impl LincApp {
         if self.program.editor.dirty {
             return Some("the buffer has unsaved changes — save it (Ctrl+S)".into());
         }
-        if let Some(check) = self
-            .program
-            .machine_check
-            .as_ref()
-            .filter(|check| check.outcome == linc_core::verify::CheckOutcome::Refused)
-        {
+        if let Some(check) = self.program.machine_check.as_ref().filter(|check| {
+            matches!(
+                check.outcome,
+                linc_core::verify::CheckOutcome::Refused | linc_core::verify::CheckOutcome::Crashed
+            )
+        }) {
             return Some(format!(
                 "the interpreter refused the program: {}",
                 check.message.as_deref().unwrap_or("no reason given")

@@ -387,7 +387,12 @@ pub(crate) fn handle_dro_keys(app: &mut LincApp, ui: &mut Ui) {
         }
     });
     if commit {
-        commit_dro_edit(app);
+        // A rejected value leaves the field open. Keep the keyboard on it too,
+        // or the next keystroke goes to the page and the value can only be
+        // corrected with the pointer.
+        if !commit_dro_edit(app) {
+            return;
+        }
     } else if cancel {
         app.offsets.dro_edit = None;
     } else {

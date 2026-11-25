@@ -445,6 +445,13 @@ impl LincApp {
         app.offsets = OffsetsUi::default();
         app.sync_offsets_from_snapshot(true);
         app.sync_tools_from_snapshot(true);
+        // A program the controller already holds was parsed into `preview` above,
+        // but the issue list and the interlock are computed, not defaulted. Left
+        // alone, a faulty program open at start reads PREVIEW VALID, the refusal
+        // sees nothing to refuse, and `linc.program-ok` is never published until
+        // the first edit or reload.
+        app.sync_issues();
+        app.sync_program_ok();
         if app.nav.page == Page::Program
             && app.snapshot.panel.mode.mode() == Some(PanelMode::Edit)
             && app.editing_allowed()
