@@ -102,6 +102,10 @@ pub struct NmlBackend {
     /// repeats nothing, but a program that faults twice must be held twice, so
     /// the flag clears when the interpreter is idle again.
     held_for_error: bool,
+    /// The machine ran with the cabinet switch on, and an E-stop from here is
+    /// ours to undo: set while the task reports ON, cleared once the machine has
+    /// been asked for again or powered off on purpose.
+    power_armed: bool,
 }
 
 /// How long the IO process may take to publish a reloaded tool table.
@@ -218,6 +222,7 @@ impl NmlBackend {
             program_line_revision: 0,
             program_line_logged: false,
             held_for_error: false,
+            power_armed: false,
             tool_table,
             tool_state,
             tool_restore,
@@ -288,6 +293,9 @@ impl NmlBackend {
             .as_ref()
             .and_then(|hal| hal.read("linc.machine-on"))
             .and_then(|value| value.as_bool());
+        // An E-stop takes the machine off and leaves the cabinet switch holding
+        // its edge-only pin high, so this is the one place that can put it back.
+        self.service_power(status.task.state, snapshot.cabinet_on);
         // Per-axis load. LinuxCNC's status carries no servo load, so the only
         // source is a HAL pin, and SnapshotBuilder owns no HAL reader: the pins
         // are read here. An axis with no configured pin publishes no row at all,
@@ -537,6 +545,47 @@ impl NmlBackend {
                 log::warn!("holding the program after a fault: {}", text.trim());
             }
             Err(error) => log::warn!("could not hold the program after a fault: {error}"),
+        }
+    }
+
+    /// Put the machine back on after an E-stop the operator has cleared.
+    ///
+    /// The cabinet switch reaches the controller through `halui.machine.on`,
+    /// which acts on a *change* of its pin — and the switch is a level. Pressing
+    /// the mushroom therefore drops the machine off and leaves nothing to send
+    /// the opposite edge: releasing it makes the HAL raise `halui.estop.reset`,
+    /// the task lands in `ESTOP_RESET`, and the machine waits there until
+    /// somebody toggles the cabinet switch off and on again.
+    ///
+    /// The switch is the operator's intent, so follow it. The latch keeps this
+    /// to machines that were actually running: an E-stop on a machine that was
+    /// already off powers nothing up, and a deliberate power-off — the probe
+    /// trip's `linc.machine-off` — clears it.
+    fn service_power(&mut self, state: NmlTaskState, cabinet_on: Option<bool>) {
+        match state {
+            NmlTaskState::On => {
+                self.power_armed = true;
+                return;
+            }
+            NmlTaskState::Off => {
+                self.power_armed = false;
+                return;
+            }
+            _ => {}
+        }
+        if !power_on_wanted(state, cabinet_on, self.power_armed) {
+            return;
+        }
+        // One attempt per E-stop cycle, and no waiting: this runs on the UI's
+        // polling path, and the next snapshot reports what the task made of it.
+        self.power_armed = false;
+        match self.nml_send(&NmlCommand::SetState(NmlTaskState::On)) {
+            Ok(()) => log::info!(
+                "E-stop cleared with the cabinet switch still on: the machine goes back on"
+            ),
+            Err(error) => {
+                log::warn!("could not power the machine back on after the E-stop: {error}")
+            }
         }
     }
 
@@ -2303,6 +2352,21 @@ pub(crate) fn hold_wanted(
     )
 }
 
+/// Whether the power service should ask the controller for the machine.
+///
+/// `ESTOP_RESET` is where the controller lands once the mushroom is released —
+/// the HAL drives `halui.estop.reset` from the released switch — and it is the
+/// state that then waits for a machine-on nothing sends any more. `armed` means
+/// "the machine was on when the E-stop came", and `cabinet_on` is the same level
+/// `halui.machine.on` samples: an unread switch fails closed.
+pub(crate) fn power_on_wanted(
+    state: NmlTaskState,
+    cabinet_on: Option<bool>,
+    armed: bool,
+) -> bool {
+    armed && cabinet_on == Some(true) && state == NmlTaskState::EstopReset
+}
+
 fn machine_units_code(linear_units: &str) -> &'static str {
     match linear_units.trim().to_ascii_lowercase().as_str() {
         "inch" | "inches" | "in" => "G20",
@@ -2667,6 +2731,26 @@ mod tests {
         assert!(!hold_wanted(M::Mdi, S::On, I::Reading, false));
         assert!(!hold_wanted(M::Auto, S::Off, I::Reading, false));
         assert!(!hold_wanted(M::Auto, S::Estop, I::Reading, false));
+    }
+
+    /// The cabinet switch is a level; `halui.machine.on` takes an edge. The one
+    /// state that needs the HMI to send the machine-on is `ESTOP_RESET` after a
+    /// machine that was running.
+    #[test]
+    fn an_estop_on_a_running_machine_powers_it_back_up() {
+        use linuxcnc_nml::TaskState as S;
+        assert!(power_on_wanted(S::EstopReset, Some(true), true));
+        // The mushroom is still held, there is nothing to power yet.
+        assert!(!power_on_wanted(S::Estop, Some(true), true));
+        // The switch is the intent: off, or unreadable, means stay off.
+        assert!(!power_on_wanted(S::EstopReset, Some(false), true));
+        assert!(!power_on_wanted(S::EstopReset, None, true));
+        // A machine that was already off before the E-stop stays off.
+        assert!(!power_on_wanted(S::EstopReset, Some(true), false));
+        // And a machine that is on, or was powered off on purpose, has nothing
+        // for this service to do.
+        assert!(!power_on_wanted(S::On, Some(true), true));
+        assert!(!power_on_wanted(S::Off, Some(true), true));
     }
 
     /// The reload handshake asks the one question `G43` asks: does the
