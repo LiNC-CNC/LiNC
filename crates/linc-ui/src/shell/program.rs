@@ -109,11 +109,13 @@ impl LincApp {
     }
 
     pub fn load_program(&mut self, path: PathBuf) {
-        // The gate sits here, not on cycle start: the panel's CYCLE START is a
-        // HAL edge straight into `halui.program.run`, and LiNC is not in that
-        // path. What LiNC owns is the load, and an interpreter with no program
-        // has nothing to start. A file the check refuses still opens in the
-        // editor - the operator has to be able to fix it where it is shown.
+        // The load gate and the cycle-start gate ask the same question from two
+        // ends: a file the check refuses never reaches the interpreter, and
+        // `cycle_start_refusal` refuses the press on the interlock it leaves
+        // shut. The key reaches the controller only through
+        // `MachineCommand::CycleStart`, so a refused press sends nothing. A file
+        // the check refuses still opens in the editor - the operator has to be
+        // able to fix it where it is shown.
         if let Some(refusal) = self.syntax_refusal(&path) {
             self.refuse_load(path, refusal);
             return;

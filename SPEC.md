@@ -941,9 +941,9 @@ Program rules:
 - A program with a fault is **not loaded** into the interpreter while
   `program.block_run_on_syntax_error` is true: the file still opens in the
   editor, the faults are marked, and the controller never gets the program, so
-  the panel's CYCLE START has nothing to run. This is the only place LiNC can
-  hold the gate - CYCLE START is a HAL edge straight into `halui.program.run` -
-  and `linc.program-ok` closes the HAL side of it for the panel's key as well.
+  the panel's CYCLE START has nothing to run. CYCLE START passes through the
+  HMI, which asks this same condition (`cycle_start_refusal`) before it sends the
+  run; `linc.program-ok` carries the answer as a published level.
 - With `program.verify_on_load`, the controller's own interpreter reads the file
   first (`rs274 -g`, the machine INI, a temporary copy of the buffer, killed at
   `program.verify_timeout_ms`). It catches what one block cannot decide - a feed

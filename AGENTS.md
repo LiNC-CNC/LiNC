@@ -71,9 +71,12 @@ Three layers, in the order they run:
   line number (it echoes the block), and is killed at `program.verify_timeout_ms`.
 
 A file the checks refuse is not loaded, so the panel's CYCLE START has nothing to
-run; `linc.program-ok` closes the HAL side of the same gate. CYCLE START itself is
-a HAL edge into `halui.program.run` and never passes through LiNC — that is why
-the pin exists at all.
+run. CYCLE START passes through LiNC: the HMI reads `cnc_panel.cycle_start`, runs
+its refusal checks (E-stop, machine on, AUTO, homing, a live panel, the program
+interlock) and sends the run over NML. `linc.program-ok` is published as the
+interlock's level; no HAL file drives `halui.program.run` from the panel key any
+more, because that path issued a second command per press and ran a press the HMI
+had refused.
 
 ## Crate map
 

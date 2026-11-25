@@ -120,14 +120,15 @@ after the GUI has created the `linc.*` component and wires
 `linc-pendant.hal` is real-machine only and wires jog/handwheel inputs.
 
 `allowed_outputs` is the whole writable surface. The eighth key, `program-ok`,
-is the program interlock: `linc.program-ok` is high only while the interpreter
-holds the program on screen, that program holds no syntax fault and the buffer
-has not been edited since. The machine HAL ANDs it into cycle start and resume
-(`and2.cycle_permit` in `hal/linc.hal`, `hal/linc-lathe.hal` and
-`hal/baiermill-pb-postgui.hal`, netted from the post-GUI files), because the
-panel's CYCLE START reaches `halui.program.run` without passing through LiNC.
-It starts low and is written on every change, so a machine whose HMI is not
-running cannot start a program at all.
+is the program interlock's level: `linc.program-ok` is high only while the
+interpreter holds the program on screen, that program holds no syntax fault and
+the buffer has not been edited since. It starts low and is written on every
+change. The HMI asks the same condition before it sends a cycle start
+(`cycle_start_refusal`), and the panel key reaches the controller only through
+that path: no HAL file drives `halui.program.run` from `cnc_panel.cycle_start`
+any more, because that path issued a second command per press and ran a press the
+HMI had refused. The pin stays published so a machine tree can interlock a path
+of its own, and the Diagnostics page shows it.
 
 The sixth key, `machine-off`,
 is the `linc.machine-off` bit. It is true for as long as a probe trip is
