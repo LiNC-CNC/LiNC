@@ -945,7 +945,6 @@ impl LincApp {
             | ShortcutCommand::DiagFaster
             | ShortcutCommand::DiagSlower
             | ShortcutCommand::DiagClearFilters
-            | ShortcutCommand::ManualZeroAll
             | ShortcutCommand::OffsetsActivate
             | ShortcutCommand::ProbeRun
             | ShortcutCommand::ProbeApply
