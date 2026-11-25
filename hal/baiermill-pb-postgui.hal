@@ -115,8 +115,6 @@ addf and2.coolant-off servo-thread
 addf and2.ready-led servo-thread
 addf and2.cycle-start-resume servo-thread
 addf and2.cycle-start-run servo-thread
-addf and2.cycle-permit servo-thread
-addf and2.resume-permit servo-thread
 addf and2.run-enabled servo-thread
 addf and2.tool-change-piston servo-thread
 addf and2.jog-enable-x servo-thread

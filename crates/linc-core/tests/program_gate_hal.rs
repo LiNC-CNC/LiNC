@@ -184,7 +184,10 @@ fn the_lathe_run_is_gated_and_the_instance_is_declared_before_the_net() {
 /// this gate, so every instance these files create has to be in a thread.
 #[test]
 fn every_and2_these_files_create_is_added_to_a_thread() {
-    for name in ["linc.hal", "linc-lathe.hal", "baiermill-pb-postgui.hal"] {
+    let names = ["linc.hal", "linc-lathe.hal", "baiermill-pb-postgui.hal"];
+    let mut created_anywhere: BTreeSet<String> = BTreeSet::new();
+    let mut added_anywhere: Vec<(String, String)> = Vec::new();
+    for name in names {
         let text = read(name);
         // Continuations first: `loadrt and2 names=a,\` spans lines.
         let code: String = text
@@ -202,12 +205,13 @@ fn every_and2_these_files_create_is_added_to_a_thread() {
             let Some(names) = rest.trim_start().strip_prefix("names=") else {
                 continue;
             };
+            // The whole list, not its first whitespace-separated word: taking
+            // one word kept 1 of the 24 instances a continued list declares,
+            // which is how a dead `addf` stayed invisible here.
             created.extend(
                 names
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("")
                     .split(',')
+                    .map(str::trim)
                     .filter(|name| name.starts_with("and2."))
                     .map(str::to_string),
             );
@@ -219,12 +223,23 @@ fn every_and2_these_files_create_is_added_to_a_thread() {
             .filter(|pin| pin.starts_with("and2."))
             .map(str::to_string)
             .collect();
+        created_anywhere.extend(created.iter().cloned());
+        added_anywhere.extend(added.iter().cloned().map(|pin| (name.to_string(), pin)));
         for instance in &created {
             assert!(
                 added.iter().any(|pin| pin == instance),
                 "{name} creates {instance} and never adds it to a thread: it computes nothing, so its output stays FALSE"
             );
         }
+    }
+    // The other direction: an `addf` naming an instance no loaded file creates
+    // fails at load, and the created-to-added assertion cannot see it because
+    // the name never appears in a `loadrt` list at all.
+    for (file, instance) in &added_anywhere {
+        assert!(
+            created_anywhere.contains(instance),
+            "{file} adds {instance} to a thread, but no HAL file creates it: the load fails at that line"
+        );
     }
 }
 
