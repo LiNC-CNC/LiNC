@@ -19,7 +19,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use linc_core::diag::{DiagError, Dropped, Envelope};
@@ -32,14 +32,17 @@ pub use source::{BusSource, Source};
 /// One request line larger than this is rejected instead of buffered.
 pub const MAX_FRAME: usize = 8 * 1024 * 1024;
 
-/// A running diagnostic server. Dropping it stops the accept loop and removes
-/// the socket and `instance.json`.
+/// A running diagnostic server. Dropping it stops the accept loop, stops the
+/// connections it already accepted, and removes the socket and `instance.json`.
 pub struct ServerHandle {
     pub socket: PathBuf,
     pub dir: PathBuf,
     role: String,
     stop: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
+    /// One handle per accepted connection, so a drop can wait for the
+    /// connection threads instead of leaving them serving a dead server.
+    connections: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
 impl Drop for ServerHandle {
@@ -51,6 +54,15 @@ impl Drop for ServerHandle {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(join) = self.join.take() {
             let _ = join.join();
+        }
+        // A live connection outlives the listener, so removing the socket alone
+        // leaves it answering: `linc-mcp` would keep talking to an HMI that had
+        // already shut down. Joining makes the shutdown mean what it says. Each
+        // thread notices `stop` on its next poll (its read timeout), so this is
+        // bounded by that poll rather than by the client.
+        let connections = std::mem::take(&mut *self.connections.lock().unwrap());
+        for connection in connections {
+            let _ = connection.join();
         }
         let _ = std::fs::remove_file(&self.socket);
         let _ = std::fs::remove_file(discovery::instance_path(&self.dir, &self.role));
@@ -80,6 +92,8 @@ pub fn serve(dir: PathBuf, role: &str, source: Arc<dyn Source>) -> std::io::Resu
     let poll = std::time::Duration::from_millis(50);
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = stop.clone();
+    let connections: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
+    let connections_accept = connections.clone();
     let join = std::thread::Builder::new()
         .name(format!("diag-{role}"))
         .spawn(move || {
@@ -91,12 +105,25 @@ pub fn serve(dir: PathBuf, role: &str, source: Arc<dyn Source>) -> std::io::Resu
                         let _ = stream.set_nonblocking(false);
                         let source = source.clone();
                         let source_name = source_name.clone();
-                        std::thread::Builder::new()
-                            .name("diag-conn".into())
-                            .spawn(move || {
-                                let _ = handle_connection(stream, source.as_ref(), &source_name);
-                            })
-                            .ok();
+                        let stop_connection = stop_thread.clone();
+                        let spawned =
+                            std::thread::Builder::new()
+                                .name("diag-conn".into())
+                                .spawn(move || {
+                                    let _ = handle_connection(
+                                        stream,
+                                        source.as_ref(),
+                                        &source_name,
+                                        &stop_connection,
+                                    );
+                                });
+                        if let Ok(handle) = spawned {
+                            let mut connections = connections_accept.lock().unwrap();
+                            // Reap the finished ones: a long-lived HMI takes a
+                            // new connection per `linc-mcp` run.
+                            connections.retain(|connection| !connection.is_finished());
+                            connections.push(handle);
+                        }
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         std::thread::sleep(poll);
@@ -115,6 +142,7 @@ pub fn serve(dir: PathBuf, role: &str, source: Arc<dyn Source>) -> std::io::Resu
         role: role.to_string(),
         stop,
         join: Some(join),
+        connections,
     })
 }
 
@@ -122,13 +150,20 @@ fn handle_connection(
     mut stream: UnixStream,
     source: &dyn Source,
     source_name: &str,
+    stop: &AtomicBool,
 ) -> std::io::Result<()> {
     let mut reader = std::io::BufReader::new(stream.try_clone()?);
     let mut subscribed = false;
     let mut last_sequence = 0u64;
     let poll = std::time::Duration::from_millis(250);
     stream.set_read_timeout(Some(poll))?;
+    // A response the peer never reads must not pin this thread, because the
+    // server's drop joins it.
+    stream.set_write_timeout(Some(std::time::Duration::from_millis(5_000)))?;
     loop {
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
         let mut line = String::new();
         match read_line_limited(&mut reader, &mut line, MAX_FRAME) {
             Ok(0) => break,
@@ -426,6 +461,28 @@ mod tests {
         assert!(discovery::socket_is_stale(&socket));
         let (handle, _bus) = start(&dir);
         assert!(!discovery::socket_is_stale(&handle.socket));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Removing the socket stops new callers, but a connection accepted before
+    /// the drop used to keep answering from its own thread: `linc-mcp` went on
+    /// talking to an HMI that had already shut down. The connection is proven
+    /// live first, so this cannot pass by the connect never having happened.
+    #[test]
+    fn a_dropped_server_stops_answering_an_accepted_connection() {
+        let dir = temp_dir("dropped-live");
+        let (handle, _bus) = start(&dir);
+        let mut client = Client::connect(&handle.socket).expect("connect");
+        client.call("diag.ping", Value::Null).expect("alive");
+
+        let socket = handle.socket.clone();
+        drop(handle);
+        assert!(!socket.exists(), "the socket is removed on drop");
+
+        let error = client
+            .call("diag.ping", Value::Null)
+            .expect_err("the server is gone");
+        assert_eq!(error.code, "LINC_NOT_RUNNING", "{error:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
