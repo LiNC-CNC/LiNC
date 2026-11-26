@@ -161,7 +161,10 @@ had refused.
 - Table cells edit in place: Enter selects the whole value, Escape restores the
   previous one, and the open cell keeps the selection border's size in red
   (Tools, Offsets). Home/End belong to the cell while it has focus; add its id to
-  the `text_focused` list in `shell/keyboard.rs` if you add another editor.
+  the `text_focused` list in `shell/keyboard.rs` if you add another editor. The
+  Offsets page's EXT cards are the same editor reached by `Ctrl+X`/`Ctrl+Y`/`Ctrl+Z`:
+  the chords, not bare letters, because the digits must stay free for typing; `0`
+on the page clears every axis, and there is no clear button.
 
 - No page titles; the navigation names the page. Start each page with `common::focus_anchor(ui, "<page>-page-focus")` so arrow navigation has a
   starting point. Banners stay because they carry live state.

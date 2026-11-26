@@ -507,6 +507,12 @@ pub struct KeysConfig {
     pub files_delete: String,
     pub tools: String,
     pub offsets: String,
+    /// Page-local to OFFSETS: edit that axis's EXT (G92) card in place.
+    pub ext_edit_x: String,
+    pub ext_edit_y: String,
+    pub ext_edit_z: String,
+    /// Page-local to OFFSETS: clear the EXT shift on every axis (`G92.1`).
+    pub offset_ext_zero: String,
     /// Page-local to the Tools page: type a tool number and load it, for an
     /// operator who knows the number and does not want to cursor to the row.
     pub tool_number: String,
@@ -578,6 +584,10 @@ impl KeysConfig {
             files_delete: "Delete".into(),
             tools: "F7".into(),
             offsets: "F8".into(),
+            ext_edit_x: "Ctrl+X".into(),
+            ext_edit_y: "Ctrl+Y".into(),
+            ext_edit_z: "Ctrl+Z".into(),
+            offset_ext_zero: "0".into(),
             tool_number: "Ctrl+T".into(),
             limit_recovery: "Ctrl+I".into(),
             diagnostics: "Ctrl+D".into(),

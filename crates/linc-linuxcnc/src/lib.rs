@@ -1698,14 +1698,55 @@ impl NmlBackend {
                 self.touch_off(index, &values, &axes)
             }
             MachineCommand::SetG92Offset { values } => {
-                self.validate_controller_write()?;
-                let parts = values
-                    .iter()
-                    .map(|(axis, value)| format!("{axis}{value:.6}"))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                self.issue_blocks(&[format!("G92 {parts}")])?;
+                let snapshot = self.validate_controller_write()?;
+                if let Some((wcs, rotation)) = rotated_work_system(&snapshot.offsets) {
+                    return Err(MachineError::Invalid(format!(
+                        "EXT cannot be set while {wcs} is rotated {rotation:.3}°"
+                    )));
+                }
+                // `G92` makes the current point read a coordinate, and the
+                // interpreter derives the register from the position it holds
+                // *without* the register in effect: `G92 X5` then `G92 X10`
+                // with no motion leaves the register at -10, not -5. So the
+                // word is the position plus the register in effect minus the
+                // shift the operator asked for, and the round trip through the
+                // interpreter is what makes a second edit land on the typed
+                // number instead of on the sum.
+                let mut words = Vec::new();
+                for (axis, wanted) in values.iter() {
+                    let Some(position) = snapshot.positions.axes.get(axis) else {
+                        return Err(MachineError::Invalid(format!("unknown axis {axis}")));
+                    };
+                    let register = snapshot.offsets.g92.get(axis).copied().unwrap_or(0.0);
+                    words.push(format!(
+                        "{axis}{:.6}",
+                        g92_word(position.work, register, *wanted)
+                    ));
+                }
+                if words.is_empty() {
+                    return Err(MachineError::Invalid("no axes given".into()));
+                }
+                let units_before = self.poll_status()?.task.program_units;
+                let block = format!(
+                    "G90 {} G92 {}",
+                    machine_units_code(&self.profile.machine_ini.linear_units),
+                    words.join(" ")
+                );
+                self.issue_blocks(&[block])?;
                 self.wait_complete(Duration::from_secs(2))?;
+                self.restore_program_units(units_before)?;
+                self.persist_g92()
+            }
+            MachineCommand::ClearG92Offset => {
+                self.validate_controller_write()?;
+                let units_before = self.poll_status()?.task.program_units;
+                let block = format!(
+                    "G90 {} G92.1",
+                    machine_units_code(&self.profile.machine_ini.linear_units)
+                );
+                self.issue_blocks(&[block])?;
+                self.wait_complete(Duration::from_secs(2))?;
+                self.restore_program_units(units_before)?;
                 self.persist_g92()
             }
             MachineCommand::SetToolTableRow {
@@ -2386,6 +2427,32 @@ fn program_units_code(program_units: i32) -> &'static str {
 /// millimetre value times 25.4.
 fn g10_prefix(linear_units: &str, verb: &str, index: u8) -> String {
     format!("G90 {} {verb} P{index}", machine_units_code(linear_units))
+}
+
+/// The coordinate a `G92` block must name so the register ends up at
+/// `wanted`.
+///
+/// The interpreter does not read the register in effect when it derives a new
+/// one - `G92 X5` then `G92 X10` with no motion leaves the register at -10, not
+/// -5 - so the register has to be added back before the operator's value is
+/// subtracted. Dropping that term makes every edit additive: typing 12.5 twice
+/// leaves 25.
+fn g92_word(work: f64, register: f64, wanted: f64) -> f64 {
+    work + register - wanted
+}
+
+/// The active work system, and its rotation, when the rotation makes a per-axis
+/// EXT write unsafe.
+///
+/// LiNC's snapshot applies neither the rotation nor the register when it
+/// computes a work position, so `work + register` is not the frame the
+/// interpreter derives `G92` in. Until that math is modelled, a rotated system
+/// is refused rather than approximated: a wrong-axis shift lands silently.
+fn rotated_work_system(offsets: &linc_core::model::WorkOffsetSet) -> Option<(String, f64)> {
+    let index = offsets.active_index?;
+    let row = offsets.offsets.iter().find(|row| row.index == index)?;
+    let rotation = row.rotation.unwrap_or(0.0);
+    (rotation.abs() > 1e-6).then(|| (linc_core::model::wcs_name(index), rotation))
 }
 
 fn pose_component(pose: &linuxcnc_nml::Pose, index: usize) -> f64 {
@@ -3253,5 +3320,67 @@ mod tests {
 
         // Nothing stored means nothing to lose.
         assert!(!super::live_row_lost(&zeros, 0.0, &axes, &AxisMap::new()));
+    }
+}
+
+#[cfg(test)]
+mod ext_offset_tests {
+    use super::{g92_word, rotated_work_system};
+    use linc_core::model::{AxisMap, WorkOffset, WorkOffsetSet};
+
+    /// The interpreter derives a new register from the position without the
+    /// register in effect, so the word has to add it back. Verified with
+    /// `rs274 -g`: `G92 X5` then `G92 X10` with no motion leaves the register at
+    /// -10, not -5.
+    #[test]
+    fn the_word_carries_the_register_already_in_effect() {
+        assert_eq!(g92_word(30.0, 0.0, 12.5), 17.5);
+        assert_eq!(g92_word(17.5, 12.5, 10.0), 20.0);
+        // Clearing one axis at work 17.5 with the register at 12.5.
+        assert_eq!(g92_word(17.5, 12.5, 0.0), 30.0);
+    }
+
+    /// What the round trip through the interpreter settles on, without the
+    /// interpreter: the base is the work position plus the register, and the
+    /// resulting register is that base minus the word.
+    #[test]
+    fn a_second_edit_lands_on_the_typed_number() {
+        // The base is the machine position with the work system and tool length
+        // removed and no register applied; LiNC reports the work position with
+        // the register taken out, so `work + register` is that base again.
+        let base = 30.0_f64;
+        let mut register = 0.0_f64;
+        for wanted in [12.5, 12.5, 4.0, 0.0] {
+            let work = base - register;
+            let word = g92_word(work, register, wanted);
+            register = base - word;
+            assert_eq!(register, wanted, "typed {wanted}");
+        }
+    }
+
+    fn offsets(index: u8, rotation: Option<f64>) -> WorkOffsetSet {
+        WorkOffsetSet {
+            offsets: vec![WorkOffset {
+                index,
+                values: AxisMap::new(),
+                rotation,
+            }],
+            g92: AxisMap::new(),
+            active_index: Some(index),
+            revision: 0,
+        }
+    }
+
+    #[test]
+    fn an_unrotated_system_allows_the_write() {
+        assert_eq!(rotated_work_system(&offsets(1, None)), None);
+        assert_eq!(rotated_work_system(&offsets(1, Some(0.0))), None);
+    }
+
+    #[test]
+    fn a_rotated_system_refuses_and_names_itself() {
+        let blocked = rotated_work_system(&offsets(2, Some(45.0))).expect("rotation blocks it");
+        assert_eq!(blocked.0, "G55");
+        assert_eq!(blocked.1, 45.0);
     }
 }

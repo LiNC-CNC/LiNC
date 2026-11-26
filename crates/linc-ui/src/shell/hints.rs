@@ -617,6 +617,12 @@ impl LincApp {
                     ShortcutCommand::OffsetsActivate,
                 ));
                 hints.push(Shortcut::hint("X/Y/Z", "EDIT DRO"));
+                hints.push(Shortcut::hint("Ctrl+X/Y/Z", "EDIT EXT"));
+                hints.push(Shortcut::run(
+                    k.offset_ext_zero.label(),
+                    "ZERO EXT",
+                    ShortcutCommand::OffsetsExtZero,
+                ));
                 hints.push(Shortcut::run(
                     offset_key.clone(),
                     "PROBE",

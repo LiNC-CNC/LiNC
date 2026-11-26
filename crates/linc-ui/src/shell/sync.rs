@@ -199,13 +199,6 @@ impl LincApp {
             }
             self.offsets.rows.insert(offset.index, draft);
         }
-        self.offsets.g92 = self
-            .snapshot
-            .offsets
-            .g92
-            .iter()
-            .map(|(_, value)| format!("{value:.4}"))
-            .collect();
     }
 
     pub(super) fn sync_tools_from_snapshot(&mut self, force: bool) {

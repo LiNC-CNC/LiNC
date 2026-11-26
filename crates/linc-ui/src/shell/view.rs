@@ -72,6 +72,8 @@ impl LincApp {
             self.tool_tip(),
             &self.profile.subroutines(),
             &Tools::from_rows(&self.snapshot.tool_table.rows),
+            // The machine's EXT shift is in effect before the program starts.
+            Some(&self.snapshot.offsets.g92),
         );
         // The first rapid is the approach from the live tool position to the
         // program start. Keep the program geometry; do not draw that connector.

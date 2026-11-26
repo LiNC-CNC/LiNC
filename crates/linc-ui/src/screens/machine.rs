@@ -505,7 +505,27 @@ fn work_coordinates_card(
         ui.set_min_width(cell.x);
         ui.set_max_width(cell.x);
         let wcs = app.active_wcs_label();
-        let badge = Some((wcs.as_str(), theme::ACCENT));
+        // The matrix is the machine's own view of its frame, so a global EXT
+        // shift names itself here, in the card that shows the shifted numbers.
+        let shifted = app
+            .snapshot
+            .offsets
+            .g92
+            .iter()
+            .any(|(_, value)| value.abs() > 1e-9);
+        let badge_text = if shifted {
+            format!("{wcs} · EXT")
+        } else {
+            wcs.clone()
+        };
+        let badge = Some((
+            badge_text.as_str(),
+            if shifted {
+                theme::WARNING
+            } else {
+                theme::ACCENT
+            },
+        ));
         let body = common::value_card(ui, cell.y, "WORK COORDINATES", badge);
         paint_coordinate_lines(ui, body, lines, skip);
         let rows = lines.len().max(1);

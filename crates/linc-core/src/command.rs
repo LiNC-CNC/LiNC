@@ -270,9 +270,21 @@ pub enum MachineCommand {
     ActivateWorkOffset {
         index: u8,
     },
+    /// Set the global EXT shift: each named axis's shift becomes that axis's
+    /// value in `values`, in machine units.
+    ///
+    /// `G92` does not assign the register; it makes the current point read a
+    /// coordinate, and the interpreter derives the register from that. So each
+    /// backend computes the word from the position and the register it reports
+    /// and re-reads the register afterwards. The work position alone is wrong:
+    /// it already has the old register in it, and a second edit would land on
+    /// the sum of the two.
     SetG92Offset {
         values: AxisMap<f64>,
     },
+    /// Clear the global EXT shift with `G92.1`, every axis at once. Its own
+    /// command rather than an MDI line, so it passes the offset write gate.
+    ClearG92Offset,
     /// Touch off: make the current position read zero in work offset `index`
     /// for `axes`. Issues `G10 L20`, so LinuxCNC computes the offset itself
     /// rather than the HMI deriving it from a possibly stale snapshot.
@@ -356,6 +368,7 @@ impl MachineCommand {
             Self::SetWorkOffset { .. } => "Set work offset",
             Self::ActivateWorkOffset { .. } => "Activate work offset",
             Self::SetG92Offset { .. } => "Set G92 offset",
+            Self::ClearG92Offset => "Clear G92 offset",
             Self::ZeroWorkOffset { .. } => "Zero work offset",
             Self::SetWorkPosition { .. } => "Set work position",
             Self::RunFromLine { .. } => "Run from line",

@@ -210,6 +210,9 @@ impl LincApp {
     pub(super) fn release_closed_edits(&mut self, ctx: &egui::Context) {
         let transient = [
             (crate::state::DRO_FIELD_ID, self.offsets.dro_edit.is_some()),
+            ("linc-ext-dro-X", self.offsets.ext_edit.is_some()),
+            ("linc-ext-dro-Y", self.offsets.ext_edit.is_some()),
+            ("linc-ext-dro-Z", self.offsets.ext_edit.is_some()),
             ("linc-probe-dro", self.probe.dro_edit.is_some()),
             (
                 "linc-probe-param",

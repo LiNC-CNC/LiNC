@@ -762,6 +762,32 @@ fn the_network_metric_reports_the_link_and_warns_only_when_the_machine_runs() {
     );
 }
 
+/// The EXT metric is absent at zero and names the shifted axes otherwise. The
+/// bar is the one announcement the Program page has, because that page draws no
+/// axis card.
+#[test]
+fn the_top_bar_carries_the_ext_shift_only_while_it_is_set() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.snapshot.meta.stale = false;
+    let quiet = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        !quiet.iter().any(|text| text == "EXT"),
+        "no shift, no metric: {quiet:?}"
+    );
+
+    harness.app.snapshot.offsets.g92.insert("X", 12.5);
+    harness.app.snapshot.offsets.g92.insert("Y", -3.25);
+    let shown = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        shown.iter().any(|text| text == "EXT"),
+        "the bar names the register: {shown:?}"
+    );
+    assert!(
+        shown.iter().any(|text| text == "XY"),
+        "the bar carries the shift, per axis: {shown:?}"
+    );
+}
+
 /// The metric is absent, not blank, on a machine without a supervisor.
 #[test]
 fn the_top_bar_always_carries_the_network_metric() {
@@ -5919,9 +5945,10 @@ fn the_cut_shortcut_reaches_the_probe_x_data_reset() {
 }
 
 #[test]
-fn the_cut_hand_off_is_scoped_to_the_probe_page() {
-    // No page other than Probe may receive a synthetic cut chord: the
-    // clipboard event belongs to text editing everywhere else.
+fn the_cut_hand_off_is_scoped_to_the_pages_that_bind_it() {
+    // Probe's X data reset and the Offsets page's EXT X card both bind Ctrl+X,
+    // and neither can receive it as a key: `egui-winit` turns the chord into a
+    // clipboard event. Every other page keeps the clipboard event for text.
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
     let mut observed = Vec::new();
     for page in [Page::Machine, Page::Files, Page::Offsets, Page::Probe] {
@@ -5950,7 +5977,7 @@ fn the_cut_hand_off_is_scoped_to_the_probe_page() {
         vec![
             (Page::Machine, true, false),
             (Page::Files, true, false),
-            (Page::Offsets, true, false),
+            (Page::Offsets, false, true),
             (Page::Probe, false, true),
         ]
     );

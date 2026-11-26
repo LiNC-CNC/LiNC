@@ -176,6 +176,7 @@ impl LincApp {
                 [0.0; 3],
                 &profile.subroutines(),
                 &Tools::from_rows(&snapshot.tool_table.rows),
+                Some(&snapshot.offsets.g92),
             );
             preview.trim_approach([0.0; 3]);
         }

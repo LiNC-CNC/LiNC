@@ -239,6 +239,13 @@ impl LincApp {
                 13.0,
             );
             metric(ui, "WORK", self.active_wcs_label(), 13.0);
+            // The global shift that moves every work offset at once. Absent at
+            // zero, so a session that does not use it keeps the bar's width.
+            if let Some(ext) =
+                crate::shell::status::ext_metric(&self.snapshot.offsets.g92, &self.axes())
+            {
+                metric_colored(ui, "EXT", ext, 13.0, theme::WARNING);
+            }
             // The external link rides with the other machine metrics. It is
             // absent for a profile without `[network]`, and the top bar is the
             // bar with room: the read-only bottom group is already at the

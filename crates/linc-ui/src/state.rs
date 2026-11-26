@@ -198,6 +198,7 @@ pub enum ShortcutCommand {
     DiagSlower,
     DiagClearFilters,
     OffsetsActivate,
+    OffsetsExtZero,
     ProbeRun,
     ProbeApply,
     ProbeUpdateParams,
@@ -1882,6 +1883,21 @@ pub struct DroEdit {
 /// the edit can hand the focus back.
 pub const DRO_FIELD_ID: &str = "linc-wcs-dro";
 
+/// Inline editor for one axis of the EXT shift, opened from the OFFSETS page's
+/// EXT card. Separate from [`DroEdit`] because it writes a different command:
+/// the value here is the shift itself, not a position.
+#[derive(Clone, Debug, Default)]
+pub struct ExtEdit {
+    pub axis: String,
+    pub buffer: String,
+    /// Put the keyboard in the field on the next frame.
+    pub focus: bool,
+}
+
+/// The widget id of that field, kept apart from the WCS one so a page that
+/// closes one edit cannot surrender the other's focus.
+pub const EXT_FIELD_ID: &str = "linc-ext-dro";
+
 pub struct OffsetsUi {
     pub selected: u8,
     /// Selected cell, the way the tool table tracks it: row is the index into
@@ -1890,7 +1906,8 @@ pub struct OffsetsUi {
     pub selected_row: usize,
     pub selected_column: usize,
     pub rows: HashMap<u8, OffsetDraft>,
-    pub g92: Vec<String>,
+    /// The EXT axis field being typed in, if any.
+    pub ext_edit: Option<ExtEdit>,
     pub editing: bool,
     pub edit_buffer: String,
     /// The cell editor was just opened: select its whole contents on the next
@@ -1920,7 +1937,7 @@ impl Default for OffsetsUi {
             selected_row: 0,
             selected_column: 1,
             rows: HashMap::new(),
-            g92: Vec::new(),
+            ext_edit: None,
             edit_buffer: String::new(),
             editing: false,
             edit_focus: false,
@@ -3028,6 +3045,12 @@ pub struct Keymap {
     pub files_delete: Binding,
     pub tools: Binding,
     pub offsets: Binding,
+    /// Page-local to OFFSETS: edit that axis's EXT card in place.
+    pub ext_edit_x: Binding,
+    pub ext_edit_y: Binding,
+    pub ext_edit_z: Binding,
+    /// Page-local to OFFSETS: clear the EXT shift on every axis.
+    pub offset_ext_zero: Binding,
     /// Page-local to Tools: type a tool number and load it, as bare `T` loads
     /// the selected row.
     pub tool_number: Binding,
@@ -3205,6 +3228,14 @@ impl Keymap {
             ),
             tools: binding(&keys.tools, Binding::new(Key::F7, none), &mut rejected),
             offsets: binding(&keys.offsets, Binding::new(Key::F8, none), &mut rejected),
+            ext_edit_x: binding(&keys.ext_edit_x, Binding::new(Key::X, ctrl), &mut rejected),
+            ext_edit_y: binding(&keys.ext_edit_y, Binding::new(Key::Y, ctrl), &mut rejected),
+            ext_edit_z: binding(&keys.ext_edit_z, Binding::new(Key::Z, ctrl), &mut rejected),
+            offset_ext_zero: binding(
+                &keys.offset_ext_zero,
+                Binding::new(Key::Num0, none),
+                &mut rejected,
+            ),
             tool_number: binding(&keys.tool_number, Binding::new(Key::T, ctrl), &mut rejected),
             limit_recovery: binding(
                 &keys.limit_recovery,
@@ -3402,6 +3433,23 @@ mod jog_increment_tests {
 #[cfg(test)]
 mod keymap_tests {
     use super::*;
+
+    #[test]
+    #[test]
+    fn the_ext_keys_parse_as_the_documented_chords() {
+        // One chord per EXT card, so the digits stay free for typing; the bare
+        // `0` clears every axis.
+        let ctrl_x = Binding::parse("Ctrl+X").expect("ctrl+x");
+        assert_eq!(ctrl_x.key, egui::Key::X);
+        assert!(ctrl_x.modifiers.ctrl);
+        let ctrl_z = Binding::parse("Ctrl+Z").expect("ctrl+z");
+        assert_eq!(ctrl_z.key, egui::Key::Z);
+        assert!(ctrl_z.modifiers.ctrl);
+        assert_eq!(
+            Binding::parse("0"),
+            Some(Binding::new(egui::Key::Num0, egui::Modifiers::NONE))
+        );
+    }
 
     #[test]
     fn parses_the_documented_binding_forms() {

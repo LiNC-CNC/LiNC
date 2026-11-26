@@ -76,10 +76,11 @@ impl LincApp {
     /// and never synthesize the chord for any other page. Refresh (Ctrl+R) and
     /// redo (Ctrl+Y) never need this because they are not clipboard shortcuts.
     pub(super) fn hand_cut_to_page(&mut self, ui: &egui::Ui) {
-        // Only the Probe page binds Ctrl+X. Every other page keeps the
-        // clipboard event, so Ctrl+X stays a text-editing chord there and the
-        // Files page's delete is Backspace.
-        if self.nav.page != Page::Probe {
+        // Two pages bind Ctrl+X as a command: the Probe page's X data reset and
+        // the Offsets page's EXT X card. Every other page keeps the clipboard
+        // event, so Ctrl+X stays a text-editing chord there and the Files page's
+        // delete is Backspace.
+        if !matches!(self.nav.page, Page::Probe | Page::Offsets) {
             return;
         }
         if ui.ctx().text_edit_focused() || self.overlay_open() {
@@ -101,7 +102,11 @@ impl LincApp {
                 physical_key: None,
                 pressed: true,
                 repeat: false,
-                modifiers: CUT_SHORTCUT.modifiers,
+                // `command` as well as `ctrl`: a binding parsed from `Ctrl+X`
+                // carries both, and `matches_logically` requires the event to
+                // have every modifier the pattern asks for. The Probe page's
+                // constant binding takes either.
+                modifiers: CUT_SHORTCUT.modifiers | egui::Modifiers::COMMAND,
             });
         });
     }

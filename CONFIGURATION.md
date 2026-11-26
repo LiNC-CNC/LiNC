@@ -793,7 +793,7 @@ The bindings do not change: the panel's navigation keys already send `F5` to
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `save_preamble`, `save_postamble` |
 | `[toolpath]` | `show_grid`, `show_live_trail`, `trail_max_points`, `clear_trail_action`, `show_program_bounds`, `show_machine_bounds`, `show_stock`, `stock_alpha`, `bounds_mode` (preference), `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `tool_number`, `spindle_speed_up`, `spindle_speed_down`, `spindle_speed`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds`, `remaining`, `toggle_lathe_mirror`, `toggle_lathe_diameter`, `limit_recovery`, `fault_next`, `fault_prev` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `ext_edit_x`, `ext_edit_y`, `ext_edit_z`, `offset_ext_zero`, `tool_number`, `spindle_speed_up`, `spindle_speed_down`, `spindle_speed`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds`, `remaining`, `toggle_lathe_mirror`, `toggle_lathe_diameter`, `limit_recovery`, `fault_next`, `fault_prev` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_execution`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |
@@ -1092,6 +1092,15 @@ Page-local to the TOOLS page, like the bare `T` row load.
 | Key | Default | Meaning |
 |---|---|---|
 | `tool_number` | `Ctrl+T` | Open the typed tool-number dialog, prefilled with the tool in the spindle. `Enter` loads it, `Esc` cancels. It accepts a tool number the table carries or `0` (empty spindle, no length compensation) and issues the same `LoadTool` (`Tn M6` + `G43 Hn`) as `T`; a refused number keeps the dialog open with the reason. |
+
+Page-local to the OFFSETS page: the global EXT shift (`G92`).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `ext_edit_x` | `Ctrl+X` | Edit the `EXT X` card in place. `Enter` commits the offset value, `Esc` discards the draft. The arrows and Home/End stay with the caret. |
+| `ext_edit_y` | `Ctrl+Y` | The same for `EXT Y`. |
+| `ext_edit_z` | `Ctrl+Z` | The same for `EXT Z`. |
+| `offset_ext_zero` | `0` | Clear the EXT shift on every axis (`G92.1`). A `0` typed inside a field commits that one axis at zero instead. |
 
 The chord stays off bare `T`: `T` loads the selected row, `Ctrl+T` types a
 number. `consume_key` matches the modifiers exactly and the row load takes its

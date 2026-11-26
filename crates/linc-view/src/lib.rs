@@ -670,6 +670,64 @@ pub fn arc_points(segment: &PathSegment, arc: &ArcSpec) -> Vec<[f64; 3]> {
 /// stable view must hand it the same box every frame. A fit is therefore a
 /// zoom/pan adjustment on top of that box, not a different box: changing the box
 /// is what made loading a program rescale the view and move the markers.
+/// The box the axis indicator occupies in the card's top-right corner, measured
+/// from that corner. Wider than the arms because the axis letters sit outside
+/// them, and tall enough for a letter parked below an arm pointing at the viewer.
+pub const TRIAD_BAND: Vec2 = Vec2::new(92.0, 80.0);
+
+/// Push a fit left so the part clears the axis indicator.
+///
+/// The fit frames the whole card, so a wide part in ISO or a tall one in a side
+/// view reaches into the corner the indicator is painted in. The zoom is left
+/// alone — shrinking the part to make room is a larger change than the overlap
+/// needs — and the picture moves left by the overlap instead. Nothing moves when
+/// the part does not reach the band: the indicator owns a corner, not a margin.
+#[allow(clippy::too_many_arguments)]
+fn clear_of_axis_triad(
+    reference: Bounds3,
+    target: Bounds3,
+    rect: Rect,
+    mode: ViewMode,
+    yaw: f32,
+    pitch: f32,
+    mirror_x: bool,
+    zoom: f32,
+    pan: Vec2,
+) -> Vec2 {
+    let projection =
+        Projection::new(reference, rect, mode, yaw, pitch, zoom, pan).mirrored(mirror_x);
+    let mut max_x = f32::NEG_INFINITY;
+    let mut min_y = f32::INFINITY;
+    for corner in 0..8 {
+        let point = [
+            if corner & 1 == 0 {
+                target.min[0]
+            } else {
+                target.max[0]
+            },
+            if corner & 2 == 0 {
+                target.min[1]
+            } else {
+                target.max[1]
+            },
+            if corner & 4 == 0 {
+                target.min[2]
+            } else {
+                target.max[2]
+            },
+        ];
+        let pos = projection.project(point);
+        max_x = max_x.max(pos.x);
+        min_y = min_y.min(pos.y);
+    }
+    let triad_left = rect.right() - TRIAD_BAND.x;
+    let triad_bottom = rect.top() + TRIAD_BAND.y;
+    if max_x <= triad_left || min_y >= triad_bottom {
+        return pan;
+    }
+    pan - Vec2::new(max_x - triad_left, 0.0)
+}
+
 fn fit_zoom_pan(
     reference: Bounds3,
     target: Bounds3,
@@ -1261,7 +1319,17 @@ pub fn draw_trajectory(ui: &mut Ui, view: &mut TrajectoryView<'_>) -> Response {
             view.mirror_x,
         );
         view.zoom = zoom;
-        view.pan = pan;
+        view.pan = clear_of_axis_triad(
+            reference,
+            target_bounds,
+            rect,
+            view.view,
+            view.yaw,
+            view.pitch,
+            view.mirror_x,
+            zoom,
+            pan,
+        );
     }
     // Keep the tool on the card while it moves. At a zoomed or panned view a jog
     // otherwise walks the head off the picture with nothing to show where it
@@ -3610,6 +3678,76 @@ mod tests {
                 ];
                 let pos = projection.project(point);
                 assert!(rect.contains(pos), "{mode:?}: {pos:?} outside {rect:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_fit_keeps_the_part_clear_of_the_axis_triad() {
+        // The indicator is painted into the card's top-right corner, not laid
+        // out beside the picture, so a fit that used the whole card put a wide
+        // part under it. The fit pushes the picture left by the overlap; the
+        // zoom is left alone.
+        let machine = Bounds3 {
+            min: [-500.0, -320.0, -250.0],
+            max: [0.0, 0.0, 0.0],
+        };
+        let program = Bounds3 {
+            min: [-300.0, -200.0, -40.0],
+            max: [-60.0, -40.0, 10.0],
+        };
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0));
+        for mode in [
+            ViewMode::Iso3d,
+            ViewMode::SideYz,
+            ViewMode::SideXz,
+            ViewMode::TopXy,
+        ] {
+            let (zoom, pan) = fit_zoom_pan(
+                machine,
+                program,
+                rect.shrink(12.0),
+                mode,
+                DEFAULT_YAW,
+                DEFAULT_PITCH,
+                false,
+            );
+            let pan = clear_of_axis_triad(
+                machine,
+                program,
+                rect,
+                mode,
+                DEFAULT_YAW,
+                DEFAULT_PITCH,
+                false,
+                zoom,
+                pan,
+            );
+            let projection =
+                Projection::new(machine, rect, mode, DEFAULT_YAW, DEFAULT_PITCH, zoom, pan);
+            let triad_left = rect.right() - TRIAD_BAND.x;
+            let triad_bottom = rect.top() + TRIAD_BAND.y;
+            for corner in 0..8 {
+                let point = [
+                    if corner & 1 == 0 {
+                        program.min[0]
+                    } else {
+                        program.max[0]
+                    },
+                    if corner & 2 == 0 {
+                        program.min[1]
+                    } else {
+                        program.max[1]
+                    },
+                    if corner & 4 == 0 {
+                        program.min[2]
+                    } else {
+                        program.max[2]
+                    },
+                ];
+                let pos = projection.project(point);
+                let in_band = pos.x > triad_left && pos.y < triad_bottom;
+                assert!(!in_band, "{mode:?}: {pos:?} sits under the axis indicator");
             }
         }
     }
