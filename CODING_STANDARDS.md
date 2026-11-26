@@ -27,6 +27,13 @@ traps. This file states the conditions that decide whether a change is correct.
   mode and alive in the other.
 - A gate pin must accept the bit its producer publishes. A type mismatch leaves
   the gate permanently false and looks like a logic bug at the consumer.
+- A HAL change is made in the file the machine profile resolves, not in the
+  file of the same purpose under `hal/`. A profile names its own HAL files, and a
+  machine's post-GUI file can come from another repository entirely, so a change
+  to the repository's copy is unverified until that profile is read and its
+  installed file is changed. Confirm the result on the restarted machine's pins,
+  never on the repository's nets. See
+  `docs/solutions/integration-issues/hal-edit-reaches-the-machine-through-its-profile.md`.
 - Wire `linc.*` nets only in the post-GUI HAL files. A pre-GUI net on a pin that
   does not exist yet fails at load, and the failure names the pin, not the file.
 
