@@ -1954,6 +1954,28 @@ pub struct DrawnTrajectory {
     pub span_mm: f32,
 }
 
+/// What a toolpath card draws besides the program path itself. Kept as named
+/// fields rather than a run of positional booleans: the flags are easy to
+/// transpose at a call site and a new one silently shifts every later meaning.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TrajectoryLayers {
+    /// Legends name the colours; a thumbnail too small to read them omits it.
+    pub show_legend: bool,
+    /// Frame the tool tip, trail and origin markers as well as the program.
+    pub fit_all: bool,
+    /// Frame the program and the live tool head, and nothing else. The manual
+    /// views want the part and the head together without the trail.
+    pub fit_tool: bool,
+    /// Draw the machine-origin triad and the line to the work origin.
+    pub origin_tether: bool,
+    /// Keep the machine envelope on regardless of the Ctrl+B cycle.
+    pub machine_bounds_always: bool,
+    /// Draw the machine's own layer: the live trail, the tool head and the line
+    /// the interpreter is on. The prepared document's path is drawn without it -
+    /// it is a file, not the run - and REMAINING has nothing to eat there.
+    pub live: bool,
+}
+
 pub fn trajectory(
     app: &LincApp,
     ui: &mut Ui,
@@ -1968,21 +1990,7 @@ pub fn trajectory(
     auto_fit: &mut bool,
     selected_line: Option<usize>,
     current_line: Option<usize>,
-    // Legends name the colours; a thumbnail too small to read them omits it.
-    show_legend: bool,
-    // Frame the tool tip, trail and origin markers as well as the program.
-    fit_all: bool,
-    // Frame the program and the live tool head, and nothing else. The manual
-    // views want the part and the head together without the trail.
-    fit_tool: bool,
-    // Draw the machine-origin triad and the line to the work origin.
-    origin_tether: bool,
-    // Keep the machine envelope on regardless of the Ctrl+B cycle.
-    machine_bounds_always: bool,
-    // Draw the machine's own layer: the live trail, the tool head and the line
-    // the interpreter is on. The prepared document's path is drawn without it -
-    // it is a file, not the run - and REMAINING has nothing to eat there.
-    live: bool,
+    layers: TrajectoryLayers,
     // A second origin marker, in the current-line colour: the OFFSETS page
     // highlights the row being edited without moving the active cross.
     highlight: Option<([f64; 3], String)>,
@@ -2018,10 +2026,10 @@ pub fn trajectory(
     view.pitch = *pitch;
     view.fit = *fit;
     view.auto_fit = *auto_fit;
-    view.fit_all = fit_all;
-    view.fit_tool = fit_tool;
-    view.origin_tether = origin_tether;
-    view.machine_bounds_always = machine_bounds_always;
+    view.fit_all = layers.fit_all;
+    view.fit_tool = layers.fit_tool;
+    view.origin_tether = layers.origin_tether;
+    view.machine_bounds_always = layers.machine_bounds_always;
     view.selected_line = selected_line;
     view.current_line = current_line;
     view.axis_labels = app.axes();
@@ -2032,7 +2040,7 @@ pub fn trajectory(
         current_line,
         eaten_through(&app.graph_style, &app.snapshot.program),
     );
-    if !live {
+    if !layers.live {
         view.show_live_trail = false;
         view.tool_tip = None;
         view.current_line = None;
@@ -2045,7 +2053,7 @@ pub fn trajectory(
     // so every card that draws a trail is correct in the frame it is drawn.
     view.live_trail_shift =
         crate::state::live_trail_shift(&app.snapshot, app.program.loaded().preview_offset.as_ref());
-    view.show_legend = view.show_legend && show_legend;
+    view.show_legend = view.show_legend && layers.show_legend;
     let response = draw_trajectory(ui, &mut view);
     // A click on the card hands it the keyboard. The shell's pan chords are
     // hover-scoped *and* behind "no text field is focused" — Ctrl+Left/Right is
@@ -2488,13 +2496,12 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32, legend:
             &mut auto_fit,
             None,
             current_line,
-            false,
-            // Frame the program and the live tool head together.
-            false,
-            true,
-            true,
-            false,
-            false,
+            TrajectoryLayers {
+                // Frame the program and the live tool head together.
+                fit_tool: true,
+                origin_tether: true,
+                ..TrajectoryLayers::default()
+            },
             None,
         );
         toolpath_status(ui, header, view.label(), drawn.span_mm, None);

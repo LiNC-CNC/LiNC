@@ -484,8 +484,10 @@ impl LincApp {
         if page == Page::Help {
             self.help.ensure_loaded();
         }
-        if page == Page::Program && self.program.view == ProgramView::Code && self.editing_allowed()
-        {
+        // The editor is the Program page's keyboard owner whenever it is
+        // editable, in Split as much as in Code. Returning from another page
+        // must not leave the operator on a dead keyboard.
+        if page == Page::Program && self.editing_allowed() {
             self.program.focus_editor = true;
         }
         if page == Page::Machine {

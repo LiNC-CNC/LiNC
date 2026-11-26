@@ -5996,7 +5996,23 @@ impl UiBackend for RecordingBackend {
         if self.deferred.get() {
             return Ok(());
         }
-        linc_core::backend::MachineBackend::send(&mut self.inner, command)
+        let label = command.label();
+        let prepared_write = matches!(
+            command,
+            MachineCommand::LoadPreparedProgram { .. } | MachineCommand::SaveProgramFile { .. }
+        );
+        let outcome = linc_core::backend::MachineBackend::send(&mut self.inner, command);
+        if prepared_write && outcome.is_ok() {
+            self.events.borrow_mut().push_back(BackendEvent::Command(
+                linc_core::command::CommandResult {
+                    id: 0,
+                    command: label.to_string(),
+                    result: Ok(()),
+                    timestamp_ms: 0,
+                },
+            ));
+        }
+        outcome
     }
 
     fn drain_events(&mut self) -> Vec<BackendEvent> {
@@ -10143,6 +10159,176 @@ fn preparing_a_file_puts_the_keyboard_in_the_editor() {
     );
 }
 
+/// Leaving the Program page for MAIN and coming back must return the keyboard
+/// to the prepared editor, in Split as well as in Code.
+#[test]
+fn returning_to_the_program_page_restores_the_prepared_editors_focus() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness.draw_program_page();
+
+    harness.app.set_page(Page::Machine);
+    harness.app.set_page(Page::Program);
+    harness.draw_program_page();
+
+    assert!(
+        harness
+            .ctx
+            .memory(|memory| memory.has_focus(egui::Id::unique("linc-program-editor"))),
+        "the prepared editor holds the keyboard again"
+    );
+}
+
+/// The loaded document keeps its own preview while the prepared file is in
+/// front, and an offset the controller moves still reaches it. The Machine
+/// page draws that preview, so a stale one puts the tool marker at home.
+#[test]
+fn a_stale_loaded_preview_is_refreshed_behind_the_prepared_document() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    let loaded_generation = harness.app.program.loaded().preview_generation;
+    let revision = harness.app.program.loaded().preview_offsets_seen + 1;
+    harness.app.snapshot.offsets.revision = revision;
+
+    harness.app.refresh_stale_previews();
+
+    assert_eq!(
+        harness.app.program.loaded().preview_offsets_seen,
+        revision,
+        "the loaded preview followed the controller's offset revision"
+    );
+    assert_ne!(
+        harness.app.program.loaded().preview_generation,
+        loaded_generation,
+        "the loaded preview was rebuilt while the prepared file was in front"
+    );
+}
+
+/// The handoff opens a program, so it passes the same gate as LOAD. A buffer
+/// only the interpreter would refuse must never become the controller's
+/// program with the interlock open.
+#[test]
+fn a_handoff_the_load_gate_would_refuse_is_not_sent() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "broken.ngc", "G0 X0 Y0\nG1 X\nM2\n");
+    harness.sent.borrow_mut().clear();
+
+    harness.app.handoff_prepared();
+
+    assert!(
+        !harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::LoadPreparedProgram { .. })),
+        "the refused buffer reached the controller: {:?}",
+        harness.sent_debug()
+    );
+    assert!(
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text.contains("NOT HANDED OFF")),
+        "the reason names the gate: {:?}",
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .map(|toast| &toast.text)
+            .collect::<Vec<_>>()
+    );
+    assert!(harness.app.program.prepared.is_some(), "the buffer stays");
+    assert!(!harness.app.program.pending_handoff);
+}
+
+/// Closing the prepared file must not leave the shared editor's caret on the
+/// loaded program: the loaded document keeps its own line.
+#[test]
+fn closing_the_prepared_file_seeds_the_loaded_documents_caret() {
+    let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nG1 X1\nG1 X2\nM2\n");
+    harness.app.program.loaded_mut().selected_line = 3;
+    prepare_file(&mut harness, "next.ngc", "G0 X7\nM2\n");
+    harness.app.program.prepared.as_mut().unwrap().selected_line = 1;
+
+    harness.app.close_prepared();
+
+    assert_eq!(harness.app.program.front, DocumentFront::Loaded);
+    assert_eq!(
+        harness.app.program.loaded().cursor_line,
+        Some(3),
+        "the caret returns to where the loaded program was"
+    );
+    assert_eq!(harness.app.program.loaded().selected_line, 3);
+}
+
+/// A LOAD the gate refuses lands in the loaded document, so that document must
+/// come to the front: the faults and the interlock belong to what is shown.
+#[test]
+fn a_refused_load_brings_the_loaded_document_forward() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    let broken = harness._dir.path().join("gcode").join("broken.ngc");
+    std::fs::write(&broken, "G0 X0 Y0\nG1 X\nM2\n").unwrap();
+
+    harness.app.load_program(broken.clone());
+
+    assert_eq!(harness.app.program.front, DocumentFront::Loaded);
+    assert_eq!(
+        harness.app.program.loaded().path.as_deref(),
+        Some(broken.as_path())
+    );
+    assert!(harness.app.program.prepared.is_some(), "the buffer is kept");
+}
+
+/// With no prepared document there is nothing for Ctrl+W to close: it must not
+/// open the discard question, leave the page, or consume a prepared action.
+/// (The chord is then the editor's own; the shell no longer takes it.)
+#[test]
+fn ctrl_w_without_a_prepared_file_takes_no_prepared_action() {
+    let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+    load_clean_and_show(&mut harness, "G0 X1\nM2\n");
+    harness.app.set_page(Page::Program);
+    harness.app.program.focus_editor = true;
+    harness.draw_program_page();
+    let before = harness.app.program.loaded().editor.text();
+    harness
+        .app
+        .program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X1\nM2\nG0 X2\n".into());
+    harness.sent.borrow_mut().clear();
+
+    harness.frame_with(&[(egui::Key::W, ctrl())]);
+
+    assert!(harness.app.program.prepared.is_none());
+    assert!(
+        !matches!(
+            harness.app.overlay.modal,
+            Some(Modal::ConfirmDiscard(PendingAction::ClosePrepared))
+        ),
+        "no prepared document, so no close question"
+    );
+    assert_eq!(harness.app.nav.page, Page::Program);
+    assert!(
+        harness.sent.borrow().is_empty(),
+        "the chord reaches no controller: {:?}",
+        harness.sent_debug()
+    );
+    // The text is untouched by the shell; whatever the editor does with the
+    // chord is its own business (the harness does not route ctrl chords to the
+    // widget).
+    assert_ne!(harness.app.program.loaded().editor.text(), before);
+}
+
 /// The handoff is one command that carries the buffer's text; the accepted
 /// result makes the prepared document the loaded one and the editor follows it.
 #[test]
@@ -10161,6 +10347,7 @@ fn handoff_writes_the_prepared_buffer_and_makes_it_the_loaded_program() {
     harness.sent.borrow_mut().clear();
 
     harness.app.handoff_prepared();
+    harness.app.poll_backend();
 
     let sent = harness.sent.borrow();
     assert_eq!(sent.len(), 1, "{:?}", harness.sent_debug());
@@ -10384,6 +10571,7 @@ fn load_of_the_prepared_file_is_the_handoff() {
     harness.sent.borrow_mut().clear();
 
     harness.app.request_load(prepared.clone());
+    harness.app.poll_backend();
 
     let sent = harness.sent.borrow();
     assert!(
@@ -10649,6 +10837,7 @@ fn save_on_a_question_about_the_loaded_buffer_writes_the_loaded_file() {
 
     harness.sent.borrow_mut().clear();
     harness.click_at(save);
+    harness.app.poll_backend();
 
     assert!(
         harness.sent.borrow().iter().any(|command| matches!(

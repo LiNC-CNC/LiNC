@@ -156,26 +156,8 @@ impl LincApp {
         // The same rules LOAD applies, so any caller of this public entry point
         // gets them: a configured G-code extension, a file under NC_FILES, and
         // never the program the controller holds.
-        let extension = path
-            .extension()
-            .map(|extension| format!(".{}", extension.to_string_lossy().to_ascii_lowercase()))
-            .unwrap_or_default();
-        if !self
-            .profile
-            .config
-            .files
-            .load_extensions
-            .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(&extension))
-        {
-            self.toast(
-                format!("not a configured G-code extension: {extension}"),
-                theme::ERROR,
-            );
-            return;
-        }
-        if !path.starts_with(self.profile.nc_files_root()) {
-            self.toast("file is outside NC_FILES", theme::ERROR);
+        if let Some(reason) = crate::screens::files::program_file_refusal(self, &path) {
+            self.toast(reason, theme::ERROR);
             return;
         }
         if self
@@ -249,6 +231,13 @@ impl LincApp {
             return;
         }
         self.program.front = DocumentFront::Loaded;
+        // Both documents share one editor id, so the caret the prepared file
+        // left would be read back into the loaded document on the next frame.
+        // Reseed it from the loaded document's own selection.
+        let line = self.program.loaded().selected_line.max(1);
+        let loaded = self.program.loaded_mut();
+        loaded.cursor_line = Some(line);
+        loaded.code_scroll_to_line = Some(line);
         self.refit_after_document_change();
         // The loaded document's preview stayed current while the prepared file
         // was in front, so re-parsing it here would only reset the run's
@@ -348,21 +337,34 @@ impl LincApp {
             // Unreadable is the backend's error to report, with its own words.
             return None;
         };
-        if let Some(issue) = linc_core::lint::lint_program(&text).into_iter().next() {
+        self.syntax_refusal_text(&text, true)
+    }
+
+    /// The text half of the load gate, so a prepared buffer is checked before
+    /// it becomes the controller's program. `store_check` is true for a load,
+    /// whose refusal is the loaded document's verdict; a handoff refusal keeps
+    /// the verdict of the program the controller still holds.
+    fn syntax_refusal_text(&mut self, text: &str, store_check: bool) -> Option<String> {
+        if !self.profile.config.program.block_run_on_syntax_error {
+            return None;
+        }
+        if let Some(issue) = linc_core::lint::lint_program(text).into_iter().next() {
             return Some(format!("NOT LOADED  LN {}: {}", issue.line, issue.message));
         }
         // The block checks are not the whole story: the preview's own fatal fault
         // is a semantic one (`arc missing valid I/J/K or R`, a polar word against
         // the wrong plane, a G76 in the wrong plane) that no single block decides.
         let axes = self.axes();
-        let preview = linc_core::gcode::parse_preview(&text, &axes, None, self.tool_tip());
+        let preview = linc_core::gcode::parse_preview(text, &axes, None, self.tool_tip());
         if let Some(error) = &preview.error {
             return Some(format!("NOT LOADED  LN {}: {}", error.line, error.message));
         }
-        let Some(check) = self.controller_check(&text) else {
+        let Some(check) = self.controller_check(text) else {
             return None;
         };
-        self.program.machine_check = Some(check.clone());
+        if store_check {
+            self.program.machine_check = Some(check.clone());
+        }
         match check.outcome {
             linc_core::verify::CheckOutcome::Refused => {
                 let place = match check.line {
@@ -412,6 +414,11 @@ impl LincApp {
             loaded.cursor_line = Some(line);
             loaded.code_scroll_to_line = Some(line);
         }
+        // The refused file is in the loaded document, so bring that document
+        // to the front: the faults and the interlock belong to the buffer the
+        // editor is showing, not to the prepared file it replaced on screen.
+        self.program.front = DocumentFront::Loaded;
+        self.refit_after_document_change();
         self.set_page(Page::Program);
         self.toast_for(reason, theme::ERROR, 12);
         self.sync_program_ok();
@@ -451,6 +458,7 @@ impl LincApp {
         // of a file that is no longer loaded, and leaving it highlighted made
         // the graph and the gutter point at the wrong block.
         self.program.loaded_mut().selected_line = 1;
+        self.program.loaded_mut().cursor_line = Some(1);
         self.program.loaded_mut().code_scroll_to_line = Some(1);
         self.program.completed_at = None;
         self.set_page(Page::Program);
@@ -495,6 +503,14 @@ impl LincApp {
         };
         let content = prepared.editor.text();
         let was_dirty = prepared.editor.dirty;
+        // The handoff opens a program just as LOAD does, so it must pass the
+        // same gate. The check stays local: the loaded document still holds
+        // the controller's program until the handoff lands.
+        if let Some(refusal) = self.syntax_refusal_text(&content, false) {
+            let reason = refusal.replacen("NOT LOADED", "NOT HANDED OFF", 1);
+            self.toast(reason, theme::ERROR);
+            return;
+        }
         self.program.pending_handoff = true;
         self.program.handoff_was_dirty = was_dirty;
         self.program.handoff_sent = Some((path.clone(), content.clone()));
@@ -504,11 +520,7 @@ impl LincApp {
         };
         if self.try_send(command) {
             if self.program.pending_handoff {
-                if self.handoff_landed(&path, &content) {
-                    // A synchronous backend has already opened it; there is no
-                    // result event to wait for.
-                    self.commit_handoff();
-                } else if let Some(prepared) = self.program.prepared.as_mut() {
+                if let Some(prepared) = self.program.prepared.as_mut() {
                     prepared.editor.dirty = false;
                 }
             }
@@ -518,21 +530,6 @@ impl LincApp {
             self.program.pending_handoff = false;
             self.program.handoff_sent = None;
         }
-    }
-
-    /// Whether the controller already reports the handed-off file as its
-    /// program, which is how a synchronous backend confirms the handoff.
-    fn handoff_landed(&self, path: &Path, content: &str) -> bool {
-        let program = &self.snapshot.program;
-        !program.running
-            && program
-                .path
-                .as_deref()
-                .is_some_and(|loaded| crate::screens::files::same_file(loaded, path))
-            && program
-                .content
-                .as_ref()
-                .is_some_and(|text| text.as_str() == content)
     }
 
     /// The backend accepted the handoff: the prepared document is now the
@@ -677,16 +674,10 @@ impl LincApp {
             return;
         }
         // The write was accepted. The marker goes with the acceptance and an
-        // error result puts it back. A synchronous backend sends no result
-        // event, so its answer is the file itself; this runs once per operator
-        // save, not per frame.
+        // error result puts it back; success arrives as the backend's command
+        // result, the same path the worker takes.
         if let Some(prepared) = self.program.prepared.as_mut() {
             prepared.editor.dirty = false;
-        }
-        if std::fs::read_to_string(&path).is_ok_and(|written| written == content) {
-            self.commit_prepared_save();
-        } else {
-            self.toast("save queued", theme::ACCENT);
         }
     }
 

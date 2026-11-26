@@ -445,7 +445,24 @@ fn spindle_for_trim(
 /// prepared document is written while the machine runs and in any valid panel
 /// mode. The panel still has to be live and its mode valid, and protect has to
 /// be known off - an unknown protect state counts as on.
-pub fn check_program_file_write(snapshot: &MachineSnapshot) -> Result<(), MachineError> {
+///
+/// While the task runs, a write under one of the machine's `SUBROUTINE_PATH`
+/// directories is refused: the interpreter reopens a subroutine file at the
+/// moment an `o<name> call` executes, so replacing one would change the text
+/// AUTO runs without touching the loaded program's own file.
+pub fn check_program_file_write(
+    snapshot: &MachineSnapshot,
+    target: &Path,
+    subroutine_paths: &[PathBuf],
+) -> Result<(), MachineError> {
+    check_program_file_panel(snapshot)?;
+    if snapshot.task.running && path_is_under_any(target, subroutine_paths) {
+        return Err(MachineError::SubroutineInUse);
+    }
+    Ok(())
+}
+
+fn check_program_file_panel(snapshot: &MachineSnapshot) -> Result<(), MachineError> {
     if !snapshot.panel.connected || snapshot.panel.communication_error {
         return Err(MachineError::PanelOffline);
     }
@@ -461,7 +478,7 @@ pub fn check_program_file_write(snapshot: &MachineSnapshot) -> Result<(), Machin
 /// Rules for handing the prepared program to the controller: the prepared
 /// write's gate plus an interpreter that is idle and not running.
 pub fn check_prepared_handoff(snapshot: &MachineSnapshot) -> Result<(), MachineError> {
-    check_program_file_write(snapshot)?;
+    check_program_file_panel(snapshot)?;
     if snapshot.task.running {
         return Err(MachineError::ProgramRunning);
     }
@@ -469,6 +486,20 @@ pub fn check_prepared_handoff(snapshot: &MachineSnapshot) -> Result<(), MachineE
         return Err(MachineError::NotIdle);
     }
     Ok(())
+}
+
+/// Whether `target` resolves under one of the configured subroutine
+/// directories. A directory that does not resolve is compared as written; a
+/// target that does not exist is resolved through its parent, so the check
+/// works before the file is created.
+fn path_is_under_any(target: &Path, dirs: &[PathBuf]) -> bool {
+    let Some(target) = resolved_for_compare(target) else {
+        return false;
+    };
+    dirs.iter().any(|dir| {
+        let dir = resolved_for_compare(dir).unwrap_or_else(|| dir.clone());
+        target.starts_with(&dir)
+    })
 }
 
 /// Replace `canonical` with `content` in one step: a sibling temporary file,
@@ -502,25 +533,30 @@ pub fn check_write_target_not_loaded(
     let Some(loaded) = snapshot.program.path.as_deref() else {
         return Ok(());
     };
-    let target = resolved_for_compare(target);
-    let loaded = resolved_for_compare(loaded);
-    let same = match (target, loaded) {
-        (Some(target), Some(loaded)) => target == loaded,
-        // A file the controller holds can be gone from disk while the
-        // interpreter still runs it. Compare the names it would be recreated
-        // under rather than letting an unresolvable path pass.
-        (target, loaded) => match (
-            lexical_absolute(target.as_deref()),
-            lexical_absolute(loaded.as_deref()),
-        ) {
-            (Some(target), Some(loaded)) => target == loaded,
-            _ => false,
-        },
-    };
-    if same {
+    if same_program_file(target, loaded) {
         return Err(MachineError::LoadedProgramPath);
     }
     Ok(())
+}
+
+/// Whether two paths name the same program file.
+///
+/// Both sides go through the filesystem first, so a symlinked name or a path
+/// carrying a `..` parent component compares as the file it resolves to. A
+/// file the controller holds can be gone from disk while the interpreter still
+/// runs it, so an unresolvable pair compares through its lexical absolute
+/// form instead of passing.
+pub fn same_program_file(first: &Path, second: &Path) -> bool {
+    match (resolved_for_compare(first), resolved_for_compare(second)) {
+        (Some(first), Some(second)) => first == second,
+        (first, second) => match (
+            lexical_absolute(first.as_deref()),
+            lexical_absolute(second.as_deref()),
+        ) {
+            (Some(first), Some(second)) => first == second,
+            _ => false,
+        },
+    }
 }
 
 /// Resolve a path for comparison: the file itself when it exists, otherwise its
@@ -676,6 +712,8 @@ pub enum MachineError {
     NetworkBusy,
     #[error("path is outside NC_FILES or is not a regular file")]
     UnsafePath,
+    #[error("the write target is a subroutine the running program may call")]
+    SubroutineInUse,
     #[error("the write target is the program the controller has loaded")]
     LoadedProgramPath,
 }
@@ -718,6 +756,7 @@ impl MachineError {
             Self::RevisionConflict => "REVISION CONFLICT",
             Self::NetworkBusy => "NETWORK BUSY",
             Self::UnsafePath => "UNSAFE PATH",
+            Self::SubroutineInUse => "SUBROUTINE IN USE",
             Self::LoadedProgramPath => "LOADED PROGRAM",
         }
     }
@@ -833,17 +872,20 @@ mod tests {
         snapshot.panel.program_protect = false;
         snapshot.panel.program_protect_known = true;
 
-        assert_eq!(check_program_file_write(&snapshot), Ok(()));
+        assert_eq!(
+            check_program_file_write(&snapshot, Path::new("prep.ngc"), &[]),
+            Ok(())
+        );
 
         snapshot.panel.connected = false;
         assert_eq!(
-            check_program_file_write(&snapshot),
+            check_program_file_write(&snapshot, Path::new("prep.ngc"), &[]),
             Err(MachineError::PanelOffline)
         );
         snapshot.panel.connected = true;
         snapshot.panel.communication_error = true;
         assert_eq!(
-            check_program_file_write(&snapshot),
+            check_program_file_write(&snapshot, Path::new("prep.ngc"), &[]),
             Err(MachineError::PanelOffline),
             "a stale panel is the same as no panel"
         );
@@ -851,22 +893,54 @@ mod tests {
 
         snapshot.panel.mode = PanelModeValidity::Unknown;
         assert_eq!(
-            check_program_file_write(&snapshot),
+            check_program_file_write(&snapshot, Path::new("prep.ngc"), &[]),
             Err(MachineError::InvalidPanelMode)
         );
         snapshot.panel.mode = PanelModeValidity::Valid(PanelMode::Auto);
 
         snapshot.panel.program_protect = true;
         assert_eq!(
-            check_program_file_write(&snapshot),
+            check_program_file_write(&snapshot, Path::new("prep.ngc"), &[]),
             Err(MachineError::ProgramProtected)
         );
         snapshot.panel.program_protect = false;
         snapshot.panel.program_protect_known = false;
         assert_eq!(
-            check_program_file_write(&snapshot),
+            check_program_file_write(&snapshot, Path::new("prep.ngc"), &[]),
             Err(MachineError::ProgramProtected),
             "an unknown protect state counts as on"
+        );
+    }
+
+    #[test]
+    fn a_prepared_write_keeps_off_a_subroutine_the_run_may_call() {
+        use crate::model::{MachineVariant, PanelMode, PanelModeValidity};
+        let dir = tempfile::tempdir().unwrap();
+        let subs = dir.path().join("subs");
+        std::fs::create_dir_all(&subs).unwrap();
+        let target = subs.join("probe.ngc");
+        let outside = dir.path().join("part.ngc");
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.panel.connected = true;
+        snapshot.panel.mode = PanelModeValidity::Valid(PanelMode::Auto);
+        snapshot.panel.program_protect = false;
+        snapshot.panel.program_protect_known = true;
+
+        // Idle: the interpreter is not holding a call open, so the write is
+        // allowed even under SUBROUTINE_PATH.
+        assert_eq!(
+            check_program_file_write(&snapshot, &target, std::slice::from_ref(&subs)),
+            Ok(())
+        );
+        snapshot.task.running = true;
+        assert_eq!(
+            check_program_file_write(&snapshot, &target, std::slice::from_ref(&subs)),
+            Err(MachineError::SubroutineInUse)
+        );
+        assert_eq!(
+            check_program_file_write(&snapshot, &outside, std::slice::from_ref(&subs)),
+            Ok(()),
+            "a part file outside the subroutine dirs is still writable mid-run"
         );
     }
 

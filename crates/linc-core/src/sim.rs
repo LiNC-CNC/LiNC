@@ -1453,7 +1453,11 @@ impl MachineBackend for SimBackend {
                 Ok(())
             }
             MachineCommand::SaveProgramFile { path, content } => {
-                crate::command::check_program_file_write(&self.snapshot)?;
+                crate::command::check_program_file_write(
+                    &self.snapshot,
+                    &path,
+                    &self.profile.machine_ini.subroutine_paths,
+                )?;
                 crate::command::check_write_target_not_loaded(&self.snapshot, &path)?;
                 let canonical = canonical_write_under(self.profile.nc_files_root(), &path)?;
                 crate::command::write_program_file(&canonical, &content)?;

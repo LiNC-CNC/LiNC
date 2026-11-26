@@ -441,12 +441,10 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
             &mut auto_fit,
             inputs.selected_line,
             inputs.current_line,
-            false,
-            false,
-            false,
-            false,
-            false,
-            inputs.live,
+            common::TrajectoryLayers {
+                live: inputs.live,
+                ..common::TrajectoryLayers::default()
+            },
             None,
         );
         if let Some(header) = header {
@@ -713,7 +711,8 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
             // machine. Cut to what the right group leaves rather than painted
             // over it.
             if let Some(readout) = crate::state::LoopReadout::current(
-                &app.program.doc().preview,
+                &app.program.loaded().preview,
+                app.program.loaded().preview_generation,
                 &app.program.loop_progress,
             ) {
                 let reserved = theme::measure(ui, &status, 9.0)

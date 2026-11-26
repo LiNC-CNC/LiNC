@@ -325,12 +325,13 @@ fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
         &mut auto_fit,
         None,
         None,
-        false,
-        true,
-        false,
-        true,
-        true,
-        true,
+        common::TrajectoryLayers {
+            fit_all: true,
+            origin_tether: true,
+            machine_bounds_always: true,
+            live: true,
+            ..common::TrajectoryLayers::default()
+        },
         highlight,
     );
     app.offsets.preview_zoom = zoom;

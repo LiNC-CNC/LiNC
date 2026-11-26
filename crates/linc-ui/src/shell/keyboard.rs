@@ -458,7 +458,7 @@ impl LincApp {
             // the same reason: Ctrl+N is a new tool row on TOOLS, and Ctrl+W
             // is a text chord. Consumed here, before any widget draws, so a
             // focused editor cannot take them.
-            if self.nav.page == Page::Program {
+            if self.nav.page == Page::Program && self.program.prepared.is_some() {
                 let k = &self.prefs.keymap;
                 if input.consume_key(k.prepared_close.modifiers, k.prepared_close.key) {
                     close_prepared = true;

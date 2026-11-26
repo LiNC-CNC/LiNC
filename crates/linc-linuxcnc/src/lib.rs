@@ -1565,7 +1565,11 @@ impl NmlBackend {
             }
             MachineCommand::SaveProgramFile { path, content } => {
                 let snapshot = self.refresh();
-                linc_core::command::check_program_file_write(&snapshot)?;
+                linc_core::command::check_program_file_write(
+                    &snapshot,
+                    &path,
+                    &self.profile.machine_ini.subroutine_paths,
+                )?;
                 linc_core::command::check_write_target_not_loaded(&snapshot, &path)?;
                 let canonical = contained_nc_write_target(self.profile.nc_files_root(), &path)
                     .ok_or(MachineError::UnsafePath)?;
@@ -2549,12 +2553,15 @@ fn contained_nc_file(root: &Path, requested: &Path) -> Option<PathBuf> {
 /// file and not a symlink: writing through a link would land wherever it points
 /// rather than in `NC_FILES`.
 fn contained_nc_write_target(root: &Path, requested: &Path) -> Option<PathBuf> {
-    let root = normalize_lexically(root);
-    let candidate = normalize_lexically(requested);
+    // Resolve the parent through the filesystem: a symlinked directory inside
+    // NC_FILES must not carry the write outside it. The file name is appended
+    // to that resolved parent, so a target that does not exist yet still
+    // compares against the directory it will land in.
+    let root = root.canonicalize().ok()?;
+    let parent = requested.parent()?.canonicalize().ok()?;
+    let name = requested.file_name()?;
+    let candidate = parent.join(name);
     if !candidate.starts_with(&root) || candidate == root {
-        return None;
-    }
-    if !candidate.parent()?.is_dir() {
         return None;
     }
     match std::fs::symlink_metadata(&candidate) {
@@ -2704,6 +2711,17 @@ mod nc_containment_tests {
         assert!(
             contained_nc_write_target(&root, &link).is_none(),
             "writing through a link would leave NC_FILES"
+        );
+
+        // A symlinked directory inside the root must not smuggle the write out.
+        let escape_dir = root.parent().unwrap().join("write-escape");
+        std::fs::create_dir_all(&escape_dir).unwrap();
+        let dir_link = root.join("write-linked-dir");
+        let _ = std::fs::remove_file(&dir_link);
+        std::os::unix::fs::symlink(&escape_dir, &dir_link).unwrap();
+        assert!(
+            contained_nc_write_target(&root, &dir_link.join("part.ngc")).is_none(),
+            "the parent resolves outside NC_FILES"
         );
     }
 }

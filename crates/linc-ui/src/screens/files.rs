@@ -1252,7 +1252,7 @@ fn prepare_selected(app: &mut LincApp, path: &Path) {
 /// Why Files will not act on `path` as a program: the extension must be one
 /// the profile loads and the file must sit under NC_FILES. LOAD and PREPARE
 /// share these two rules; only LOAD then asks the machine whether it is idle.
-fn program_file_refusal(app: &LincApp, path: &Path) -> Option<String> {
+pub(crate) fn program_file_refusal(app: &LincApp, path: &Path) -> Option<String> {
     let extension = path
         .extension()
         .map(|extension| format!(".{}", extension.to_string_lossy().to_ascii_lowercase()))
@@ -1273,13 +1273,10 @@ fn program_file_refusal(app: &LincApp, path: &Path) -> Option<String> {
     None
 }
 
-/// Whether two paths name the same file. The controller canonicalises what it
-/// opens, while the listing shows the path it walked.
+/// Whether two paths name the same file. One rule for the UI and both
+/// backends: the backend's resolution decides what the safety refusal means.
 pub(crate) fn same_file(first: &Path, second: &Path) -> bool {
-    match (std::fs::canonicalize(first), std::fs::canonicalize(second)) {
-        (Ok(first), Ok(second)) => first == second,
-        _ => first == second,
-    }
+    linc_core::command::same_program_file(first, second)
 }
 
 fn copy_nc_to_usb(app: &mut LincApp) {

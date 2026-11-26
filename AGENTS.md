@@ -197,7 +197,7 @@ had refused.
   green-tinted row. The line and block stay fed from the loaded document whatever the editor shows, and the row carries no control. The
   prepared file is named by the editor header (`PREPARING: <file>`), and the handoff is `Ctrl+N` or the sidebar's `LOAD PREP` row. While the prepared file is in front the graph, MODAL pane,
   fault list and estimate describe that file, and the live trail, tool head and executing-line marker are left off. Nothing on that surface
-  starts, pauses or resets a program, and a prepared write never touches the file the controller holds.
+  starts, pauses or resets a program, and a prepared write never touches the file the controller holds or, while a program runs, a file on its `SUBROUTINE_PATH`. The handoff passes the same syntax/controller gate as `LOAD`.
 - Use `theme` constants and the `SPEC.md §7` palette, not literals.
 - The program editor soft-wraps long lines at the editor width. The gutter paints
   one number at each logical line's first galley row, and the selection band covers

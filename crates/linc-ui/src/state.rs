@@ -577,14 +577,20 @@ impl UiBackend for BackendHandle {
 }
 
 /// Synchronous backend for tests and the headless demo.
+///
+/// The command is applied inline, then its result is queued for the next poll,
+/// the same contract the worker backend has. The UI then has one path for
+/// settling a pending write instead of probing the snapshot or the file.
 pub struct LocalBackend {
     pub backend: linc_core::sim::SimBackend,
+    events: Vec<BackendEvent>,
 }
 
 impl LocalBackend {
     pub fn new(profile: linc_core::config::Profile, mode: linc_core::model::PanelMode) -> Self {
         Self {
             backend: linc_core::sim::SimBackend::new(profile, mode),
+            events: Vec::new(),
         }
     }
 }
@@ -595,11 +601,24 @@ impl UiBackend for LocalBackend {
     }
 
     fn send(&mut self, command: MachineCommand) -> Result<(), MachineError> {
-        linc_core::backend::MachineBackend::send(&mut self.backend, command)
+        let label = command.label();
+        match linc_core::backend::MachineBackend::send(&mut self.backend, command) {
+            Ok(()) => {
+                self.events
+                    .push(BackendEvent::Command(linc_core::command::CommandResult {
+                        id: 0,
+                        command: label.to_string(),
+                        result: Ok(()),
+                        timestamp_ms: 0,
+                    }));
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn drain_events(&mut self) -> Vec<BackendEvent> {
-        Vec::new()
+        std::mem::take(&mut self.events)
     }
 }
 
@@ -1245,7 +1264,12 @@ pub struct LoopReadout {
 
 impl LoopReadout {
     /// The preview's reading of every loop the cut is inside.
-    pub fn current(preview: &Preview, progress: &LoopProgress) -> Option<Self> {
+    pub fn current(preview: &Preview, generation: u64, progress: &LoopProgress) -> Option<Self> {
+        // The counters were walked from one program's preview; never apply
+        // them to another program's loops.
+        if progress.generation != generation {
+            return None;
+        }
         let lines: Vec<LoopLine> = progress
             .stack
             .iter()
@@ -4075,7 +4099,7 @@ mod loop_readout_tests {
     fn the_readout_names_the_loop_and_its_value() {
         let preview = while_loop();
         // The cut is on the body line, at the end of the first pass's move.
-        let readout = LoopReadout::current(&preview, &follow(&preview, 3, [1.0, 0.0, 0.0]))
+        let readout = LoopReadout::current(&preview, 1, &follow(&preview, 3, [1.0, 0.0, 0.0]))
             .expect("inside the loop");
         assert_eq!(line(&readout), "#<i>=1 1/3");
         assert!(!readout.lines[0].live);
@@ -4087,7 +4111,7 @@ mod loop_readout_tests {
         let mut progress = LoopProgress::default();
         progress.follow(&preview, 3, [1.0, 0.0, 0.0], 1);
         progress.follow(&preview, 3, [2.0, 0.0, 0.0], 1);
-        let readout = LoopReadout::current(&preview, &progress).expect("inside the loop");
+        let readout = LoopReadout::current(&preview, 1, &progress).expect("inside the loop");
         assert_eq!(line(&readout), "#<i>=2 2/3");
     }
 
@@ -4095,8 +4119,8 @@ mod loop_readout_tests {
     fn a_nested_run_stacks_one_line_per_loop_outermost_first() {
         let preview = nested();
         // The inner loop's first pass is at X11; the outer loop has not moved.
-        let readout =
-            LoopReadout::current(&preview, &follow(&preview, 5, [11.0, 0.0, 0.0])).expect("inside");
+        let readout = LoopReadout::current(&preview, 1, &follow(&preview, 5, [11.0, 0.0, 0.0]))
+            .expect("inside");
         assert_eq!(
             line(&readout),
             "#<a>=1 1/2 | #<b>=1 1/4",
@@ -4109,7 +4133,7 @@ mod loop_readout_tests {
     fn the_readout_clears_when_the_cut_leaves_the_loop() {
         let preview = while_loop();
         // Line 5 is the loop's own `endwhile`: no motion, so nothing matches.
-        assert!(LoopReadout::current(&preview, &follow(&preview, 5, [0.0; 3])).is_none());
+        assert!(LoopReadout::current(&preview, 1, &follow(&preview, 5, [0.0; 3])).is_none());
     }
 
     #[test]
@@ -4120,19 +4144,19 @@ mod loop_readout_tests {
         progress.follow(&preview, 3, [1.0, 0.0, 0.0], 1);
         // No parameter holds this number, so the readout names where it comes
         // from; the count and the total are the trace's own.
-        let readout = LoopReadout::current(&preview, &progress).expect("inside the loop");
+        let readout = LoopReadout::current(&preview, 1, &progress).expect("inside the loop");
         assert_eq!(line(&readout), "REPEAT 1/4");
         assert_eq!(readout.lines[0].iteration, Some((1, 4)));
         // The second pass's move ends at X2, and the counter follows it.
         progress.follow(&preview, 3, [2.0, 0.0, 0.0], 1);
-        let readout = LoopReadout::current(&preview, &progress).expect("inside the loop");
+        let readout = LoopReadout::current(&preview, 1, &progress).expect("inside the loop");
         assert_eq!(line(&readout), "REPEAT 2/4");
     }
 
     #[test]
     fn a_repeat_whose_count_is_a_parameter_shows_it() {
         let preview = plan("#<n> = 3\no300 repeat [#<n>]\nG0 X10\nG0 X0\no300 endrepeat\n");
-        let readout = LoopReadout::current(&preview, &follow(&preview, 3, [10.0, 0.0, 0.0]))
+        let readout = LoopReadout::current(&preview, 1, &follow(&preview, 3, [10.0, 0.0, 0.0]))
             .expect("inside the loop");
         // `#<n>` is the count, not a counter: the loop does not walk it.
         assert_eq!(line(&readout), "REPEAT 1/3");
@@ -4163,7 +4187,7 @@ mod loop_readout_tests {
         for lap in 1..=3 {
             progress.follow(&preview, 2, [10.0, 0.0, 0.0], 1);
             progress.follow(&preview, 3, [0.0, 0.0, 0.0], 1);
-            let readout = LoopReadout::current(&preview, &progress).expect("inside the loop");
+            let readout = LoopReadout::current(&preview, 1, &progress).expect("inside the loop");
             assert_eq!(line(&readout), format!("REPEAT {lap}/3"));
         }
     }
@@ -4174,17 +4198,17 @@ mod loop_readout_tests {
         let mut progress = LoopProgress::default();
         progress.follow(&preview, 3, [10.0, 0.0, 0.0], 1);
         assert_eq!(
-            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            line(&LoopReadout::current(&preview, 1, &progress).expect("inside")),
             "REPEAT 1/3"
         );
         feed_circle(&preview, &mut progress);
         assert_eq!(
-            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            line(&LoopReadout::current(&preview, 1, &progress).expect("inside")),
             "REPEAT 2/3"
         );
         feed_circle(&preview, &mut progress);
         assert_eq!(
-            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            line(&LoopReadout::current(&preview, 1, &progress).expect("inside")),
             "REPEAT 3/3"
         );
     }
@@ -4204,7 +4228,7 @@ mod loop_readout_tests {
             );
         }
         assert_eq!(
-            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            line(&LoopReadout::current(&preview, 1, &progress).expect("inside")),
             "REPEAT 1/3"
         );
     }
@@ -4218,12 +4242,12 @@ mod loop_readout_tests {
         let mut progress = LoopProgress::default();
         progress.follow(&preview, 3, [10.0, 0.0, 0.0], 1);
         assert_eq!(
-            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            line(&LoopReadout::current(&preview, 1, &progress).expect("inside")),
             "#<i>=1 1/3"
         );
         feed_circle(&preview, &mut progress);
         assert_eq!(
-            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            line(&LoopReadout::current(&preview, 1, &progress).expect("inside")),
             "#<i>=2 2/3"
         );
     }
@@ -4235,7 +4259,7 @@ mod loop_readout_tests {
         progress.follow(&preview, 3, [10.0, 0.0, 0.0], 1);
         feed_circle(&preview, &mut progress);
         assert_eq!(
-            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            line(&LoopReadout::current(&preview, 1, &progress).expect("inside")),
             "REPEAT 2/3"
         );
         // A line past the loop ends this entry; the next one starts at pass 1.
@@ -4243,15 +4267,22 @@ mod loop_readout_tests {
         assert!(progress.stack.is_empty());
         progress.follow(&preview, 3, [10.0, 0.0, 0.0], 1);
         assert_eq!(
-            line(&LoopReadout::current(&preview, &progress).expect("inside")),
+            line(&LoopReadout::current(&preview, 1, &progress).expect("inside")),
             "REPEAT 1/3"
         );
     }
 
     #[test]
+    fn a_readout_from_another_program_is_not_shown() {
+        let preview = while_loop();
+        let progress = follow(&preview, 3, [1.0, 0.0, 0.0]);
+        assert!(LoopReadout::current(&preview, progress.generation + 1, &progress).is_none());
+    }
+
+    #[test]
     fn a_loop_that_reads_machine_state_is_marked() {
         let preview = plan("o400 while [#5070 lt 1]\nG0 X5\no400 endwhile\n");
-        let readout = LoopReadout::current(&preview, &follow(&preview, 2, [0.0; 3]))
+        let readout = LoopReadout::current(&preview, 1, &follow(&preview, 2, [0.0; 3]))
             .expect("inside the loop");
         assert!(readout.lines[0].live);
         // A live test has no counter to name, only its pass - and the preview

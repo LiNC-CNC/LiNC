@@ -692,12 +692,10 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 &mut auto_fit,
                 Some(app.program.loaded().selected_line),
                 app.snapshot.program.highlight_line(),
-                false,
-                false,
-                false,
-                false,
-                false,
-                true,
+                common::TrajectoryLayers {
+                    live: true,
+                    ..common::TrajectoryLayers::default()
+                },
                 None,
             );
             app.program.graph_zoom = zoom;
@@ -737,6 +735,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 // the listing carries it too.
                 if let Some(readout) = crate::state::LoopReadout::current(
                     &app.program.loaded().preview,
+                    app.program.loaded().preview_generation,
                     &app.program.loop_progress,
                 ) {
                     ui.label(
@@ -836,12 +835,10 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                         &mut auto_fit,
                         Some(app.program.loaded().selected_line),
                         app.snapshot.program.highlight_line(),
-                        false,
-                        false,
-                        false,
-                        false,
-                        false,
-                        true,
+                        common::TrajectoryLayers {
+                            live: true,
+                            ..common::TrajectoryLayers::default()
+                        },
                         None,
                     )
                     .response;

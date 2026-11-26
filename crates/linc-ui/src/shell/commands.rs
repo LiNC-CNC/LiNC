@@ -163,23 +163,7 @@ impl LincApp {
         // zero row it saw before the publication does not just draw the part in
         // the wrong place - `live_trail_shift` then shifts the tool marker by the
         // whole offset, which is the "toolhead sits at machine home" report.
-        let rows = offsets_signature(&self.snapshot.offsets.offsets);
-        let offsets_revision = self.snapshot.offsets.revision;
-        let has_rows = !self.snapshot.offsets.offsets.is_empty();
-        let stale = |doc: &Document| {
-            offsets_revision != doc.preview_offsets_seen
-                || rows != doc.preview_offsets_rows
-                || (doc.preview_offset.is_none() && has_rows)
-        };
-        if stale(self.program.doc()) {
-            self.refresh_preview();
-        }
-        // The loaded document keeps its own preview, which the Machine page draws
-        // and the interlock and the run's estimate read: with a prepared file in
-        // front, an offset the controller moved still has to reach that one.
-        if self.program.front != DocumentFront::Loaded && stale(self.program.loaded()) {
-            self.refresh_loaded_preview();
-        }
+        self.refresh_stale_previews();
         // RAPID changes the jog ceiling, so the published speed follows it.
         // Compared against what we last sent, not against the snapshot: the
         // snapshot is rebuilt every poll, and comparing with it published on
@@ -332,6 +316,27 @@ impl LincApp {
             } else if prepared_save_failed {
                 self.abandon_prepared_save();
             }
+        }
+    }
+
+    /// Rebuild any document's preview when the controller moved the offset
+    /// rows it was parsed against. The loaded document keeps its own preview
+    /// even while the prepared file is in front: the Machine page draws it and
+    /// the interlock and the run's estimate read it.
+    pub(super) fn refresh_stale_previews(&mut self) {
+        let rows = offsets_signature(&self.snapshot.offsets.offsets);
+        let offsets_revision = self.snapshot.offsets.revision;
+        let has_rows = !self.snapshot.offsets.offsets.is_empty();
+        let stale = |doc: &Document| {
+            offsets_revision != doc.preview_offsets_seen
+                || rows != doc.preview_offsets_rows
+                || (doc.preview_offset.is_none() && has_rows)
+        };
+        if stale(self.program.doc()) {
+            self.refresh_preview();
+        }
+        if self.program.front != DocumentFront::Loaded && stale(self.program.loaded()) {
+            self.refresh_loaded_preview();
         }
     }
 

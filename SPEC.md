@@ -719,10 +719,15 @@ the controller. Only the handoff opens it there.
   it replaces the file atomically, never opens it in the interpreter, and
   leaves the loaded program, its running text and the interlock untouched. It
   refuses a target that resolves onto the loaded program's path, because the
-  running program's file is never the file being written. There is no save-as
-  for a prepared document: it was read from a file.
-- The handoff is one press. The backend writes the prepared buffer's text and
-  then opens that file through the load sequence, so `AUTO` starts the text the
+  running program's file is never the file being written. While a program runs
+  it also refuses a target under the machine's `SUBROUTINE_PATH`: the
+  interpreter reopens a subroutine file when an `o<name> call` executes, so
+  replacing one would change the text `AUTO` runs. There is no save-as for a
+  prepared document: it was read from a file.
+- The handoff is one press. The buffer passes the same syntax and controller
+  gate as `LOAD` before anything is sent; a refused buffer stays prepared and
+  the reason names the gate. The backend then writes the prepared buffer's text
+  and opens that file through the load sequence, so `AUTO` starts the text the
   operator checked. It asks first when the loaded buffer has unsaved changes,
   offering `DISCARD`, `SAVE` of the loaded buffer, or `CANCEL`. It refuses
   while a program runs or the interpreter is not idle, and a press already in
