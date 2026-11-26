@@ -1014,12 +1014,14 @@ never set, an arc against the wrong plane, a tool the table does not carry.
 | Key | Default | Meaning |
 |---|---|---|
 | `block_run_on_syntax_error` | `true` | A file the checks refuse is not loaded into the interpreter. It still opens in the editor with every fault marked, because that is where the operator fixes it. The panel's CYCLE START has nothing to run once the load was refused. |
-| `verify_on_load` | `true` | Ask `rs274` about the file before loading it. Costs about 40 ms plus the read; skipped without a word when `rs274` is not installed (`MACHINE CHECK UNAVAILABLE`). |
+| `verify_on_load` | `true` | Ask `rs274` about the file before loading it. The check runs on a worker thread, so the interpreter's deadline never holds the frame; skipped without a word when `rs274` is not installed (`MACHINE CHECK UNAVAILABLE`). |
 | `verify_timeout_ms` | `2000` | How long the interpreter may take, 1-60000. A program can loop without moving, so the child is killed at the deadline and the load goes ahead with a warning: a timeout is not a verdict on the file. |
 
-`--check-config` rejects a timeout outside that range. The check runs on the
-loading thread, before the load command is sent, so a refused file never reaches
-the backend.
+`--check-config` rejects a timeout outside that range. The check runs on a
+worker thread; the load command is held until its verdict lands, so a refused
+file never reaches the backend and the frame that asked for the load never waits.
+Until the verdict is applied the program interlock stays shut - a check in flight
+is not an answer.
 
 Every fault the editor knows about - the lint's, the preview's own fatal one and
 the interpreter's, when it named a line - is marked: the line is washed red, its

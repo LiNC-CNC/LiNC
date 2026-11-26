@@ -206,7 +206,14 @@ impl LincApp {
                 linc_core::verify::CheckOutcome::Refused | linc_core::verify::CheckOutcome::Crashed
             )
         });
-        loaded && !self.program.editor.dirty && self.program.issues.is_empty() && controller_ok
+        // A check in flight is not an answer: the text under the gate has no
+        // verdict yet, and the previous one was about different text.
+        let checked = self.program.verify.is_none();
+        loaded
+            && !self.program.editor.dirty
+            && self.program.issues.is_empty()
+            && controller_ok
+            && checked
     }
 
     /// Why the interlock is shut, in one sentence the operator can act on.
@@ -231,6 +238,9 @@ impl LincApp {
         }
         if self.program.editor.dirty {
             return Some("the buffer has unsaved changes — save it (Ctrl+S)".into());
+        }
+        if self.program.verify.is_some() {
+            return Some("checking the program — the interpreter is reading it".into());
         }
         if let Some(check) = self.program.machine_check.as_ref().filter(|check| {
             matches!(

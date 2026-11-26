@@ -1,7 +1,7 @@
 //! The program editor's commands: load, save, line jumps, run-from-line, and
 //! the dirty-buffer bookkeeping.
 
-use std::path::Path;
+use std::path::PathBuf;
 
 use super::*;
 
@@ -116,10 +116,30 @@ impl LincApp {
         // `MachineCommand::CycleStart`, so a refused press sends nothing. A file
         // the check refuses still opens in the editor - the operator has to be
         // able to fix it where it is shown.
-        if let Some(refusal) = self.syntax_refusal(&path) {
-            self.refuse_load(path, refusal);
-            return;
+        let text = std::fs::read_to_string(&path).ok();
+        if let Some(text) = text.as_deref() {
+            if let Some(refusal) = self.local_refusal(text) {
+                self.refuse_load(path, refusal);
+                return;
+            }
         }
+        // The interpreter's answer decides whether the file reaches the backend
+        // at all, and it can take up to `verify_timeout_ms` to arrive: the frame
+        // does not wait for it, so the load waits for the verdict instead.
+        match text {
+            Some(text) if self.profile.config.program.verify_on_load => {
+                self.start_verify(VerifyKind::Load, path, &text);
+            }
+            // Unreadable is the backend's error to report, with its own words;
+            // a profile without the check has already been answered.
+            _ => self.send_load(path),
+        }
+    }
+
+    /// Hand the file to the backend. A load in flight keeps `pending_load` set,
+    /// which is what Files shows while it waits - whether it waits for the
+    /// backend or, before that, for the interpreter.
+    fn send_load(&mut self, path: PathBuf) {
         self.send(MachineCommand::LoadProgram {
             path,
             expected_revision: None,
@@ -137,104 +157,152 @@ impl LincApp {
     /// program typed into EDIT was never asked about at all: save is the only
     /// route by which a file the interpreter refuses could reach the panel with
     /// the interlock open. Both save paths - overwrite and save-as - end here.
+    ///
+    /// The file is already written; what follows is the verdict, when it lands.
     pub(super) fn verify_saved_text(&mut self, content: &str) {
-        self.program.machine_check = self.controller_check(content);
-        if let Some(check) = self
-            .program
-            .machine_check
-            .as_ref()
-            .filter(|check| check.outcome == linc_core::verify::CheckOutcome::Refused)
-        {
-            let reason = format!("SAVED — {}", check.summary());
-            self.toast(reason, theme::ERROR);
-        }
+        self.program.machine_check = None;
         self.sync_program_ok();
+        if !self.profile.config.program.verify_on_load {
+            return;
+        }
+        let path = self
+            .program
+            .loaded_path
+            .clone()
+            .or_else(|| self.snapshot.program.path.clone())
+            .unwrap_or_default();
+        self.start_verify(VerifyKind::Save, path, content);
     }
 
-    /// Ask the controller's own interpreter about `text`, when this profile asks
-    /// it to. `None` means the question is off in the configuration, which is not
-    /// the same answer as "no faults".
+    /// Run the controller's own interpreter over `text` on a worker thread.
     ///
     /// `rs274` reads the file the way the machine's task will: same reader, same
     /// preparation, no axis moves. It is the only check here that knows what a
     /// line means in the context of the lines above it, so it runs on everything
     /// that can become the loaded program - a load, and a save, which is how a
     /// program typed straight into the editor becomes one.
-    fn controller_check(&mut self, text: &str) -> Option<linc_core::verify::MachineCheck> {
-        if !self.profile.config.program.verify_on_load {
-            return None;
-        }
+    fn start_verify(&mut self, kind: VerifyKind, path: PathBuf, text: &str) {
         let timeout =
             std::time::Duration::from_millis(self.profile.config.program.verify_timeout_ms.max(1));
-        Some(linc_core::verify::check_program(
-            Some(self.profile.machine_ini_path.as_path()),
-            Some(self.profile.machine_ini.tool_table.as_path()),
-            text,
-            timeout,
-        ))
+        let ini = self.profile.machine_ini_path.clone();
+        let table = self.profile.machine_ini.tool_table.clone();
+        let text = text.to_string();
+        // A newer request supersedes this one. Nothing is cancelled: the check
+        // finishes on its own and its verdict is dropped by generation.
+        self.program.verify_generation += 1;
+        let generation = self.program.verify_generation;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("linc-verify".into())
+            .spawn(move || {
+                let check = linc_core::verify::check_program(
+                    Some(ini.as_path()),
+                    Some(table.as_path()),
+                    &text,
+                    timeout,
+                );
+                // A dropped receiver means the verdict was superseded or the
+                // window closed: nothing was lost that was still wanted.
+                let _ = tx.send(check);
+            });
+        match spawned {
+            Ok(_) => {
+                self.program.verify = Some(VerifyJob {
+                    kind,
+                    path,
+                    generation,
+                    started: Instant::now(),
+                    rx,
+                });
+                if kind == VerifyKind::Load {
+                    // The file has not been sent yet, but a load is on its way
+                    // and Files shows it as such until the verdict decides.
+                    self.program.pending_load = true;
+                }
+            }
+            // No thread, no answer. That is not a refusal: the machine still
+            // has the last word at run time.
+            Err(_) => self.apply_verdict(kind, path, None),
+        }
     }
 
-    /// Why this file must not be loaded, if it must not.
+    /// Apply a controller verdict when it lands, and act on it.
     ///
-    /// Two checks, cheapest first: the block-level lint always runs, and the
-    /// controller's own interpreter joins it when `program.verify_on_load` is
-    /// set. A machine without `rs274` installed answers `Unavailable`, which is
-    /// not a refusal - the machine itself will still have the last word at run
-    /// time.
-    fn syntax_refusal(&mut self, path: &Path) -> Option<String> {
+    /// `None` means no answer at all (a check that could not run, or a worker
+    /// that died): a load goes ahead, because an unasked question is not a
+    /// refusal, and the machine's own interpreter will read the file anyway.
+    fn apply_verdict(
+        &mut self,
+        kind: VerifyKind,
+        path: PathBuf,
+        check: Option<linc_core::verify::MachineCheck>,
+    ) {
+        self.program.machine_check = check.clone();
+        match kind {
+            VerifyKind::Load => match check.as_ref().and_then(refusal_from_check) {
+                Some(reason) => self.refuse_load(path, reason),
+                None => self.send_load(path),
+            },
+            VerifyKind::Save => {
+                // A refused save still wrote the file: the write is the
+                // operator's decision, the check is the interlock's.
+                if let Some(check) = check
+                    .as_ref()
+                    .filter(|check| check.outcome == linc_core::verify::CheckOutcome::Refused)
+                {
+                    self.toast(format!("SAVED — {}", check.summary()), theme::ERROR);
+                }
+                self.sync_program_ok();
+            }
+        }
+    }
+
+    /// Apply a verdict that has arrived, if it still answers the newest request.
+    pub(super) fn poll_verify(&mut self) {
+        let Some(job) = self.program.verify.as_ref() else {
+            return;
+        };
+        let kind = job.kind;
+        let path = job.path.clone();
+        let generation = job.generation;
+        let verdict = match job.rx.try_recv() {
+            Ok(check) => Some(Some(check)),
+            // Still reading.
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            // The worker ended without saying anything.
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(None),
+        };
+        let Some(verdict) = verdict else {
+            return;
+        };
+        self.program.verify = None;
+        if generation != self.program.verify_generation {
+            return;
+        }
+        self.apply_verdict(kind, path, verdict);
+    }
+
+    /// Why this file must not be loaded on the evidence already in hand: the
+    /// block lint and the preview's own fatal fault. Both are cheap enough to
+    /// run in the frame, and both must run before the interpreter is asked.
+    ///
+    /// The block checks are not the whole story - the preview's own fatal fault
+    /// is a semantic one (`arc missing valid I/J/K or R`, a polar word against
+    /// the wrong plane, a G76 in the wrong plane) that no single block decides -
+    /// but neither needs an interpreter to see.
+    fn local_refusal(&mut self, text: &str) -> Option<String> {
         if !self.profile.config.program.block_run_on_syntax_error {
             return None;
         }
-        let Ok(text) = std::fs::read_to_string(path) else {
-            // Unreadable is the backend's error to report, with its own words.
-            return None;
-        };
-        if let Some(issue) = linc_core::lint::lint_program(&text).into_iter().next() {
+        if let Some(issue) = linc_core::lint::lint_program(text).into_iter().next() {
             return Some(format!("NOT LOADED  LN {}: {}", issue.line, issue.message));
         }
-        // The block checks are not the whole story: the preview's own fatal fault
-        // is a semantic one (`arc missing valid I/J/K or R`, a polar word against
-        // the wrong plane, a G76 in the wrong plane) that no single block decides.
         let axes = self.axes();
-        let preview = linc_core::gcode::parse_preview(&text, &axes, None, self.tool_tip());
-        if let Some(error) = &preview.error {
-            return Some(format!("NOT LOADED  LN {}: {}", error.line, error.message));
-        }
-        let Some(check) = self.controller_check(&text) else {
-            return None;
-        };
-        self.program.machine_check = Some(check.clone());
-        match check.outcome {
-            linc_core::verify::CheckOutcome::Refused => {
-                let place = match check.line {
-                    Some(line) => format!("LN {line}"),
-                    None => check
-                        .message
-                        .as_deref()
-                        .and_then(linc_core::verify::line_from_message)
-                        .map_or_else(|| "MACHINE".to_string(), |line| format!("LN {line}")),
-                };
-                Some(format!(
-                    "NOT LOADED  {place}: {}",
-                    check
-                        .message
-                        .as_deref()
-                        .unwrap_or("the interpreter refused it")
-                ))
-            }
-            // A crash is not a verdict either way, and the one thing it must
-            // never be read as is "the file is fine": the interpreter died
-            // before it finished reading, so the load is refused and the
-            // interlock stays shut.
-            linc_core::verify::CheckOutcome::Crashed => Some(format!(
-                "NOT LOADED  {}: the interpreter crashed before it read the program",
-                check
-                    .line
-                    .map_or_else(|| "MACHINE".to_string(), |line| format!("LN {line}"))
-            )),
-            // Ok, Timeout and Unavailable all let the load through.
-            _ => None,
-        }
+        let preview = linc_core::gcode::parse_preview(text, &axes, None, self.tool_tip());
+        preview
+            .error
+            .as_ref()
+            .map(|error| format!("NOT LOADED  LN {}: {}", error.line, error.message))
     }
 
     /// Show the refused file in the editor, mark its faults and say why the
@@ -402,6 +470,18 @@ impl LincApp {
         // Keeping it would leave a stale red line under a block that is already
         // fixed, and a stale "the machine refused it" beside a repaired file.
         self.program.machine_check = None;
+        // A verdict still in flight is about that same text: drop the job so it
+        // cannot be applied when it lands. A load's verdict is about a file, not
+        // about the buffer, and survives the keystroke.
+        if self
+            .program
+            .verify
+            .as_ref()
+            .is_some_and(|job| job.kind == VerifyKind::Save)
+        {
+            self.program.verify = None;
+            self.program.verify_generation += 1;
+        }
         self.sync_program_ok();
         if !self.profile.config.program.live_preview {
             return;
@@ -409,5 +489,43 @@ impl LincApp {
         self.program.preview_due = Some(
             Instant::now() + Duration::from_millis(self.profile.config.program.preview_debounce_ms),
         );
+    }
+}
+
+/// Why the interpreter's verdict forbids the program, in the words the operator
+/// sees, or `None` when the verdict does not forbid it.
+///
+/// A crash is not a verdict either way, and the one thing it must never be read
+/// as is "the file is fine": the interpreter died before it finished reading, so
+/// the load is refused and the interlock stays shut. `Timeout` and `Unavailable`
+/// are not refusals - the machine's own interpreter still reads the file at run
+/// time, and nothing here may invent a fault it did not see.
+pub(super) fn refusal_from_check(check: &linc_core::verify::MachineCheck) -> Option<String> {
+    use linc_core::verify::CheckOutcome;
+    match check.outcome {
+        CheckOutcome::Refused => {
+            let place = match check.line {
+                Some(line) => format!("LN {line}"),
+                None => check
+                    .message
+                    .as_deref()
+                    .and_then(linc_core::verify::line_from_message)
+                    .map_or_else(|| "MACHINE".to_string(), |line| format!("LN {line}")),
+            };
+            Some(format!(
+                "NOT LOADED  {place}: {}",
+                check
+                    .message
+                    .as_deref()
+                    .unwrap_or("the interpreter refused it")
+            ))
+        }
+        CheckOutcome::Crashed => Some(format!(
+            "NOT LOADED  {}: the interpreter crashed before it read the program",
+            check
+                .line
+                .map_or_else(|| "MACHINE".to_string(), |line| format!("LN {line}"))
+        )),
+        _ => None,
     }
 }

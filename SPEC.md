@@ -950,7 +950,10 @@ Program rules:
   rate never set, an arc against the wrong plane, a tool the table lacks - and its
   refusal blocks the load with its own words. Its message carries no line number
   except for o-word label faults, so the block it echoes is matched back against
-  the file; a missing `rs274` skips the check instead of failing the load.
+  the file; a missing `rs274` skips the check instead of failing the load. The
+  interpreter runs on a worker thread: the load is held until its verdict lands,
+  the frame that asked never waits for it, and `linc.program-ok` stays shut from
+  the moment the check starts until the verdict is applied.
 - While running, the editor is read-only and auto-scrolls to the current line,
   centring its whole wrapped block rather than its first row. The MAIN program
   card does the same, measured in the rows the lines really take, so wrapped

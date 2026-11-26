@@ -69,6 +69,8 @@ Three layers, in the order they run:
 - `linc-core::verify` — the controller's own interpreter through `rs274 -g`, on
   load, which knows what one block cannot. It reports one fault, mostly without a
   line number (it echoes the block), and is killed at `program.verify_timeout_ms`.
+  The HMI runs it on a worker thread and polls the verdict: the load waits, the
+  frame does not, and the interlock stays shut until the answer lands.
 
 A file the checks refuse is not loaded, so the panel's CYCLE START has nothing to
 run. CYCLE START passes through LiNC: the HMI reads `cnc_panel.cycle_start`, runs

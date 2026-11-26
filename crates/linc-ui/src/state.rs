@@ -1575,6 +1575,34 @@ impl CycleClock {
     }
 }
 
+/// What a controller check is about.
+///
+/// A load waits for its verdict before it reaches the backend; a save has
+/// already been written, so its verdict only moves the interlock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerifyKind {
+    Load,
+    Save,
+}
+
+/// A controller check running off the UI thread.
+///
+/// The check is an `rs274` child that reads the whole program, under a deadline
+/// that configuration allows up to a minute. The frame that asks for it cannot
+/// wait for that, so the job owns the channel and the frame polls it; the
+/// generation says which request the verdict answers.
+pub struct VerifyJob {
+    pub kind: VerifyKind,
+    /// The file the verdict is about: what `Load` sends to the backend when the
+    /// verdict allows it, and what `Save` names in its toast.
+    pub path: std::path::PathBuf,
+    /// The request this job answers: compare with
+    /// [`ProgramUi::verify_generation`] before applying the verdict.
+    pub generation: u64,
+    pub started: std::time::Instant,
+    pub rx: std::sync::mpsc::Receiver<linc_core::verify::MachineCheck>,
+}
+
 pub struct ProgramUi {
     pub editor: Editor,
     pub view: ProgramView,
@@ -1645,6 +1673,12 @@ pub struct ProgramUi {
     /// What the controller's own interpreter last said about this buffer. The
     /// load gate fills it; the name panel shows it as the machine's verdict.
     pub machine_check: Option<linc_core::verify::MachineCheck>,
+    /// The controller check in flight, if any. While it is `Some` the text under
+    /// the gate has no verdict yet, so the interlock is shut.
+    pub verify: Option<VerifyJob>,
+    /// The newest check request. A verdict carrying an older number belongs to a
+    /// text that is no longer the one under the gate, and is dropped.
+    pub verify_generation: u64,
     /// Elapsed cycle time and the estimated time to program end.
     pub cycle: CycleClock,
     /// Bumped whenever the preview is rebuilt, so loop counters for the old
@@ -1692,6 +1726,8 @@ impl Default for ProgramUi {
             issues: Vec::new(),
             issue_index: 0,
             machine_check: None,
+            verify: None,
+            verify_generation: 0,
             external_change: false,
         }
     }

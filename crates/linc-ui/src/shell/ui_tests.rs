@@ -209,6 +209,26 @@ fn diagnostics_tabs_draw_text_strips_and_their_own_bodies() {
     }
 }
 
+/// Let a controller check finish.
+///
+/// The check is an `rs274` child on a worker thread, so a test that needs its
+/// verdict asks for it instead of the frame waiting for it. The deadline is
+/// generous: the fixtures are a few lines and the interpreter reads them in
+/// milliseconds.
+fn settle(app: &mut LincApp) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while app.program.verify.is_some() {
+        app.poll_verify();
+        if app.program.verify.is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the controller check never answered"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+}
+
 fn make_app(mode: PanelMode) -> (tempfile::TempDir, LincApp) {
     let (dir, profile) = fixture();
     let ctx = egui::Context::default();
@@ -2873,9 +2893,12 @@ fn saving_a_program_asks_the_interpreter_again() {
     app.save_program();
     // The buffer had no path, so the save asked for a name; naming it is the
     // save-as path, and it must ask the interpreter as well.
-    if app.program.machine_check.is_none() && app.overlay.modal.is_some() {
+    if app.overlay.modal.is_some() {
         app.save_program_as("typed");
     }
+    // The check is a child process on a worker thread: its verdict is polled for
+    // rather than waited for, so the test asks for it here.
+    settle(&mut app);
     let check = app
         .program
         .machine_check
@@ -3399,6 +3422,8 @@ fn a_clean_file_loads_and_opens_the_interlock() {
     std::fs::write(&path, "G0 X0 Y0\nG1 X2 F300\nM2\n").unwrap();
     harness.sent.borrow_mut().clear();
     harness.app.load_program(path.clone());
+    // The load waits for the controller's verdict, which is a worker thread away.
+    settle(&mut harness.app);
     assert!(
         harness
             .sent
@@ -3428,6 +3453,7 @@ fn a_move_outside_the_travel_box_blocks_cycle_start() {
     let path = harness._dir.path().join("gcode").join("outside.ngc");
     std::fs::write(&path, "G0 X0 Y0 Z0\nG1 X10 F100\nM2\n").unwrap();
     harness.app.load_program(path);
+    settle(&mut harness.app);
     harness.app.poll_backend();
     harness.app.refresh_preview();
     harness.frame(&[]);
@@ -9454,5 +9480,142 @@ fn the_selected_line_follows_the_cut_so_the_graph_has_a_current_segment() {
         app.snapshot.program.highlight_line(),
         Some(2),
         "the view receives the executing line"
+    );
+}
+
+/// The verdict refuses on exactly two answers: the interpreter said no, or it
+/// died before it said anything. `Ok`, `Timeout` and `Unavailable` are not
+/// refusals - the machine's own interpreter reads the file at run time.
+#[test]
+fn only_a_refusal_or_a_crash_closes_the_gate_on_a_verdict() {
+    use linc_core::verify::{CheckOutcome, MachineCheck};
+    let verdict = |outcome: CheckOutcome, line: Option<usize>| MachineCheck {
+        outcome,
+        message: Some("Cannot use g53 incremental".into()),
+        block: Some("G91 G53 G0 X10".into()),
+        line,
+    };
+    let refused = super::program::refusal_from_check(&verdict(CheckOutcome::Refused, Some(7)))
+        .expect("a refusal refuses");
+    assert!(refused.starts_with("NOT LOADED  LN 7:"), "{refused}");
+    let crashed = super::program::refusal_from_check(&verdict(CheckOutcome::Crashed, None))
+        .expect("a crash refuses");
+    assert!(
+        crashed.contains("crashed before it read the program"),
+        "{crashed}"
+    );
+    for outcome in [
+        CheckOutcome::Ok,
+        CheckOutcome::Timeout,
+        CheckOutcome::Unavailable,
+    ] {
+        assert_eq!(
+            super::program::refusal_from_check(&verdict(outcome, None)),
+            None,
+            "{outcome:?} must not refuse a load"
+        );
+    }
+}
+
+/// The frame that asks for a load does not wait for the interpreter: the file is
+/// held until the verdict lands, and the interlock is shut in the meantime.
+#[test]
+fn a_load_waits_for_the_verdict_without_holding_the_frame() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let path = harness._dir.path().join("gcode").join("clean.ngc");
+    std::fs::write(&path, "G0 X0 Y0\nG1 X2 F300\nM2\n").unwrap();
+    harness.sent.borrow_mut().clear();
+    harness.app.load_program(path.clone());
+    assert!(
+        harness.app.program.verify.is_some(),
+        "the check must run off the frame"
+    );
+    assert!(
+        !harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::LoadProgram { .. })),
+        "the file reached the backend before the verdict: {:?}",
+        harness.sent_debug()
+    );
+    assert!(
+        !harness.app.program_ready(),
+        "a check in flight is not a verdict: the gate stays shut"
+    );
+    settle(&mut harness.app);
+    assert!(
+        harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::LoadProgram { .. })),
+        "a clean verdict lets the load through: {:?}",
+        harness.sent_debug()
+    );
+}
+
+/// A worker that dies without answering is not a refusal: the question was
+/// never answered, so the load goes ahead and the machine has the last word.
+#[test]
+fn a_check_that_never_answers_does_not_refuse() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let path = harness._dir.path().join("gcode").join("never.ngc");
+    std::fs::write(&path, "G0 X0 Y0\nM2\n").unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    drop(tx);
+    harness.app.program.verify_generation += 1;
+    harness.app.program.verify = Some(crate::state::VerifyJob {
+        kind: crate::state::VerifyKind::Load,
+        path,
+        generation: harness.app.program.verify_generation,
+        started: std::time::Instant::now(),
+        rx,
+    });
+    harness.sent.borrow_mut().clear();
+    harness.app.poll_verify();
+    assert!(
+        harness.app.program.verify.is_none(),
+        "the job is done either way"
+    );
+    assert!(
+        harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::LoadProgram { .. })),
+        "an unanswered question must not refuse a load"
+    );
+}
+
+/// A keystroke makes the verdict about to land stale, so the save that asked for
+/// it is dropped rather than applied to text it never saw.
+#[test]
+fn a_verdict_about_text_that_moved_on_is_dropped() {
+    let (_dir, mut app) = make_app(PanelMode::Edit);
+    app.snapshot.program.path = None;
+    app.snapshot.program.content = None;
+    app.program.editor.replace_text("G0 X0\nG1 X10\n".into());
+    app.save_program();
+    let Some(Modal::SaveProgramAs(_)) = app.overlay.modal.clone() else {
+        panic!("the save asks for a name, got {:?}", app.overlay.modal);
+    };
+    app.save_program_as("typed");
+    assert!(
+        app.program.verify.is_some(),
+        "the save asks the interpreter"
+    );
+    let generation = app.program.verify_generation;
+    app.mark_editor_changed();
+    assert!(app.program.verify.is_none(), "the keystroke drops the job");
+    assert!(
+        app.program.verify_generation > generation,
+        "and makes its verdict stale"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    app.poll_verify();
+    assert!(
+        app.program.machine_check.is_none(),
+        "a dropped verdict leaves no answer behind"
     );
 }
