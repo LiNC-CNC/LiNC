@@ -110,6 +110,9 @@ impl LincApp {
                 || memory.has_focus(egui::Id::unique("linc-tool-position"))
                 || memory.has_focus(egui::Id::unique("linc-offset-cell"))
                 || memory.has_focus(egui::Id::unique("linc-offsets-dro"))
+                || memory.has_focus(egui::Id::unique("linc-ext-dro-X"))
+                || memory.has_focus(egui::Id::unique("linc-ext-dro-Y"))
+                || memory.has_focus(egui::Id::unique("linc-ext-dro-Z"))
                 || memory.has_focus(egui::Id::unique("linc-file-rename"))
                 || memory.has_focus(egui::Id::unique("linc-probe-param"))
                 || memory.has_focus(egui::Id::unique("linc-probe-dro"))
@@ -520,6 +523,9 @@ impl LincApp {
                 // has nothing to close.
                 || (self.offsets.dro_edit.is_some()
                     && (self.nav.page == Page::Offsets || self.main_matrix_active()))
+                // The EXT card's field owns Escape where it is drawn, or the key
+                // would leave the page instead of discarding the draft.
+                || (self.nav.page == Page::Offsets && self.offsets.ext_edit.is_some())
                 || (self.nav.page == Page::Files && self.files.rename.is_some())
                 || (self.nav.page == Page::Probe
                     && (self.probe.param_editing
@@ -979,6 +985,7 @@ impl LincApp {
             | ShortcutCommand::DiagSlower
             | ShortcutCommand::DiagClearFilters
             | ShortcutCommand::OffsetsActivate
+            | ShortcutCommand::OffsetsExtZero
             | ShortcutCommand::ProbeRun
             | ShortcutCommand::ProbeApply
             | ShortcutCommand::ProbeUpdateParams

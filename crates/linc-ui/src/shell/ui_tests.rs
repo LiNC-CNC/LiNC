@@ -209,6 +209,26 @@ fn diagnostics_tabs_draw_text_strips_and_their_own_bodies() {
     }
 }
 
+/// Let a controller check finish.
+///
+/// The check is an `rs274` child on a worker thread, so a test that needs its
+/// verdict asks for it instead of the frame waiting for it. The deadline is
+/// generous: the fixtures are a few lines and the interpreter reads them in
+/// milliseconds.
+fn settle(app: &mut LincApp) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while app.program.verify.is_some() {
+        app.poll_verify();
+        if app.program.verify.is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the controller check never answered"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+}
+
 fn make_app(mode: PanelMode) -> (tempfile::TempDir, LincApp) {
     let (dir, profile) = fixture();
     let ctx = egui::Context::default();
@@ -739,6 +759,32 @@ fn the_network_metric_reports_the_link_and_warns_only_when_the_machine_runs() {
         network_metric(&snapshot),
         Some(("?", theme::WARNING)),
         "stale data asks instead of repeating a state that may have moved"
+    );
+}
+
+/// The EXT metric is absent at zero and names the shifted axes otherwise. The
+/// bar is the one announcement the Program page has, because that page draws no
+/// axis card.
+#[test]
+fn the_top_bar_carries_the_ext_shift_only_while_it_is_set() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.app.snapshot.meta.stale = false;
+    let quiet = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        !quiet.iter().any(|text| text == "EXT"),
+        "no shift, no metric: {quiet:?}"
+    );
+
+    harness.app.snapshot.offsets.g92.insert("X", 12.5);
+    harness.app.snapshot.offsets.g92.insert("Y", -3.25);
+    let shown = top_bar_texts(&mut harness.app, &harness.ctx);
+    assert!(
+        shown.iter().any(|text| text == "EXT"),
+        "the bar names the register: {shown:?}"
+    );
+    assert!(
+        shown.iter().any(|text| text == "XY"),
+        "the bar carries the shift, per axis: {shown:?}"
     );
 }
 
@@ -2997,9 +3043,12 @@ fn saving_a_program_asks_the_interpreter_again() {
     app.save_program();
     // The buffer had no path, so the save asked for a name; naming it is the
     // save-as path, and it must ask the interpreter as well.
-    if app.program.machine_check.is_none() && app.overlay.modal.is_some() {
+    if app.overlay.modal.is_some() {
         app.save_program_as("typed");
     }
+    // The check is a child process on a worker thread: its verdict is polled for
+    // rather than waited for, so the test asks for it here.
+    settle(&mut app);
     let check = app
         .program
         .machine_check
@@ -3539,6 +3588,8 @@ fn a_clean_file_loads_and_opens_the_interlock() {
     std::fs::write(&path, "G0 X0 Y0\nG1 X2 F300\nM2\n").unwrap();
     harness.sent.borrow_mut().clear();
     harness.app.load_program(path.clone());
+    // The load waits for the controller's verdict, which is a worker thread away.
+    settle(&mut harness.app);
     assert!(
         harness
             .sent
@@ -3568,6 +3619,7 @@ fn a_move_outside_the_travel_box_blocks_cycle_start() {
     let path = harness._dir.path().join("gcode").join("outside.ngc");
     std::fs::write(&path, "G0 X0 Y0 Z0\nG1 X10 F100\nM2\n").unwrap();
     harness.app.load_program(path);
+    settle(&mut harness.app);
     harness.app.poll_backend();
     harness.app.refresh_preview();
     harness.frame(&[]);
@@ -6184,9 +6236,10 @@ fn the_cut_shortcut_reaches_the_probe_x_data_reset() {
 }
 
 #[test]
-fn the_cut_hand_off_is_scoped_to_the_probe_page() {
-    // No page other than Probe may receive a synthetic cut chord: the
-    // clipboard event belongs to text editing everywhere else.
+fn the_cut_hand_off_is_scoped_to_the_pages_that_bind_it() {
+    // Probe's X data reset and the Offsets page's EXT X card both bind Ctrl+X,
+    // and neither can receive it as a key: `egui-winit` turns the chord into a
+    // clipboard event. Every other page keeps the clipboard event for text.
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
     let mut observed = Vec::new();
     for page in [Page::Machine, Page::Files, Page::Offsets, Page::Probe] {
@@ -6215,7 +6268,7 @@ fn the_cut_hand_off_is_scoped_to_the_probe_page() {
         vec![
             (Page::Machine, true, false),
             (Page::Files, true, false),
-            (Page::Offsets, true, false),
+            (Page::Offsets, false, true),
             (Page::Probe, false, true),
         ]
     );
@@ -9769,6 +9822,7 @@ fn load_for_prepare(harness: &mut ProbeHarness, text: &str) -> std::path::PathBu
     let path = harness._dir.path().join("gcode").join("running.ngc");
     std::fs::write(&path, text).unwrap();
     harness.app.load_program(path.clone());
+    settle(&mut harness.app);
     harness.app.poll_backend();
     // The recording backend sends no result event, so the load is committed by
     // hand the way the shell would on that event.
@@ -9778,6 +9832,13 @@ fn load_for_prepare(harness: &mut ProbeHarness, text: &str) -> std::path::PathBu
     path
 }
 
+/// Finish a handoff's controller check and its command result, so a test can
+/// assert the settled state.
+fn settle_handoff(harness: &mut ProbeHarness) {
+    settle(&mut harness.app);
+    harness.app.poll_backend();
+}
+
 /// Put a clean program on the controller and show it on the Program page. The
 /// recording backend reports no command results, so the commit that a real
 /// backend's verdict drives is made here.
@@ -9785,6 +9846,7 @@ fn load_clean_and_show(harness: &mut ProbeHarness, text: &str) -> std::path::Pat
     let path = harness._dir.path().join("gcode").join("running.ngc");
     std::fs::write(&path, text).unwrap();
     harness.app.load_program(path.clone());
+    settle(&mut harness.app);
     harness.app.poll_backend();
     harness.app.sync_program();
     harness.app.commit_load();
@@ -10102,6 +10164,7 @@ fn a_load_with_a_dirty_prepared_buffer_does_not_ask_or_discard_it() {
     std::fs::write(&other, "G0 X0 Y0\nM2\n").unwrap();
     harness.sent.borrow_mut().clear();
     harness.app.request_load(other.clone());
+    settle(&mut harness.app);
 
     assert!(
         harness.app.overlay.modal.is_none(),
@@ -10217,6 +10280,7 @@ fn a_handoff_the_load_gate_would_refuse_is_not_sent() {
     harness.sent.borrow_mut().clear();
 
     harness.app.handoff_prepared();
+    settle_handoff(&mut harness);
 
     assert!(
         !harness
@@ -10347,6 +10411,7 @@ fn handoff_writes_the_prepared_buffer_and_makes_it_the_loaded_program() {
     harness.sent.borrow_mut().clear();
 
     harness.app.handoff_prepared();
+    settle_handoff(&mut harness);
     harness.app.poll_backend();
 
     let sent = harness.sent.borrow();
@@ -10395,6 +10460,7 @@ fn two_handoff_presses_send_one_command_while_one_is_in_flight() {
     harness.sent.borrow_mut().clear();
 
     harness.app.handoff_prepared();
+    settle_handoff(&mut harness);
     assert!(
         harness.app.program.pending_handoff,
         "the press is pending until the result arrives"
@@ -10404,6 +10470,7 @@ fn two_handoff_presses_send_one_command_while_one_is_in_flight() {
         "acceptance clears the marker; the result decides whether it stays"
     );
     harness.app.handoff_prepared();
+    settle_handoff(&mut harness);
 
     assert_eq!(harness.sent.borrow().len(), 1, "{:?}", harness.sent_debug());
 
@@ -10471,6 +10538,7 @@ fn a_refused_handoff_restores_the_prepared_buffers_dirty_state() {
     harness.sent.borrow_mut().clear();
 
     harness.app.handoff_prepared();
+    settle_handoff(&mut harness);
 
     assert!(!harness.app.program.pending_handoff);
     let prepared = harness
@@ -10525,6 +10593,7 @@ fn a_handoff_under_protect_reports_the_reason_and_keeps_the_buffer() {
     harness.sent.borrow_mut().clear();
 
     harness.app.handoff_prepared();
+    settle_handoff(&mut harness);
 
     assert!(!harness.app.program.pending_handoff);
     let prepared = harness
@@ -10571,6 +10640,7 @@ fn load_of_the_prepared_file_is_the_handoff() {
     harness.sent.borrow_mut().clear();
 
     harness.app.request_load(prepared.clone());
+    settle_handoff(&mut harness);
     harness.app.poll_backend();
 
     let sent = harness.sent.borrow();
@@ -10837,7 +10907,7 @@ fn save_on_a_question_about_the_loaded_buffer_writes_the_loaded_file() {
 
     harness.sent.borrow_mut().clear();
     harness.click_at(save);
-    harness.app.poll_backend();
+    settle_handoff(&mut harness);
 
     assert!(
         harness.sent.borrow().iter().any(|command| matches!(
@@ -11247,6 +11317,7 @@ fn ctrl_n_hands_off_while_the_editor_holds_the_keyboard() {
     harness.sent.borrow_mut().clear();
 
     harness.frame_with(&[(egui::Key::N, ctrl())]);
+    settle_handoff(&mut harness);
 
     assert_eq!(
         harness
@@ -11270,6 +11341,7 @@ fn ctrl_n_hands_off_the_prepared_program() {
     prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
     harness.sent.borrow_mut().clear();
     harness.frame_with(&[(egui::Key::N, ctrl())]);
+    settle_handoff(&mut harness);
     assert_eq!(
         harness
             .sent
@@ -11847,5 +11919,143 @@ fn the_fault_walk_moves_through_the_front_documents_faults_only() {
             .any(|issue| issue.message.starts_with("controller:")),
         "{:?}",
         app.program.loaded().issues
+
+    );
+}
+
+/// The verdict refuses on exactly two answers: the interpreter said no, or it
+/// died before it said anything. `Ok`, `Timeout` and `Unavailable` are not
+/// refusals - the machine's own interpreter reads the file at run time.
+#[test]
+fn only_a_refusal_or_a_crash_closes_the_gate_on_a_verdict() {
+    use linc_core::verify::{CheckOutcome, MachineCheck};
+    let verdict = |outcome: CheckOutcome, line: Option<usize>| MachineCheck {
+        outcome,
+        message: Some("Cannot use g53 incremental".into()),
+        block: Some("G91 G53 G0 X10".into()),
+        line,
+    };
+    let refused = super::program::refusal_from_check(&verdict(CheckOutcome::Refused, Some(7)))
+        .expect("a refusal refuses");
+    assert!(refused.starts_with("NOT LOADED  LN 7:"), "{refused}");
+    let crashed = super::program::refusal_from_check(&verdict(CheckOutcome::Crashed, None))
+        .expect("a crash refuses");
+    assert!(
+        crashed.contains("crashed before it read the program"),
+        "{crashed}"
+    );
+    for outcome in [
+        CheckOutcome::Ok,
+        CheckOutcome::Timeout,
+        CheckOutcome::Unavailable,
+    ] {
+        assert_eq!(
+            super::program::refusal_from_check(&verdict(outcome, None)),
+            None,
+            "{outcome:?} must not refuse a load"
+        );
+    }
+}
+
+/// The frame that asks for a load does not wait for the interpreter: the file is
+/// held until the verdict lands, and the interlock is shut in the meantime.
+#[test]
+fn a_load_waits_for_the_verdict_without_holding_the_frame() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let path = harness._dir.path().join("gcode").join("clean.ngc");
+    std::fs::write(&path, "G0 X0 Y0\nG1 X2 F300\nM2\n").unwrap();
+    harness.sent.borrow_mut().clear();
+    harness.app.load_program(path.clone());
+    assert!(
+        harness.app.program.verify.is_some(),
+        "the check must run off the frame"
+    );
+    assert!(
+        !harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::LoadProgram { .. })),
+        "the file reached the backend before the verdict: {:?}",
+        harness.sent_debug()
+    );
+    assert!(
+        !harness.app.program_ready(),
+        "a check in flight is not a verdict: the gate stays shut"
+    );
+    settle(&mut harness.app);
+    assert!(
+        harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::LoadProgram { .. })),
+        "a clean verdict lets the load through: {:?}",
+        harness.sent_debug()
+    );
+}
+
+/// A worker that dies without answering is not a refusal: the question was
+/// never answered, so the load goes ahead and the machine has the last word.
+#[test]
+fn a_check_that_never_answers_does_not_refuse() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let path = harness._dir.path().join("gcode").join("never.ngc");
+    std::fs::write(&path, "G0 X0 Y0\nM2\n").unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    drop(tx);
+    harness.app.program.verify_generation += 1;
+    harness.app.program.verify = Some(crate::state::VerifyJob {
+        kind: crate::state::VerifyKind::Load,
+        path,
+        generation: harness.app.program.verify_generation,
+        started: std::time::Instant::now(),
+        rx,
+    });
+    harness.sent.borrow_mut().clear();
+    harness.app.poll_verify();
+    assert!(
+        harness.app.program.verify.is_none(),
+        "the job is done either way"
+    );
+    assert!(
+        harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::LoadProgram { .. })),
+        "an unanswered question must not refuse a load"
+    );
+}
+
+/// A keystroke makes the verdict about to land stale, so the save that asked for
+/// it is dropped rather than applied to text it never saw.
+#[test]
+fn a_verdict_about_text_that_moved_on_is_dropped() {
+    let (_dir, mut app) = make_app(PanelMode::Edit);
+    app.snapshot.program.path = None;
+    app.snapshot.program.content = None;
+    app.program.loaded_mut().editor.replace_text("G0 X0\nG1 X10\n".into());
+    app.save_program();
+    let Some(Modal::SaveProgramAs(_)) = app.overlay.modal.clone() else {
+        panic!("the save asks for a name, got {:?}", app.overlay.modal);
+    };
+    app.save_program_as("typed");
+    assert!(
+        app.program.verify.is_some(),
+        "the save asks the interpreter"
+    );
+    let generation = app.program.verify_generation;
+    app.mark_editor_changed();
+    assert!(app.program.verify.is_none(), "the keystroke drops the job");
+    assert!(
+        app.program.verify_generation > generation,
+        "and makes its verdict stale"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    app.poll_verify();
+    assert!(
+        app.program.machine_check.is_none(),
+        "a dropped verdict leaves no answer behind"
     );
 }

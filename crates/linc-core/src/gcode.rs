@@ -4699,6 +4699,30 @@ pub fn parse_preview(
     )
 }
 
+/// The same preview, seeded with the EXT register the machine holds.
+///
+/// A machine with a shift in effect cuts shifted even when the program never
+/// mentions `G92`, so the drawn path has to start from the register. Callers
+/// that draw a program the machine will run pass it; a single MDI block that
+/// has not run yet has no reason to.
+pub fn parse_preview_seeded(
+    text: &str,
+    axis_names: &[String],
+    offset: Option<&AxisMap<f64>>,
+    current_position: [f64; 3],
+    register: Option<&AxisMap<f64>>,
+) -> Preview {
+    parse_preview_full(
+        text,
+        axis_names,
+        offset,
+        current_position,
+        &Subroutines::default(),
+        &Tools::default(),
+        register,
+    )
+}
+
 /// The same preview, but following `o<name> call` into the machine's
 /// subroutine files the way the interpreter does.
 pub fn parse_preview_with(
@@ -4715,6 +4739,7 @@ pub fn parse_preview_with(
         current_position,
         subs,
         &Tools::default(),
+        None,
     )
 }
 
@@ -4727,6 +4752,10 @@ pub fn parse_preview_full(
     current_position: [f64; 3],
     subs: &Subroutines,
     tools: &Tools,
+    // The EXT shift in effect when the program starts, in machine units. The
+    // machine holds one, so the drawn path must start from it: a program that
+    // never touches `G92` still runs shifted.
+    register: Option<&AxisMap<f64>>,
 ) -> Preview {
     let mut preview = Preview::empty();
     let axis_index = |name: &str| -> Option<usize> {
@@ -4743,7 +4772,7 @@ pub fn parse_preview_full(
     // layers because G92.1 takes the shift back off without touching the
     // system underneath it.
     let mut system: AxisMap<f64> = offset.cloned().unwrap_or_default();
-    let mut g92: AxisMap<f64> = AxisMap::new();
+    let mut g92: AxisMap<f64> = register.cloned().unwrap_or_default();
     // G92.2 suspends the shift and keeps it for G92.3; nothing else reads it.
     let mut g92_suspended: Option<AxisMap<f64>> = None;
     let mut offsets: AxisMap<f64> = frame_of(&system, &g92);
@@ -4828,6 +4857,9 @@ pub fn parse_preview_full(
         let mut g92_cancel = false;
         let mut g92_suspend = false;
         let mut g92_restore = false;
+        // G52 is the local offset that shares this register: it assigns the
+        // shift itself instead of deriving it from where the tool is.
+        let mut g52_set = false;
         // Set by a G38.2/G38.3/G38.4/G38.5 in this block. A straight probe is
         // not modal: the block moves at feed rate along a straight line and the
         // motion mode it was in survives it.
@@ -4919,6 +4951,8 @@ pub fn parse_preview_full(
                         g92_set = true;
                     } else if value == 92.1 {
                         g92_cancel = true;
+                    } else if value == 52.0 {
+                        g52_set = true;
                     } else if value == 92.2 {
                         g92_suspend = true;
                     } else if value == 92.3 {
@@ -5074,6 +5108,11 @@ pub fn parse_preview_full(
         // tool is and what the program wants that to read. The machine does not
         // move, so this block draws nothing -- and drawing its axis words as a
         // move put a plunge to Z0 on every probe macro that zeroed the surface.
+        //
+        // The interpreter derives the new register from the position with the
+        // register taken out, so the register in effect is added back before
+        // the word is subtracted. Without that term a program that shifts twice
+        // draws half the shift it cuts.
         if g92_set {
             for (letter, axis, axis_index) in [('x', "X", 0usize), ('y', "Y", 1), ('z', "Z", 2)] {
                 let Some(value) = word_value(&tokens, letter) else {
@@ -5084,7 +5123,30 @@ pub fn parse_preview_full(
                 } else {
                     mm(value)
                 };
-                g92.insert(axis, position[axis_index] - value);
+                // `position` holds the machine point; the base the interpreter
+                // derives from is that point less the work system, with the
+                // register taken out. Adding the register back is what makes a
+                // second `G92` land where the interpreter puts it.
+                let base = position[axis_index] - offset_of(&system, axis);
+                g92.insert(axis, base - value);
+            }
+            offsets = frame_of(&system, &g92);
+            continue;
+        }
+        // G52 assigns the register for the axes it names: it is a local offset
+        // relative to the work system, not a position the block makes the tool
+        // read. Axes it leaves out keep the shift they had.
+        if g52_set {
+            for (letter, axis, axis_index) in [('x', "X", 0usize), ('y', "Y", 1), ('z', "Z", 2)] {
+                let Some(value) = word_value(&tokens, letter) else {
+                    continue;
+                };
+                let value = if axis_index == 0 {
+                    dia(mm(value))
+                } else {
+                    mm(value)
+                };
+                g92.insert(axis, value);
             }
             offsets = frame_of(&system, &g92);
             continue;
@@ -6591,6 +6653,96 @@ mod tests {
         assert!(ends[2][0].abs() < 1e-9, "{ends:?}");
     }
 
+    /// A second `G92` derives its register from the position with the register
+    /// taken out, so the preview has to add the register back before
+    /// subtracting the word. Verified against `rs274 -g`: with no motion
+    /// between them, `G92 X5` then `G92 X10` leaves the register at -10.
+    #[test]
+    fn a_second_g92_draws_the_shift_the_interpreter_derives() {
+        let preview = parse_preview(
+            "G21 G90\nG0 X0\nG92 X5\nG92 X10\nG0 X20\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = preview.segments.last().expect("a move").end;
+        // Register -10, so program X20 is machine X10.
+        assert!((end[0] - 10.0).abs() < 1e-9, "{end:?}");
+    }
+
+    /// The machine's own shift is in effect before the program starts, so a
+    /// program that never mentions `G92` is still cut shifted.
+    #[test]
+    fn a_seeded_register_shifts_a_program_that_never_sets_one() {
+        let register = AxisMap::from_entries([("X".to_string(), 12.5)]);
+        let preview = parse_preview_seeded(
+            "G21 G90\nG0 X0\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+            Some(&register),
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = preview.segments.last().expect("a move").end;
+        assert!((end[0] - 12.5).abs() < 1e-9, "{end:?}");
+    }
+
+    /// A program's own `G92` derives from the seeded base, not from zero: the
+    /// point it is given replaces the operator's shift rather than adding to
+    /// it.
+    #[test]
+    fn a_program_g92_replaces_the_seeded_register() {
+        let register = AxisMap::from_entries([("X".to_string(), 12.5)]);
+        let preview = parse_preview_seeded(
+            "G21 G90\nG0 X0\nG92 X100\nG0 X0\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+            Some(&register),
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = preview.segments.last().expect("a move").end;
+        // The tool stands at machine X12.5 because the program's X0 in a
+        // frame shifted by 12.5 is 12.5. The interpreter derives from that
+        // point with the register taken out, so the program's value replaces
+        // the operator's shift: register -87.5, and the return to X0 lands
+        // there.
+        assert!((end[0] + 87.5).abs() < 1e-9, "{end:?}");
+    }
+
+    /// `G52` is the same register set from a local offset: it assigns the value
+    /// instead of deriving it from where the tool is. `rs274 -g` reports
+    /// `G52 X1 Y2` as a register of 1 and 2.
+    #[test]
+    fn a_g52_block_shifts_the_frame_by_the_value_it_names() {
+        let preview = parse_preview(
+            "G21 G90\nG0 X0 Y0\nG52 X1 Y2\nG0 X10 Y10\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = preview.segments.last().expect("a move").end;
+        // The register shifts the drawn frame the same way it shifts the DRO.
+        assert!((end[0] - 11.0).abs() < 1e-9, "{end:?}");
+        assert!((end[1] - 12.0).abs() < 1e-9, "{end:?}");
+    }
+
+    /// `G52` shares the register, so `G92.1` cancels it like any other shift.
+    #[test]
+    fn a_g92_cancel_removes_a_g52_shift() {
+        let preview = parse_preview(
+            "G21 G90\nG0 X0\nG52 X1\nG92.1\nG0 X10\nM2\n",
+            &preview_axes(),
+            None,
+            [0.0; 3],
+        );
+        assert!(preview.error.is_none(), "{:?}", preview.error);
+        let end = preview.segments.last().expect("a move").end;
+        assert!((end[0] - 10.0).abs() < 1e-9, "{end:?}");
+    }
+
     #[test]
     fn a_g28_passes_through_its_axis_words_then_goes_to_the_reference_point() {
         // The axis words name a point to pass through, not the destination: the
@@ -6753,6 +6905,7 @@ mod tests {
             [0.0; 3],
             &Subroutines::default(),
             &Tools::new([(tool, diameter * 0.5)]),
+            None,
         )
     }
 
@@ -6788,6 +6941,7 @@ mod tests {
             [0.0; 3],
             &Subroutines::default(),
             &Tools::default(),
+            None,
         )
     }
 
@@ -7784,6 +7938,7 @@ mod tests {
             [0.0; 3],
             &Subroutines::default(),
             &tools,
+            None,
         );
         assert!(preview.error.is_none(), "{:?}", preview.error);
         let reason = preview.incomplete_reason.clone().expect("a reason");

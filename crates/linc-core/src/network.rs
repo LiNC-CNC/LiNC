@@ -777,10 +777,10 @@ fn down_cycle(
 ) -> bool {
     let mut notes = Vec::new();
     let down = match run_steps(&settings.down) {
-        Ok(elapsed) => elapsed,
+        Ok(elapsed) => Some(elapsed),
         Err(error) => {
             notes.push(format!("down command failed: {error}"));
-            Duration::ZERO
+            None
         }
     };
     let (link_down, verify) = verify_until(settings, false, &mut notes);
@@ -797,7 +797,7 @@ fn down_cycle(
         status.link_up = Some(!link_down);
         status.safe = link_down;
         status.settle_ms = Some(settings.settle.as_millis() as u64);
-        status.down_ms = Some(down.as_millis() as u64);
+        status.down_ms = down.map(|value| value.as_millis() as u64);
         status.verify_ms = verify.map(|value| value.as_millis() as u64);
         status.measuring = false;
         status.lease = None;
@@ -814,16 +814,33 @@ fn down_cycle(
     for note in &notes {
         log::warn!("network: {note}");
     }
-    log::info!(
-        "network: {} {} down in {}ms, verify {}, settle {}",
-        settings.kind.as_str(),
-        settings.interface,
-        down.as_millis(),
-        verify
-            .map(|value| format!("{}ms", value.as_millis()))
-            .unwrap_or_else(|| "not reached".into()),
-        settings.settle.as_millis()
-    );
+    let elapsed = |value: Option<Duration>| {
+        value.map_or_else(
+            || "not reached".to_string(),
+            |d| format!("{}ms", d.as_millis()),
+        )
+    };
+    if link_down {
+        log::info!(
+            "network: {} {} down in {}, verify {}, settle {}",
+            settings.kind.as_str(),
+            settings.interface,
+            elapsed(down),
+            elapsed(verify),
+            settings.settle.as_millis()
+        );
+    } else {
+        // A down command that failed, or a device that ignored it, leaves the
+        // link up and motion blocked. Saying "down in 0ms" here read like a
+        // success in the log while the machine stayed gated.
+        log::warn!(
+            "network: {} {} did not read down (down command {}, verify {}); motion stays blocked",
+            settings.kind.as_str(),
+            settings.interface,
+            down.map_or_else(|| "failed".to_string(), |d| format!("{}ms", d.as_millis())),
+            elapsed(verify)
+        );
+    }
     link_down
 }
 
@@ -1176,7 +1193,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failing_down_command_is_a_note_not_a_silent_pass() {
+    fn a_failed_down_command_is_a_note_not_a_silent_pass() {
         let dir = tempfile::tempdir().unwrap();
         let (mut settings, _) = fixture(dir.path());
         let failing = script(dir.path(), "fail.sh", "exit 1");
@@ -1189,6 +1206,38 @@ mod tests {
                 .any(|note| note.contains("down command failed")),
             "{measurement:?}"
         );
+    }
+
+    /// The mill's own failure mode: `nmcli` exits 1 because polkit refuses the
+    /// radio switch. The link never reads down, so motion must stay blocked and
+    /// the status must say so instead of reporting a down that never happened.
+    #[test]
+    fn a_refused_down_command_leaves_motion_blocked_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut settings, state_file) = fixture(dir.path());
+        let failing = script(dir.path(), "refuse.sh", "exit 1");
+        settings.down = vec![vec![failing]];
+        settings.verify_timeout = Duration::from_millis(100);
+        let supervisor = SupervisorHandle::start(settings);
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.task.interp = InterpState::Idle;
+        snapshot.program.path = Some(std::path::PathBuf::from("/nc_files/x.ngc"));
+        supervisor.observe(&snapshot);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline && !supervisor.status().message.contains("motion blocked") {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let status = supervisor.status();
+        assert!(
+            !supervisor.safe(),
+            "an unverified down must not read safe: {status:?}"
+        );
+        assert!(
+            status.down_ms.is_none(),
+            "no down time to report: {status:?}"
+        );
+        assert!(status.message.contains("motion blocked"), "{status:?}");
+        assert_eq!(fs::read_to_string(&state_file).unwrap().trim(), "up");
     }
 
     #[test]

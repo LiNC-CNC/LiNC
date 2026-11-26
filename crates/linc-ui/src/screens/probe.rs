@@ -121,6 +121,35 @@ fn run_precondition_reason(
     None
 }
 
+/// The reason a probe run is refused while the global EXT shift is in effect.
+///
+/// Every probe bundle LiNC ships cancels the register with `G92.1` as it
+/// starts, so running one would destroy a shift the operator set and the next
+/// program would cut in a frame nobody chose.
+fn ext_shift_reason(app: &LincApp) -> Option<String> {
+    let diameter = app.reads_x_as_diameter();
+    let mut shifted = Vec::new();
+    for axis in app.axes() {
+        let value = app.snapshot.offsets.g92.get(&axis).copied().unwrap_or(0.0);
+        if value.abs() <= 1e-9 {
+            continue;
+        }
+        let shown = if diameter && axis == "X" {
+            value * 2.0
+        } else {
+            value
+        };
+        shifted.push(format!("{axis}{shown:+.3}"));
+    }
+    if shifted.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "EXT shift in effect ({}): the probe cancels it as it starts. Clear it on OFFSETS first",
+        shifted.join(" ")
+    ))
+}
+
 /// The current reason Run is unavailable, or `None` when validation passes.
 /// Keeping this separate from `run` lets the page explain a blocked action
 /// without issuing an invalid command.
@@ -145,6 +174,12 @@ pub(crate) fn run_block_reason(app: &LincApp) -> Option<String> {
         issued.probe_mode,
         app.snapshot.offsets.active_index,
     ) {
+        return Some(reason);
+    }
+    // The probe subroutines cancel the global shift on their first lines, so a
+    // run would clear it without the operator deciding to. Refuse instead, and
+    // say where the shift is cleared.
+    if let Some(reason) = ext_shift_reason(app) {
         return Some(reason);
     }
     // What the Run writes, decided by the shared classifier: `None` is an

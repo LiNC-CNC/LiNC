@@ -190,6 +190,26 @@ pub fn active_offset(snapshot: &MachineSnapshot) -> Option<&linc_core::model::Ax
         .map(|offset| &offset.values)
 }
 
+/// The top bar's EXT readout: the axes that carry a shift, run together
+/// (`XYZ`), and nothing else.
+///
+/// Absent when nothing is shifted, so a session that never uses the register
+/// keeps the bar's width. The values live on the EXT cards; the bar only has to
+/// say which axes are moved.
+pub fn ext_metric(register: &linc_core::model::AxisMap<f64>, axes: &[String]) -> Option<String> {
+    let moved: Vec<&str> = axes
+        .iter()
+        .filter(|axis| {
+            register
+                .get(axis)
+                .map(|value| value.abs() > 1e-9)
+                .unwrap_or(false)
+        })
+        .map(String::as_str)
+        .collect();
+    (!moved.is_empty()).then(|| moved.concat())
+}
+
 pub fn machine_bounds(profile: &Profile) -> Option<Bounds3> {
     let mut bounds = Bounds3 {
         min: [f64::INFINITY; 3],
@@ -557,6 +577,38 @@ impl LincApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn register(values: &[(&str, f64)]) -> linc_core::model::AxisMap<f64> {
+        let mut map = linc_core::model::AxisMap::new();
+        for (axis, value) in values {
+            map.insert(*axis, *value);
+        }
+        map
+    }
+
+    #[test]
+    fn the_ext_metric_names_only_the_shifted_axes() {
+        let axes: Vec<String> = ["X", "Y", "Z"]
+            .iter()
+            .map(|axis| axis.to_string())
+            .collect();
+        let register = register(&[("X", 12.5), ("Y", -3.25), ("Z", 0.0)]);
+        assert_eq!(ext_metric(&register, &axes).as_deref(), Some("XY"));
+    }
+
+    #[test]
+    fn the_ext_metric_is_absent_at_zero() {
+        let axes: Vec<String> = vec!["X".into(), "Y".into()];
+        let register = register(&[("X", 0.0), ("Y", 0.0)]);
+        assert_eq!(ext_metric(&register, &axes), None);
+    }
+
+    #[test]
+    fn the_ext_metric_follows_the_axis_order() {
+        let axes: Vec<String> = vec!["Z".into(), "X".into()];
+        let register = register(&[("X", 1.0), ("Z", -2.0)]);
+        assert_eq!(ext_metric(&register, &axes).as_deref(), Some("ZX"));
+    }
 
     #[test]
     fn the_cycle_time_reads_as_a_duration_not_a_clock() {

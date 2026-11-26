@@ -90,7 +90,7 @@ pub const DRO_LINE_Y: f32 = 24.0;
 /// Gap between the axis name and the coordinate beside it.
 pub const DRO_LABEL_GAP: f32 = 8.0;
 /// The DTG line reads at the small end of the ramp.
-pub const DRO_SMALL_FONT: f32 = 9.0;
+pub const DRO_SMALL_FONT: f32 = 12.0;
 /// Jog/MAIN axis card: one readout line, then the DTG line and the move bar.
 pub const DRO_CARD_HEIGHT: f32 = 66.0;
 pub const DRO_CARD_HEIGHT_COMPACT: f32 = 64.0;

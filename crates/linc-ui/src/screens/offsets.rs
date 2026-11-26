@@ -1,6 +1,6 @@
 //! Work offsets G54-G59.3 and tool offsets.
 
-use egui::{RichText, Ui};
+use egui::{FontId, RichText, Ui};
 use linc_core::command::MachineCommand;
 use linc_core::model::AxisMap;
 
@@ -35,6 +35,10 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     // Page-local: `A` selects the highlighted row as the active work system.
     // The handler lives here, so no other page consumes or sees the key.
     handle_activate_key(app, ui);
+    // The EXT band's keys come before the page's own, so an open band keeps the
+    // keyboard it opened with: `X`/`Y`/`Z` move between its fields instead of
+    // opening the WCS editor behind it.
+    handle_ext_keys(app, ui);
     let writable = app.snapshot.writes_allowed();
     if !writable {
         let reason = if app.snapshot.panel.protect_effective() {
@@ -49,18 +53,33 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
         common::read_only_hint(ui, reason);
     }
     ui.add_space(2.0);
-    work_position_dro(app, ui, writable);
-    ui.add_space(6.0);
+    // One width for the page, pinned before anything inside the scroll area is
+    // laid out: the readout rows, the table and the preview all end on the same
+    // right edge, and the scroll area's own idea of the width cannot shift one
+    // row against another.
+    let available = (ui.available_width() - ui.spacing().scroll.bar_width).max(240.0);
     egui::ScrollArea::vertical()
         .id_salt("offsets-body")
         .max_height(ui.available_height())
         .show(ui, |ui| {
-            let available = ui.available_width();
-            let table_width = (available * 0.62).max(420.0);
+            ui.set_min_width(available);
+            ui.set_max_width(available);
+            // The rows take the page width and divide it themselves, so both
+            // end on the same edge as the panes below.
+            work_position_dro(app, ui, writable, available);
+            ext_row(app, ui, writable, available);
+            ui.add_space(6.0);
+            // Both panes are measured from the same pinned width with no floor
+            // of their own: a floor is what let one pane outgrow the row and put
+            // its right edge past the readout cards above it.
+            let table_width = available * 0.62;
             // The preview must end on the table's bottom edge, not on a fixed
             // height: the table grows with the number of systems.
             let mut table_height = PREVIEW_HEIGHT;
             ui.horizontal_top(|ui| {
+                // The gap between the panes is the one named below: an implicit
+                // one on each side of it widened the row past the readout cards.
+                ui.spacing_mut().item_spacing.x = 0.0;
                 ui.allocate_ui_with_layout(
                     egui::Vec2::new(table_width, PREVIEW_HEIGHT),
                     egui::Layout::top_down(egui::Align::Min),
@@ -70,10 +89,15 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
                     },
                 );
                 ui.add_space(8.0);
+                let preview_width = (available - table_width - 8.0).max(120.0);
                 ui.allocate_ui_with_layout(
-                    egui::Vec2::new((available - table_width - 8.0).max(260.0), table_height),
+                    egui::Vec2::new(preview_width, table_height),
                     egui::Layout::top_down(egui::Align::Min),
-                    |ui| offset_preview(app, ui, table_height),
+                    |ui| {
+                        ui.set_min_width(preview_width);
+                        ui.set_max_width(preview_width);
+                        offset_preview(app, ui, table_height);
+                    },
                 );
             });
         });
@@ -83,15 +107,12 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
 /// big, with the machine coordinate small underneath — the same shape as the
 /// live DROs elsewhere. Clicking a value edits it; the entry takes arithmetic,
 /// and committing writes the position, so the machine reports what was typed.
-fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
+fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool, width: f32) {
     let axes = app.axes();
     if axes.is_empty() {
         return;
     }
     let active = app.snapshot.offsets.active_index;
-    let gap = 8.0;
-    let width =
-        ((ui.available_width() - gap * (axes.len() as f32 - 1.0)) / axes.len() as f32).max(120.0);
     // The Machine page's readout without the DTG line and move bar.
     let height = theme::DRO_CARD_HEIGHT_OFFSETS;
 
@@ -99,11 +120,14 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     handle_dro_keys(app, ui);
 
     let mut start: Option<(String, f64)> = None;
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = gap;
-        for axis in &axes {
-            let (rect, response) =
-                ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    {
+        let rects = card_row(ui, width, axes.len(), height);
+        for (rect, axis) in rects.into_iter().zip(axes.iter()) {
+            let response = ui.interact(
+                rect,
+                egui::Id::unique(format!("offsets-dro-{axis}")),
+                egui::Sense::click(),
+            );
             let editing = app
                 .offsets
                 .dro_edit
@@ -189,7 +213,7 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                 start = Some((axis.clone(), actual_work));
             }
         }
-    });
+    }
     if let Some((axis, work)) = start {
         app.offsets.dro_edit = Some(crate::state::DroEdit {
             axis,
@@ -199,17 +223,287 @@ fn work_position_dro(app: &mut LincApp, ui: &mut Ui, writable: bool) {
     }
 }
 
-/// X, Y and Z start editing that axis's DRO, so the operator does not have to
-/// reach for the mouse to enter a coordinate.
+/// The register value as the operator reads it: a lathe reads X as a diameter,
+/// so the shift reads as one too.
+fn ext_display(axis: &str, value: f64, diameter: bool) -> f64 {
+    if diameter && axis == "X" {
+        value * 2.0
+    } else {
+        value
+    }
+}
+
+/// The operator's typed value in the units the command carries. One conversion
+/// point: the write path speaks machine units, so a diameter typed into a lathe
+/// field is halved here and nowhere else.
+fn ext_machine_value(axis: &str, typed: f64, diameter: bool) -> f64 {
+    if diameter && axis == "X" {
+        typed / 2.0
+    } else {
+        typed
+    }
+}
+
+/// One row of evenly divided cards, as explicit rects.
 ///
-/// Shared with MAIN's coordinate matrix: the WORK COORDINATES card there is the
-/// same reading of the same active WCS, so the keys and the write are one path.
-/// Which modes offer the matrix's letters is the caller's decision
-/// (`matrix_dro_keys_active`); this page is the DRO itself, so it keeps them
-/// wherever it is drawn.
-///
-/// A field that holds the keyboard keeps its letters: they are text there, not a
-/// shortcut, and consuming them would open an edit over the line being typed.
+/// Not a horizontal layout: egui adds its own item spacing between allocated
+/// items, so a row built that way ended a few pixels past the pane below it and
+/// the page's right edge had three different answers. The widths come from the
+/// row's own width, and the row advances the cursor by its height.
+fn card_row(ui: &mut Ui, width: f32, cards: usize, height: f32) -> Vec<egui::Rect> {
+    const GAP: f32 = 8.0;
+    let top_left = ui.cursor().min;
+    let card_width =
+        ((width - GAP * (cards.saturating_sub(1)) as f32) / cards.max(1) as f32).max(80.0);
+    let rects: Vec<egui::Rect> = (0..cards)
+        .map(|index| {
+            egui::Rect::from_min_size(
+                egui::pos2(top_left.x + index as f32 * (card_width + GAP), top_left.y),
+                egui::vec2(card_width, height),
+            )
+        })
+        .collect();
+    let row = egui::Rect::from_min_size(top_left, egui::vec2(width, height));
+    ui.allocate_rect(row, egui::Sense::hover());
+    rects
+}
+
+/// One EXT card per axis, under the DRO row: the same frame and value treatment
+/// as the work coordinates above, with no machine coordinate — this number is
+/// the shift itself, not a position.
+pub(crate) fn ext_row(app: &mut LincApp, ui: &mut Ui, writable: bool, width: f32) {
+    let axes = app.axes();
+    if axes.is_empty() {
+        return;
+    }
+    let height = theme::DRO_CARD_HEIGHT_OFFSETS;
+    let diameter = app.reads_x_as_diameter();
+    let writable = writable;
+    let mut start: Option<String> = None;
+    ui.add_space(6.0);
+    {
+        let rects = card_row(ui, width, axes.len(), height);
+        for (rect, axis) in rects.into_iter().zip(axes.iter()) {
+            let response = ui.interact(
+                rect,
+                egui::Id::unique(format!("ext-card-{axis}")),
+                egui::Sense::click(),
+            );
+            let editing = app
+                .offsets
+                .ext_edit
+                .as_ref()
+                .map(|edit| edit.axis == *axis)
+                .unwrap_or(false);
+            let value = app.snapshot.offsets.g92.get(axis).copied().unwrap_or(0.0);
+            let shown = ext_display(axis, value, diameter);
+            common::paint_dro_frame(ui, rect, editing);
+            let painter = ui.painter_at(rect);
+            let line_y = rect.top() + theme::DRO_LINE_Y;
+            painter.text(
+                egui::pos2(rect.left() + theme::DRO_INSET, line_y),
+                egui::Align2::LEFT_CENTER,
+                format!("EXT {axis}"),
+                FontId::monospace(theme::font_size(theme::DRO_FONT)),
+                if value.abs() > 1e-9 {
+                    theme::WARNING
+                } else {
+                    theme::C3
+                },
+            );
+            if editing {
+                let field_rect = egui::Rect::from_min_max(
+                    egui::pos2(rect.left() + 88.0, rect.top() + 8.0),
+                    egui::pos2(rect.right() - 10.0, rect.top() + 36.0),
+                );
+                let mut child = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(field_rect)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                let mut buffer = app
+                    .offsets
+                    .ext_edit
+                    .as_ref()
+                    .map(|edit| edit.buffer.clone())
+                    .unwrap_or_default();
+                let id = egui::Id::unique(format!("{}-{axis}", crate::state::EXT_FIELD_ID));
+                let field = child.add_sized(
+                    [field_rect.width(), 28.0],
+                    egui::TextEdit::singleline(&mut buffer)
+                        .id(id)
+                        .font(egui::FontId::monospace(theme::font_size(20.0)))
+                        .margin(egui::Margin::symmetric(4, 0)),
+                );
+                if app
+                    .offsets
+                    .ext_edit
+                    .as_ref()
+                    .map(|edit| edit.focus)
+                    .unwrap_or(false)
+                {
+                    field.request_focus();
+                    if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(buffer.chars().count()),
+                            )));
+                        state.store(ui.ctx(), id);
+                    }
+                    if let Some(slot) = app.offsets.ext_edit.as_mut() {
+                        slot.focus = false;
+                    }
+                }
+                if field.changed() {
+                    if let Some(slot) = app.offsets.ext_edit.as_mut() {
+                        slot.buffer = buffer;
+                    }
+                }
+            } else {
+                painter.text(
+                    egui::pos2(rect.right() - theme::DRO_INSET, line_y),
+                    egui::Align2::RIGHT_CENTER,
+                    format!("{shown:+.3}"),
+                    FontId::monospace(theme::font_size(theme::DRO_FONT)),
+                    if value.abs() > 1e-9 {
+                        theme::WARNING
+                    } else {
+                        theme::MUTED
+                    },
+                );
+                if response.clicked() && writable {
+                    start = Some(axis.clone());
+                }
+            }
+        }
+    }
+    if let Some(axis) = start {
+        start_ext_edit(app, axis);
+    }
+}
+
+/// Page-local keys for the EXT cards: `Ctrl+X`/`Ctrl+Y`/`Ctrl+Z` edit that
+/// axis, `Enter` commits, `Esc` discards, and a bare `0` clears every axis. The
+/// chord is what keeps the digits free for typing and the arrows with the caret.
+pub(crate) fn handle_ext_keys(app: &mut LincApp, ui: &mut Ui) {
+    if app.overlay_open() {
+        return;
+    }
+    let axes = app.axes();
+    if axes.is_empty() {
+        return;
+    }
+    let mut open: Option<String> = None;
+    let mut clear = false;
+    let mut commit = false;
+    let mut cancel = false;
+    let editing = app.offsets.ext_edit.is_some();
+    // Read the context state before taking the input lock: `text_edit_focused`
+    // reaches into the same context write that `input_mut` holds.
+    let text_focused = ui.ctx().text_edit_focused();
+    let table_editing = app.offsets.editing;
+    let edit_x = app.prefs.keymap.ext_edit_x;
+    let edit_y = app.prefs.keymap.ext_edit_y;
+    let edit_z = app.prefs.keymap.ext_edit_z;
+    let zero_binding = app.prefs.keymap.offset_ext_zero;
+    ui.input_mut(|input| {
+        if !text_focused && !table_editing {
+            for (axis, binding) in [("X", edit_x), ("Y", edit_y), ("Z", edit_z)] {
+                if axes.iter().any(|present| present == axis)
+                    && input.consume_key(binding.modifiers, binding.key)
+                {
+                    open = Some(axis.to_string());
+                }
+            }
+            if input.consume_key(zero_binding.modifiers, zero_binding.key) {
+                clear = true;
+            }
+        }
+        if editing {
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+                commit = true;
+            }
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+                cancel = true;
+            }
+        }
+    });
+    if let Some(axis) = open {
+        start_ext_edit(app, axis);
+        return;
+    }
+    if clear {
+        send_ext_zero(app);
+    }
+    if commit && !commit_ext_edit(app) {
+        return;
+    }
+    if cancel {
+        app.offsets.ext_edit = None;
+        release_ext_focus(ui);
+    }
+    if commit {
+        release_ext_focus(ui);
+    }
+}
+
+/// Hand the keyboard back once the EXT field stops being drawn: egui keeps a
+/// text edit's focus after its widget is gone and every page key stays inert.
+fn release_ext_focus(ui: &Ui) {
+    for axis in ["X", "Y", "Z"] {
+        ui.ctx().memory_mut(|memory| {
+            memory.surrender_focus(egui::Id::unique(format!(
+                "{}-{axis}",
+                crate::state::EXT_FIELD_ID
+            )))
+        });
+    }
+}
+
+fn start_ext_edit(app: &mut LincApp, axis: String) {
+    if axis.is_empty() {
+        return;
+    }
+    let diameter = app.reads_x_as_diameter();
+    let value = app.snapshot.offsets.g92.get(&axis).copied().unwrap_or(0.0);
+    let seed = ext_display(&axis, value, diameter);
+    app.offsets.ext_edit = Some(crate::state::ExtEdit {
+        axis,
+        buffer: format!("{seed:.3}"),
+        focus: true,
+    });
+}
+
+/// Send one axis's shift. The command carries the value the operator asked for,
+/// so the controller keeps ownership of the register and the card repaints from
+/// what it reports.
+fn commit_ext_edit(app: &mut LincApp) -> bool {
+    let Some(edit) = app.offsets.ext_edit.clone() else {
+        return false;
+    };
+    let Some(typed) = crate::state::eval_expression(&edit.buffer) else {
+        app.toast("not a number or expression", theme::WARNING);
+        return false;
+    };
+    let value = ext_machine_value(&edit.axis, typed, app.reads_x_as_diameter());
+    let mut values = AxisMap::new();
+    values.insert(edit.axis.clone(), value);
+    app.send(MachineCommand::SetG92Offset { values });
+    app.offsets.ext_edit = None;
+    true
+}
+
+fn send_ext_zero(app: &mut LincApp) {
+    if !app.snapshot.writes_allowed() {
+        app.toast("offset writes are blocked", theme::WARNING);
+        return;
+    }
+    app.send(MachineCommand::ClearG92Offset);
+    app.offsets.ext_edit = None;
+}
+
 pub(crate) fn handle_axis_keys(app: &mut LincApp, ui: &mut Ui) {
     if app.overlay_open()
         || app.offsets.dro_edit.is_some()
@@ -459,7 +753,11 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
         egui::Sense::focusable_noninteractive(),
     );
     ui.spacing_mut().item_spacing.y = spacing_y;
-    if !app.offsets.editing && app.offsets.dro_edit.is_none() && !focus.has_focus() {
+    if !app.offsets.editing
+        && app.offsets.dro_edit.is_none()
+        && app.offsets.ext_edit.is_none()
+        && !focus.has_focus()
+    {
         focus.request_focus();
     }
     if app.offsets.dro_edit.is_none() {
@@ -487,13 +785,6 @@ fn work_offsets_card(app: &mut LincApp, ui: &mut Ui, writable: bool) {
                 );
             });
         });
-        if app.offsets.g92.len() != axes.len() {
-            let mut values = vec!["0.0000".into(); axes.len()];
-            for (index, value) in app.offsets.g92.iter().take(values.len()).enumerate() {
-                values[index] = value.clone();
-            }
-            app.offsets.g92 = values;
-        }
         // Half a line of air between rows, not a whole one: the rows are text
         // and a band, and nine systems at the old pitch (row height plus the
         // table's full item spacing) grew the card past the page.

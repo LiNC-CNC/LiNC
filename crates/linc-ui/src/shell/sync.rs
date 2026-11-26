@@ -20,6 +20,9 @@ pub(super) fn offsets_signature(rows: &[linc_core::model::WorkOffset]) -> Vec<f6
 impl LincApp {
     pub fn sync(&mut self) {
         self.poll_backend();
+        // A controller check is a child process on a worker thread: its verdict
+        // is picked up here, never waited for in the frame that asked.
+        self.poll_verify();
         let mode = self.snapshot.panel.mode.clone();
         if self.nav.last_mode.as_ref() != Some(&mode) {
             self.on_mode_change(mode.clone());
@@ -209,13 +212,6 @@ impl LincApp {
             }
             self.offsets.rows.insert(offset.index, draft);
         }
-        self.offsets.g92 = self
-            .snapshot
-            .offsets
-            .g92
-            .iter()
-            .map(|(_, value)| format!("{value:.4}"))
-            .collect();
     }
 
     pub(super) fn sync_tools_from_snapshot(&mut self, force: bool) {

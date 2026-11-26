@@ -69,6 +69,8 @@ Three layers, in the order they run:
 - `linc-core::verify` — the controller's own interpreter through `rs274 -g`, on
   load, which knows what one block cannot. It reports one fault, mostly without a
   line number (it echoes the block), and is killed at `program.verify_timeout_ms`.
+  The HMI runs it on a worker thread and polls the verdict: the load waits, the
+  frame does not, and the interlock stays shut until the answer lands.
 
 A file the checks refuse is not loaded, so the panel's CYCLE START has nothing to
 run. CYCLE START passes through LiNC: the HMI reads `cnc_panel.cycle_start`, runs
@@ -102,6 +104,7 @@ had refused.
 - Run `rs274` one at a time. Two instances started at the same moment crash with `SIGBUS`; `linc_core::verify` serialises them behind a process-wide
   lock, and a crash is reported as `Crashed`, never as "no faults".
 - `docs/solutions/` — documented solutions to past problems (bugs, best practices, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`); check it when working in a documented area.
+- `CONCEPTS.md` — shared domain vocabulary (entities, named processes, status concepts); relevant when orienting to the codebase or discussing domain concepts.
 - `CODING_STANDARDS.md` — the rules code here follows, one condition per past defect; read it before writing or reviewing code, and update it when a change establishes or retires a rule.
 - `REVIEW.md` — how review behaves here; it carries `@CODING_STANDARDS.md`, so a reviewer that reads only this file still reaches the rules.
 
@@ -158,7 +161,10 @@ had refused.
 - Table cells edit in place: Enter selects the whole value, Escape restores the
   previous one, and the open cell keeps the selection border's size in red
   (Tools, Offsets). Home/End belong to the cell while it has focus; add its id to
-  the `text_focused` list in `shell/keyboard.rs` if you add another editor.
+  the `text_focused` list in `shell/keyboard.rs` if you add another editor. The
+  Offsets page's EXT cards are the same editor reached by `Ctrl+X`/`Ctrl+Y`/`Ctrl+Z`:
+  the chords, not bare letters, because the digits must stay free for typing; `0`
+on the page clears every axis, and there is no clear button.
 
 - No page titles; the navigation names the page. Start each page with `common::focus_anchor(ui, "<page>-page-focus")` so arrow navigation has a
   starting point. Banners stay because they carry live state.

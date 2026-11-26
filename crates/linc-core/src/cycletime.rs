@@ -342,33 +342,93 @@ impl AxisRates {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub struct MoveKey {
     pub line: usize,
+    /// The loop pass the move runs in, from [`Preview::segment_loop`]. Zero
+    /// outside every loop. A loop body draws the same source line once per pass,
+    /// so without this the second pass overwrote the first pass's measurement
+    /// and the estimate collapsed onto one pass.
+    #[serde(default)]
+    pub pass: u32,
     pub ordinal: usize,
+}
+
+/// Whether a source line cannot be attributed to one place in the program.
+///
+/// A subroutine body carries its own file's line numbers and the preview inlines
+/// it, so a body's line 12 and the main program's line 12 are one number for two
+/// different moves. `SubroutineBody::named_at` cannot separate them either — the
+/// controller does not say which file a line is in — so such a line is not named
+/// at all and the recent ratio speaks for those moves.
+fn line_is_ambiguous(preview: &Preview, line: usize) -> bool {
+    let mut spanning = preview
+        .subroutines
+        .iter()
+        .filter(|body| (body.first_line..=body.last_line).contains(&line));
+    let Some(_) = spanning.next() else {
+        return false;
+    };
+    // Two bodies numbering the same line, or a body line the main program also
+    // uses: both leave more than one candidate for the same key.
+    spanning.next().is_some() || line <= preview.line_count
 }
 
 /// The name of move `index` in the drawn path.
 pub fn move_key(preview: &Preview, index: usize) -> Option<MoveKey> {
     let segment = preview.segments.get(index)?;
-    let (from, _) = preview.line_bounds.get(&segment.line)?;
+    if line_is_ambiguous(preview, segment.line) {
+        return None;
+    }
+    let pass = preview.segment_loop.get(index).copied().unwrap_or(0);
+    let mut from = index;
+    while from > 0 {
+        let previous = from - 1;
+        let same_line = preview.segments[previous].line == segment.line;
+        let same_pass = preview.segment_loop.get(previous).copied().unwrap_or(0) == pass;
+        if !(same_line && same_pass) {
+            break;
+        }
+        from = previous;
+    }
     Some(MoveKey {
         line: segment.line,
-        ordinal: index.saturating_sub(*from),
+        pass,
+        ordinal: index - from,
     })
 }
 
 /// Where move `key` is in the drawn path, if this preview still draws it.
 pub fn move_index(preview: &Preview, key: MoveKey) -> Option<usize> {
-    let (from, to) = preview.line_bounds.get(&key.line)?;
-    let index = from + key.ordinal;
-    if index >= *to {
-        return None;
+    let mut index = 0;
+    while index < preview.segments.len() {
+        let matches = preview.segments[index].line == key.line
+            && preview.segment_loop.get(index).copied().unwrap_or(0) == key.pass;
+        if !matches {
+            index += 1;
+            continue;
+        }
+        let run_start = index;
+        let mut end = run_start;
+        while end < preview.segments.len()
+            && preview.segments[end].line == key.line
+            && preview.segment_loop.get(end).copied().unwrap_or(0) == key.pass
+        {
+            end += 1;
+        }
+        let candidate = run_start + key.ordinal;
+        return (candidate < end).then_some(candidate);
     }
-    let segment = preview.segments.get(index)?;
-    (segment.line == key.line).then_some(index)
+    None
 }
 
 /// The first move of the block on `line`, as a position in the plan's order.
+///
+/// The first occurrence, not the last: a loop draws the same line once per pass,
+/// and taking the last one put the cursor at the end of the loop instead of its
+/// start.
 pub fn line_start(preview: &Preview, line: usize) -> Option<usize> {
-    preview.line_bounds.get(&line).map(|(from, _)| *from)
+    preview
+        .segments
+        .iter()
+        .position(|segment| segment.line == line)
 }
 
 /// The slowest ratio a measurement may record, and the fastest. A move that
@@ -540,6 +600,10 @@ struct StoredCalibration {
 #[serde(deny_unknown_fields)]
 struct StoredMove {
     line: usize,
+    /// The loop pass this move runs in. Absent in files written before the key
+    /// carried it, which reads as the first pass.
+    #[serde(default)]
+    pass: u32,
     ordinal: usize,
     ratio: f64,
 }
@@ -569,6 +633,7 @@ impl CycleStore {
             learned.moves.insert(
                 MoveKey {
                     line: entry.line,
+                    pass: entry.pass,
                     ordinal: entry.ordinal,
                 },
                 entry.ratio.clamp(MIN_RATIO, MAX_RATIO),
@@ -621,8 +686,8 @@ impl CycleStore {
         }
         for (move_, ratio) in entries {
             body.push_str(&format!(
-                "\n[[moves]]\nline = {}\nordinal = {}\nratio = {ratio}\n",
-                move_.line, move_.ordinal
+                "\n[[moves]]\nline = {}\npass = {}\nordinal = {}\nratio = {ratio}\n",
+                move_.line, move_.pass, move_.ordinal
             ));
         }
 
@@ -791,8 +856,60 @@ mod tests {
         let preview = parse("G21 G90\nG1 X60 F600\nM2\n");
         let key = move_key(&preview, 0).expect("a move");
         assert_eq!(key.line, 2);
+        assert_eq!(key.pass, 0);
         assert_eq!(key.ordinal, 0);
         assert_eq!(move_index(&preview, key), Some(0));
+    }
+
+    /// A loop draws its body once per pass, all under the same source line. The
+    /// name has to keep the passes apart, or the second pass's measurement
+    /// overwrites the first's and the estimate collapses onto one pass.
+    #[test]
+    fn each_loop_pass_is_named_separately() {
+        let text = "G21 G90\no100 repeat [3]\nG91\nG1 X10 F600\no100 endrepeat\nM2\n";
+        let preview = parse(text);
+        let keys: Vec<MoveKey> = (0..preview.segments.len())
+            .filter_map(|index| move_key(&preview, index))
+            .collect();
+        assert_eq!(keys.len(), 3, "three passes, three moves: {keys:?}");
+        assert_eq!(keys[0].line, keys[1].line, "one source line draws them all");
+        assert_ne!(keys[0].pass, keys[1].pass, "passes must not share a name");
+        assert_ne!(keys[1].pass, keys[2].pass, "passes must not share a name");
+        for (index, key) in keys.iter().enumerate() {
+            assert_eq!(move_index(&preview, *key), Some(index), "{key:?}");
+        }
+    }
+
+    /// The fallback that names a block by its line has to land on the first
+    /// occurrence. The last one is the end of the loop, not its start.
+    #[test]
+    fn a_looped_block_starts_where_it_first_runs() {
+        let text = "G21 G90\no100 repeat [3]\nG1 X10 F600\no100 endrepeat\nM2\n";
+        let preview = parse(text);
+        let starts: Vec<usize> = (0..preview.segments.len())
+            .filter(|index| preview.segments[*index].line == 3)
+            .collect();
+        assert_eq!(starts.len(), 3, "the body draws three times");
+        assert_eq!(line_start(&preview, 3), Some(starts[0]));
+    }
+
+    /// A subroutine body carries its own file's line numbers, so a body line the
+    /// main program also uses names two different moves. Neither is attributed.
+    #[test]
+    fn a_line_a_subroutine_shares_with_the_program_is_not_named() {
+        let mut preview = parse("G21 G90\nG1 X60 F600\nM2\n");
+        assert!(move_key(&preview, 0).is_some(), "nameable on its own");
+        preview.subroutines.push(crate::gcode::SubroutineBody {
+            name: "probe_z".into(),
+            path: std::path::PathBuf::from("probe_z.ngc"),
+            first_line: 1,
+            last_line: 10,
+        });
+        assert_eq!(
+            move_key(&preview, 0),
+            None,
+            "line 2 is in the main program and inside the body's range"
+        );
     }
 
     #[test]
@@ -801,6 +918,7 @@ mod tests {
         learned.observe(
             MoveKey {
                 line: 2,
+                pass: 0,
                 ordinal: 0,
             },
             2.0,
@@ -808,6 +926,7 @@ mod tests {
         assert_eq!(
             learned.ratio(MoveKey {
                 line: 2,
+                pass: 0,
                 ordinal: 0
             }),
             Some(2.0)
@@ -819,6 +938,7 @@ mod tests {
         learned.observe(
             MoveKey {
                 line: 2,
+                pass: 0,
                 ordinal: 0,
             },
             4.0,
@@ -826,6 +946,7 @@ mod tests {
         assert_eq!(
             learned.ratio(MoveKey {
                 line: 2,
+                pass: 0,
                 ordinal: 0
             }),
             Some(3.0)
@@ -839,6 +960,7 @@ mod tests {
         learned.observe(
             MoveKey {
                 line: 1,
+                pass: 0,
                 ordinal: 0,
             },
             1e9,
@@ -847,6 +969,7 @@ mod tests {
         learned.observe(
             MoveKey {
                 line: 1,
+                pass: 0,
                 ordinal: 1,
             },
             0.0,
@@ -854,6 +977,7 @@ mod tests {
         assert_eq!(
             learned.ratio(MoveKey {
                 line: 1,
+                pass: 0,
                 ordinal: 1
             }),
             Some(MIN_RATIO)
@@ -870,6 +994,7 @@ mod tests {
         learned.observe(
             MoveKey {
                 line: 2,
+                pass: 0,
                 ordinal: 1,
             },
             1.5,

@@ -252,6 +252,13 @@ fault_prev = "Ctrl+PageUp"
 files_delete = "Delete"
 tools = "F7"
 offsets = "F8"
+# Page-local to OFFSETS: the EXT (G92) shift. One chord per card, so the digits
+# stay free for typing and the arrows stay with the caret; 0 clears every axis
+# (`G92.1`), the same action as the row's ZERO EXT.
+ext_edit_x = "Ctrl+X"
+ext_edit_y = "Ctrl+Y"
+ext_edit_z = "Ctrl+Z"
+offset_ext_zero = "0"
 # Page-local to the TOOLS page: type a tool number instead of cursoring to its
 # row. Enter loads it exactly as bare T does (Tn M6 + G43 Hn); 0 empties the
 # spindle. Digits, Enter, Backspace and Escape are enough: no Tab, no Shift.

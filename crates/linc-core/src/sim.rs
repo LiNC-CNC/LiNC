@@ -432,6 +432,7 @@ impl SimBackend {
             self.current_tool_tip(),
             &self.profile.subroutines(),
             &Tools::from_rows(&self.snapshot.tool_table.rows),
+            None,
         );
         self.snapshot.program.syntax_error = preview.error.clone();
         self.snapshot.program.modal = preview.modal.lines();
@@ -516,6 +517,7 @@ impl SimBackend {
             self.current_tool_tip(),
             &self.profile.subroutines(),
             &Tools::from_rows(&self.snapshot.tool_table.rows),
+            None,
         );
         let limit = self.snapshot.program.current_line.max(1);
         let mut points: Vec<TrailPoint> = Vec::new();
@@ -907,6 +909,7 @@ impl SimBackend {
             self.current_tool_tip(),
             &self.profile.subroutines(),
             &Tools::from_rows(&self.snapshot.tool_table.rows),
+            None,
         );
         // A G7 or G8 in the block itself changes the frame the DRO reads X in.
         // A block that names neither keeps the mode it was in, which a one-line
@@ -1701,7 +1704,41 @@ impl MachineBackend for SimBackend {
                 if !self.snapshot.writes_allowed() {
                     return Err(MachineError::NotIdle);
                 }
-                self.snapshot.offsets.g92 = values;
+                // The field is the offset itself: the register takes the value
+                // and the readout moves by the difference, so the machine does
+                // not move and a second edit lands on the typed number rather
+                // than on top of the first.
+                for (axis, wanted) in values.iter() {
+                    if self.snapshot.positions.axes.get(axis).is_none() {
+                        return Err(MachineError::Invalid(format!("unknown axis {axis}")));
+                    }
+                    let old = self.snapshot.offsets.g92.get(axis).copied().unwrap_or(0.0);
+                    if let Some(position) = self.snapshot.positions.axes.get_mut(axis) {
+                        position.work += old - wanted;
+                    }
+                    self.snapshot.offsets.g92.insert(axis.to_string(), *wanted);
+                }
+                self.snapshot.offsets.revision += 1;
+                Ok(())
+            }
+            MachineCommand::ClearG92Offset => {
+                if !self.snapshot.writes_allowed() {
+                    return Err(MachineError::NotIdle);
+                }
+                let axes: Vec<String> = self
+                    .snapshot
+                    .offsets
+                    .g92
+                    .iter()
+                    .map(|(axis, _)| axis.to_string())
+                    .collect();
+                for axis in axes {
+                    let old = self.snapshot.offsets.g92.get(&axis).copied().unwrap_or(0.0);
+                    if let Some(position) = self.snapshot.positions.axes.get_mut(&axis) {
+                        position.work += old;
+                    }
+                    self.snapshot.offsets.g92.insert(axis, 0.0);
+                }
                 self.snapshot.offsets.revision += 1;
                 Ok(())
             }
@@ -2255,6 +2292,7 @@ enabled = true
             tip,
             &backend.profile.subroutines(),
             &Tools::from_rows(&backend.snapshot.tool_table.rows),
+            None,
         );
         let first = preview.segments.first().expect("a move");
         assert!((first.start[0] + 88.0).abs() < 1e-9, "{first:?}");
@@ -2499,6 +2537,126 @@ enabled = true
             .map(|point| point.position)
             .expect("the trail has a tip");
         assert_eq!(tip, [-40.0, -15.0, -9.0]);
+    }
+
+    /// The EXT shift is an offset, not a position: the register takes the typed
+    /// value and the readout moves by the difference, with the machine and the
+    /// work-system row untouched.
+    #[test]
+    fn an_ext_offset_shifts_the_readout_and_leaves_the_machine_alone() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        backend
+            .send(MachineCommand::IssueMdi {
+                block: "G0 X30".into(),
+                origin: MdiOrigin::Mdi,
+            })
+            .unwrap();
+
+        let mut values = AxisMap::new();
+        values.insert("X", 12.5);
+        backend
+            .send(MachineCommand::SetG92Offset { values })
+            .unwrap();
+
+        let position = backend.snapshot.positions.axes.get("X").cloned().unwrap();
+        assert_eq!(backend.snapshot.offsets.g92.get("X").copied(), Some(12.5));
+        assert_eq!(position.work, 17.5, "the readout moves by the shift");
+        assert_eq!(position.machine, 30.0, "the machine does not move");
+    }
+
+    /// A second edit lands on the typed number. An additive register would make
+    /// this 25.0, and the operator would chase it with a third edit.
+    #[test]
+    fn an_ext_offset_typed_twice_is_the_offset_it_says() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        backend
+            .send(MachineCommand::IssueMdi {
+                block: "G0 X30".into(),
+                origin: MdiOrigin::Mdi,
+            })
+            .unwrap();
+
+        for _ in 0..2 {
+            let mut values = AxisMap::new();
+            values.insert("X", 12.5);
+            backend
+                .send(MachineCommand::SetG92Offset { values })
+                .unwrap();
+        }
+
+        assert_eq!(backend.snapshot.offsets.g92.get("X").copied(), Some(12.5));
+        assert_eq!(
+            backend.snapshot.positions.axes.get("X").map(|p| p.work),
+            Some(17.5)
+        );
+    }
+
+    /// Zero in a field clears that axis, and nothing else. Clearing every axis
+    /// is the separate `ClearG92Offset` command.
+    #[test]
+    fn zero_in_one_ext_axis_leaves_the_other_axes_shifted() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        backend
+            .send(MachineCommand::IssueMdi {
+                block: "G0 X30 Y30".into(),
+                origin: MdiOrigin::Mdi,
+            })
+            .unwrap();
+        let mut values = AxisMap::new();
+        values.insert("X", 12.5);
+        values.insert("Y", -3.25);
+        backend
+            .send(MachineCommand::SetG92Offset { values })
+            .unwrap();
+
+        let mut values = AxisMap::new();
+        values.insert("X", 0.0);
+        backend
+            .send(MachineCommand::SetG92Offset { values })
+            .unwrap();
+
+        assert_eq!(backend.snapshot.offsets.g92.get("X").copied(), Some(0.0));
+        assert_eq!(backend.snapshot.offsets.g92.get("Y").copied(), Some(-3.25));
+        assert_eq!(
+            backend.snapshot.positions.axes.get("X").map(|p| p.work),
+            Some(30.0)
+        );
+        assert_eq!(
+            backend.snapshot.positions.axes.get("Y").map(|p| p.work),
+            Some(33.25)
+        );
+    }
+
+    #[test]
+    fn clearing_the_ext_offset_zeroes_every_axis_at_once() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        backend
+            .send(MachineCommand::IssueMdi {
+                block: "G0 X30 Y30".into(),
+                origin: MdiOrigin::Mdi,
+            })
+            .unwrap();
+        let mut values = AxisMap::new();
+        values.insert("X", 12.5);
+        values.insert("Y", -3.25);
+        backend
+            .send(MachineCommand::SetG92Offset { values })
+            .unwrap();
+
+        backend.send(MachineCommand::ClearG92Offset).unwrap();
+
+        for axis in ["X", "Y"] {
+            assert_eq!(backend.snapshot.offsets.g92.get(axis).copied(), Some(0.0));
+            assert_eq!(
+                backend.snapshot.positions.axes.get(axis).map(|p| p.work),
+                Some(30.0),
+                "{axis} reads the work frame again"
+            );
+        }
     }
 
     #[test]

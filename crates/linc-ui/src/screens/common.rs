@@ -532,11 +532,13 @@ pub fn value_card(
         theme::MUTED,
     );
     if let Some((badge, color)) = badge {
+        // The same size as the caption beside it: the badge names the frame the
+        // card is showing, not a footnote to the title.
         painter.text(
             inner.right_top(),
             egui::Align2::RIGHT_TOP,
             badge,
-            egui::FontId::monospace(theme::font_size(9.0)),
+            egui::FontId::monospace(theme::font_size(12.0)),
             color,
         );
     }

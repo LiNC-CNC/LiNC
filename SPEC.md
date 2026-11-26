@@ -111,7 +111,7 @@ else, so it cannot shadow another page's command.
 | Program | `FILE` open the file browser, `Ctrl+S` save, `Ctrl+W` close the prepared program, `Ctrl+N` load the prepared program, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+M` REMAINING view, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
 | Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `P` read the selected program into the prepared document, `C` copy to the other pane, `D` duplicate in place, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
 | Help | `/` or `Ctrl+F` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
-| Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system; the preview answers the same view keys as MAIN (`Ctrl+F10`/`Ctrl+▢` cycle ISO/X/Y/Z, `Ctrl+0` fit, `Ctrl+B` bounds, `Ctrl+M` REMAINING) |
+| Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system, `Ctrl+X`/`Ctrl+Y`/`Ctrl+Z` edit that axis's EXT card, `0` clear the EXT shift on every axis; the preview answers the same view keys as MAIN (`Ctrl+F10`/`Ctrl+▢` cycle ISO/X/Y/Z, `Ctrl+0` fit, `Ctrl+B` bounds, `Ctrl+M` REMAINING) |
 | Tools | Arrows select a row, `Enter` edit the selected cell, `T` load the selected row's tool (`Tn M6` + `G43 Hn`), `Ctrl+T` type a tool number and load it, `Z` open the tool-position dialog, `D` duplicate the selected tool |
 | Probe | Arrows select a row |
 
@@ -1016,7 +1016,10 @@ Program rules:
   rate never set, an arc against the wrong plane, a tool the table lacks - and its
   refusal blocks the load with its own words. Its message carries no line number
   except for o-word label faults, so the block it echoes is matched back against
-  the file; a missing `rs274` skips the check instead of failing the load.
+  the file; a missing `rs274` skips the check instead of failing the load. The
+  interpreter runs on a worker thread: the load is held until its verdict lands,
+  the frame that asked never waits for it, and `linc.program-ok` stays shut from
+  the moment the check starts until the verdict is applied.
 - The loaded program is read-only while it runs, and the editor auto-scrolls
   its view to the current line, centring its whole wrapped block rather than
   its first row. The MAIN program card does the same, measured in the rows the
@@ -1063,9 +1066,22 @@ Program rules:
   edited) shows its system's origin as a translucent blue triad with a blue
   dashed arrow from the machine origin, and keeps doing so until another row is
   selected; selecting the active row adds only its name to the active marker.
-- Tool offsets. G92 is deliberately not exposed here: it is a transient offset
-  that silently shifts every WCS, and a field for it invited the operator to
-  leave the machine in a state neither the DRO nor a program could explain.
+- The global EXT shift (`G92`, the same register `G52` writes) is exposed as one
+  card per axis under the DRO row: `EXT X`, `EXT Y`, `EXT Z`, the same frame and
+  value treatment as the work coordinates above and no machine coordinate. A
+  field holds the offset value, so entering 12.5 makes the shift 12.5 and
+  nothing moves. `0` clears every axis. On a lathe the X field reads as a diameter, matching
+  the DRO. The HMI derives the `G92` coordinate from the position and register
+  the controller reports and repaints from what the controller reports back;
+  it never displays the typed number as fact. A rotated work system
+  (`G10 L2 Pn R-`) is refused rather than approximated, because the register
+  cannot be derived per axis in a frame the HMI does not model.
+- While the shift is non-zero, the top bar carries an `EXT` metric beside `WORK`
+  naming the shifted axes, the EXT cards turn in warning colour, and MAIN's
+  WORK COORDINATES matrix card marks its badge `G54 · EXT`. The Program page draws no axis card, so the top bar
+  is its announcement. A probe run is refused while the shift is set: the probe
+  subroutines cancel the register as they start.
+- Tool offsets.
 - Mill: X/Y/Z and rotary offsets; lathe: X/Z geometry and wear, tool nose
   radius, tip orientation, C/Y offsets and turret station.
 - A DRO row on top: the active system's work coordinates, large, with the
