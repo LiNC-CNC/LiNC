@@ -14,6 +14,16 @@ Wiring loaded after the GUI starts, as opposed to the pre-GUI files loaded befor
 
 The level the HMI publishes to say the loaded program may be started, published as `linc.program-ok`. It is shut unless the program is the one the controller holds, the buffer has no unsaved change, no block-level fault is known, the interpreter has not refused or crashed on it, and no interpreter check is still outstanding. A check in flight is not an answer, so the interlock stays shut until the verdict is applied. It is distinct from the network interlock, which concerns the machine's link while a program is armed.
 
+## EXT shift
+
+The one global offset the machine applies after every work system: the register
+`G92` writes and `G52` shares. It is not a work offset and not a per-system row:
+it moves all nine systems at once, and the controller derives a new value for it
+from where the tool currently stands, not from the value already in effect. A
+program that sets it, a probe macro that cancels it, and a value restored from
+the last session all change where the part is cut, so the panel names it
+wherever it is non-zero.
+
 ## Override limits
 
 The mask that lets a bounded move ignore a tripped hard limit. It must be armed before motion is enabled, because the fault check runs every servo cycle and re-disables motion while the joint still sits on the switch. The controller clears the mask when the move it allowed ends, so each bounded step needs its own arm, enable, and short jog. It is per joint, and it is not the same as the soft-limit or home state.

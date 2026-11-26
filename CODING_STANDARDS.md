@@ -49,6 +49,12 @@ traps. This file states the conditions that decide whether a change is correct.
   path would change the file under the running program.
 - Write work offsets in absolute machine units. A display unit carried into a
   write lands the offset off by the machine's scale factor.
+- Derive a global-offset (`G92`) write from the position with the current
+  register taken out. The interpreter does not read the register in effect when
+  it derives a new one, so a write that subtracts the wanted value from the
+  displayed position compounds: typing the same shift twice doubles it, and the
+  DRO shows the sum the machine will cut. Add the register back, then subtract,
+  and cover an edit on an axis that already holds a shift.
 - Read tool, parameter, and status state back only after the interpreter is
   idle. A read taken during motion returns the previous value, and the follow-up
   move then uses the stale one.
