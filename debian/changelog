@@ -1,3 +1,17 @@
+linc (0.5.1-1) unstable; urgency=medium
+
+  * Fix the toolpath frame under a G92 shift. The register moves the work
+    origin and the path, not the tool head: the head and the live trail were
+    drawn a whole shift away from the part, the work-origin cross stayed in
+    the old frame, and a register the controller moved on its own did not
+    rebuild the preview, so the drawn path, the out-of-travel red and the
+    travel check answered in a frame the machine would not use. The rebuild is
+    gated on an idle interpreter, because a running program that sets G92 is
+    already modelled by its own parse. The MDI block overlay and the simulator
+    follow the same frame.
+
+ -- Hans Baier <foss@hans-baier.de>  Thu, 26 Nov 2026 17:40:00 +0700
+
 linc (0.5.0-1) unstable; urgency=medium
 
   * Background program editing. The Program page holds the loaded program
