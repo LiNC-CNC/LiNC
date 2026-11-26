@@ -269,8 +269,7 @@ impl Source for BusSource {
             "diag.snapshot_diff" => {
                 let from = param_u64(params, "from_sequence").unwrap_or(0);
                 let to = param_u64(params, "to_sequence").unwrap_or_else(|| bus.sequence());
-                bus.snapshot_diff(from, to)
-                    .map_err(|error| DiagError::not_found(error))
+                bus.snapshot_diff(from, to).map_err(DiagError::not_found)
             }
             "diag.timeline" => Ok(bus.timeline(
                 param_i64(params, "around_ms"),
