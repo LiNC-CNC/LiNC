@@ -1697,6 +1697,12 @@ pub struct Document {
     /// them without an HMI write (startup publication, a program's own `G10`),
     /// and a stale frame shifts the tool marker by the whole offset.
     pub preview_offsets_rows: Vec<f64>,
+    /// The EXT (`G92`) register the preview was seeded with. The register moves
+    /// the frame the interpreter cuts in without touching any offset row, so a
+    /// preview left parsed against the old value draws the part, paints the
+    /// out-of-travel red and answers the travel check in a frame the machine
+    /// will not use.
+    pub preview_register: Vec<f64>,
     /// Bumped whenever the preview is rebuilt, so loop counters for the old
     /// program cannot be read against the new one's loops.
     pub preview_generation: u64,
@@ -1729,6 +1735,7 @@ impl Default for Document {
             preview_offset: None,
             preview_offsets_seen: 0,
             preview_offsets_rows: Vec::new(),
+            preview_register: Vec::new(),
             preview_generation: 0,
             cycle_plan: None,
             issues: Vec::new(),
@@ -2843,13 +2850,19 @@ pub fn graph_style(profile: &linc_core::config::Profile) -> GraphStyle {
 /// How far the live trail must move to be drawn in the frame of the loaded
 /// program's path.
 ///
-/// The path is parsed at `program words + the work offset the program selects`,
-/// so it is machine space. The live trail is the machine's own tool-tip
-/// position, which the interpreter computes as
+/// The path is parsed at `program words + the work offset the program selects`
+/// plus the EXT (`G92`) register, so it is machine space. The live trail is the
+/// machine's own tool-tip position, which the interpreter computes as
 /// `work + work offset + G92 + tool length` — and the tool length `G43` applies
 /// is the one term the preview has no way to know. The two frames therefore
 /// differ by `preview offset + work - machine`, which is zero on a machine with
-/// no tool length and no G92 in play.
+/// no tool length in play.
+///
+/// The register comes back out of that difference: the preview has already added
+/// it to the path, so the trail must not lose it a second time. Left in, it drew
+/// the tool head a whole shift away from the part it was cutting and left the
+/// work-origin marker standing where the old frame was. The register moves the
+/// origin marker and the path; it never moves the head.
 ///
 /// The simulator tracks both frames (its motion and jog paths apply the active
 /// work system), so the same arithmetic holds there and resolves to zero unless
@@ -2874,7 +2887,8 @@ pub fn live_trail_shift(
         let offset = preview_offset
             .and_then(|map| map.get(axis).copied())
             .unwrap_or(0.0);
-        offset + work - machine
+        let register = snapshot.offsets.g92.get(axis).copied().unwrap_or(0.0);
+        offset + work - machine + register
     })
 }
 
@@ -4126,6 +4140,72 @@ mod trail_frame_tests {
             place(&mut snapshot, axis, work_value, offset + work_value);
         }
         assert_eq!(live_trail_shift(&snapshot, Some(&work)), [0.0; 3]);
+    }
+
+    /// The register moves the frame, not the head.
+    ///
+    /// A G92 is a shift the interpreter folds into the position it reports, and
+    /// the preview adds it to the path. Subtracting it here as well drew the
+    /// tool head a whole shift away from the part it was cutting, while the
+    /// work-origin cross stayed where the old frame was.
+    #[test]
+    fn a_g92_register_moves_the_path_and_not_the_tool_head() {
+        let work = g54();
+        let register = AxisMap::from_entries([
+            ("X".to_string(), 12.5),
+            ("Y".to_string(), -3.25),
+            ("Z".to_string(), 4.0),
+        ]);
+        // The cut is at program X16.864 Y3.422 Z-0.1, with no tool length: the
+        // machine carries the work offset and the register, the DRO carries the
+        // program value.
+        let program = [16.864, 3.422, -0.1];
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.offsets.g92 = register.clone();
+        for (index, axis) in AXES.iter().enumerate() {
+            let machine = program[index]
+                + work.get(axis).copied().unwrap_or(0.0)
+                + register.get(axis).copied().unwrap_or(0.0);
+            place(&mut snapshot, axis, program[index], machine);
+        }
+        let shift = live_trail_shift(&snapshot, Some(&work));
+        assert_eq!(shift, [0.0; 3], "the head is not shifted by the register");
+        for (index, axis) in AXES.iter().enumerate() {
+            let drawn = snapshot.positions.axes.get(axis).unwrap().machine;
+            let path = program[index]
+                + work.get(axis).copied().unwrap_or(0.0)
+                + register.get(axis).copied().unwrap_or(0.0);
+            assert!(
+                (drawn - path).abs() < 1e-9,
+                "axis {axis}: the head sits at {drawn}, the path is drawn at {path}"
+            );
+        }
+    }
+
+    /// A shift and a tool length together: the tool length is still the only
+    /// correction, so the register is counted once, not twice.
+    #[test]
+    fn a_shifted_machine_still_takes_only_the_tool_length_out() {
+        let work = g54();
+        let register = AxisMap::from_entries([("Z".to_string(), 4.0)]);
+        let tool = [0.0, 0.0, -67.128];
+        let program = [16.864, 3.422, -0.1];
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.offsets.g92 = register.clone();
+        for (index, axis) in AXES.iter().enumerate() {
+            let machine = program[index]
+                + work.get(axis).copied().unwrap_or(0.0)
+                + register.get(axis).copied().unwrap_or(0.0)
+                + tool[index];
+            place(&mut snapshot, axis, program[index], machine);
+        }
+        let shift = live_trail_shift(&snapshot, Some(&work));
+        for index in 0..3 {
+            assert!(
+                (shift[index] + tool[index]).abs() < 1e-9,
+                "axis {index}: shift {shift:?} must undo the tool length {tool:?} only"
+            );
+        }
     }
 }
 

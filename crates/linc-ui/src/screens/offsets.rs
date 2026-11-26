@@ -638,6 +638,11 @@ fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
 
 /// The selected system's origin, taken from the draft so an edit previews as it
 /// is typed.
+///
+/// The EXT register is added because the preview this marks is drawn in the
+/// frame the program is parsed in, which has the register on top of whichever
+/// system is active: without it the selected row's cross sits a shift away from
+/// the origin the machine would actually use.
 fn selected_highlight(app: &LincApp) -> Option<([f64; 3], String)> {
     let index = app.offsets.selected;
     let row = app
@@ -647,16 +652,17 @@ fn selected_highlight(app: &LincApp) -> Option<([f64; 3], String)> {
         .iter()
         .find(|offset| offset.index == index)?;
     let mut point = [0.0; 3];
-    for (slot, axis) in ["X", "Y", "Z"].iter().enumerate() {
+    for (slot, axis) in ["X", "Y", "Z"].into_iter().enumerate() {
         let drafted = app
             .offsets
             .rows
             .get(&index)
-            .and_then(|draft| draft.values.get(*axis))
+            .and_then(|draft| draft.values.get(axis))
             .and_then(|text| text.trim().parse::<f64>().ok());
         point[slot] = drafted
             .or_else(|| row.values.get(axis).copied())
-            .unwrap_or(0.0);
+            .unwrap_or(0.0)
+            + app.snapshot.offsets.g92.get(axis).copied().unwrap_or(0.0);
     }
     Some((point, linc_core::model::wcs_name(index)))
 }

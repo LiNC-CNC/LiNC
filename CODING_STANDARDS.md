@@ -77,6 +77,18 @@ traps. This file states the conditions that decide whether a change is correct.
 - Draw preview geometry in the frame the interpreter runs in. Work-offset
   frames, diameter programming on a lathe, and cycle passes all place the tool
   somewhere other than the raw block coordinates imply.
+- A frame shift moves the path, the travel check and the work-origin marker, and
+  never the tool marker. The head is where the controller reports the tip; a
+  global-offset (`G92`) value subtracted from it as well drew the head a whole
+  shift away from the part it was cutting while the cross stood in the old
+  frame. Take a shift off the marker that represents the frame, not off the
+  live position.
+- A frame the preview is parsed against is a rebuild trigger, whether or not it
+  is a row: a global-offset (`G92`) move changes where the part is cut, and a
+  preview left on the old value paints the out-of-travel red and answers the
+  travel check in a frame the machine will not use. Re-seed only from an idle
+  interpreter, because a running program that sets the register itself is
+  already modelled by the parse.
 - A program bound covers every arc sweep and repeat pass it draws, or the fit
   command clips a path that is on screen.
 

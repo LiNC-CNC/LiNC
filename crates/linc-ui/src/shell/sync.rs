@@ -17,6 +17,18 @@ pub(super) fn offsets_signature(rows: &[linc_core::model::WorkOffset]) -> Vec<f6
     out
 }
 
+/// The EXT (`G92`) register as the preview's frame depends on it, in the same
+/// stable axis order as [`offsets_signature`].
+///
+/// The register is not a row: it moves every system at once, and neither the
+/// offsets revision nor the rows say so.
+pub(super) fn register_signature(register: &linc_core::model::AxisMap<f64>) -> Vec<f64> {
+    ["X", "Y", "Z"]
+        .into_iter()
+        .map(|axis| register.get(axis).copied().unwrap_or(0.0))
+        .collect()
+}
+
 impl LincApp {
     pub fn sync(&mut self) {
         self.poll_backend();

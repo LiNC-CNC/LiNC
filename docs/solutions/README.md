@@ -21,6 +21,7 @@ Problem, Symptoms, What Didn't Work, Solution, Why This Works, Prevention.
 
 ## Entries
 
+- [A G92 shift belongs on the work-origin marker, not on the tool head](ui-bugs/toolpath-g92-shifts-the-frame-not-the-head.md)
 - [Saving a program must reopen it, or AUTO runs the pre-edit text](integration-issues/linuxcnc-save-must-reopen-program.md)
 - [Recovery from a hard limit needs the override armed before motion is enabled](integration-issues/limit-switch-recovery-needs-override-first.md)
 - [A HAL interlock fails silently unless it is also added to a thread](integration-issues/hal-gate-needs-addf.md)

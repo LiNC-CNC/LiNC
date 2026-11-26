@@ -68,11 +68,13 @@ impl LincApp {
         let offset = self.preview_offset(&text);
         let offsets_revision = self.snapshot.offsets.revision;
         let offsets_rows = offsets_signature(&self.snapshot.offsets.offsets);
+        let register = register_signature(&self.snapshot.offsets.g92);
         {
             let doc = self.preview_document_mut(target);
             doc.preview_offset = offset.clone();
             doc.preview_offsets_seen = offsets_revision;
             doc.preview_offsets_rows = offsets_rows;
+            doc.preview_register = register;
         }
         // The controller's verdict and the travel violation are facts about the
         // program the machine holds, so only that document's list carries them.
@@ -314,7 +316,11 @@ impl LincApp {
         // A check in flight is not an answer: the text under the gate has no
         // verdict yet, and the previous one was about different text.
         let checked = self.program.verify.is_none();
-        loaded && !loaded_doc.editor.dirty && loaded_doc.issues.is_empty() && controller_ok && checked
+        loaded
+            && !loaded_doc.editor.dirty
+            && loaded_doc.issues.is_empty()
+            && controller_ok
+            && checked
     }
 
     /// Why the interlock is shut, in one sentence the operator can act on.

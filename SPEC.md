@@ -801,6 +801,14 @@ Program rules:
   active offset. Neither the DRO's work value (a whole offset short) nor the
   machine position (a tool length long, since the preview draws the tip and not
   the machine slide) is it.
+- The global `G92`/`G52` shift is part of that frame, so it moves the path and
+  the work-origin marker together and never the tool marker: the tool tip is
+  where the controller reports it, and the origin is the active system's offset
+  with the register on top. A register that reaches the preview late (the
+  controller moved it, no offset row did) rebuilds the preview so the path and
+  the travel check follow it; a register a running program sets itself does not,
+  because the parse already models that block and re-seeding would apply the
+  program's own shift twice.
 - `G53` makes its block's axis words machine positions, so the move ends there
   and not an offset away from it. It is a one-block word: the block after it is
   back in the work system. A `G38.2`/`G38.3`/`G38.4`/`G38.5` straight probe is
@@ -882,7 +890,10 @@ Program rules:
   same view transform as the toolpath.
 - Any part of the loaded program path outside the machine travel envelope is
   drawn in the `--error` red (`theme::ERROR`, `#ff5c5c`). Red therefore means
-  outside the machine boundary. A move that crosses a limit is split at the
+  outside the machine boundary. The check runs on the path as drawn, so a work
+  offset or a `G92` shift that pushes the part past a limit is red and blocks
+  cycle start, and one that moves it inside is not. A move that crosses a limit
+  is split at the
   exact crossing: the inside keeps its cut, rapid or selected-line stroke, and
   only the out-of-travel part turns solid red, so a selected line is still
   highlighted where it is reachable. A move whose endpoints are both outside
@@ -1057,7 +1068,9 @@ Program rules:
 - The toolpath preview is drawn in machine space in the work system the program
   selects (`G54`..`G59.3`, first selection in the file), falling back to the
   active system when the program selects none, so the part sits at the origin it
-  will be cut from. The preview beside the table frames every actor — the
+  will be cut from. Every work-origin marker is that system's offset with the
+  `G92` register on top, which is where the machine puts its zero while a shift
+  is set. The preview beside the table frames every actor — the
   program, the live trail, the tool tip, the machine origin and both work-origin
   markers — so an offset far from the part is still on screen; its height
   matches the table so the two panes end on the same line. The machine origin

@@ -190,6 +190,24 @@ pub fn active_offset(snapshot: &MachineSnapshot) -> Option<&linc_core::model::Ax
         .map(|offset| &offset.values)
 }
 
+/// Where the toolpath draws the work origin, in the frame the program path is
+/// parsed in: the active system's offset with the EXT (`G92`) register on top.
+///
+/// The register moves every system at once and the preview adds it to the path,
+/// so the cross has to move with it. Without the register here the path slid
+/// away from its own zero and the head looked like the thing that moved.
+///
+/// `None` when the snapshot names no active system: a load can leave one poll
+/// without it, and the caller keeps the cross where it was rather than snapping
+/// it back to the machine origin.
+pub fn work_origin(snapshot: &MachineSnapshot) -> Option<[f64; 3]> {
+    let offset = active_offset(snapshot)?;
+    Some(["X", "Y", "Z"].map(|axis| {
+        offset.get(axis).copied().unwrap_or(0.0)
+            + snapshot.offsets.g92.get(axis).copied().unwrap_or(0.0)
+    }))
+}
+
 /// The top bar's EXT readout: the axes that carry a shift, run together
 /// (`XYZ`), and nothing else.
 ///
@@ -608,6 +626,39 @@ mod tests {
         let axes: Vec<String> = vec!["Z".into(), "X".into()];
         let register = register(&[("X", 1.0), ("Z", -2.0)]);
         assert_eq!(ext_metric(&register, &axes).as_deref(), Some("ZX"));
+    }
+
+    #[test]
+    fn the_work_origin_carries_the_ext_register() {
+        // The register moves every system at once. The cross the toolpath draws
+        // is the frame's zero, so it is the system's row with the shift on top —
+        // not the row alone, which left the part drawing away from its own
+        // origin while the tool head looked like the thing that had moved.
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.offsets.active_index = Some(1);
+        snapshot.offsets.offsets.push(linc_core::model::WorkOffset {
+            index: 1,
+            values: register(&[("X", -120.0), ("Y", -80.0), ("Z", 45.0)]),
+            rotation: None,
+        });
+        snapshot.offsets.g92 = register(&[("X", 12.5), ("Y", -3.25), ("Z", 0.0)]);
+        assert_eq!(work_origin(&snapshot), Some([-107.5, -83.25, 45.0]));
+    }
+
+    #[test]
+    fn the_work_origin_of_an_unshifted_machine_is_the_row() {
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.offsets.active_index = Some(2);
+        snapshot.offsets.offsets.push(linc_core::model::WorkOffset {
+            index: 2,
+            values: register(&[("X", 5.0), ("Y", 6.0), ("Z", 7.0)]),
+            rotation: None,
+        });
+        assert_eq!(work_origin(&snapshot), Some([5.0, 6.0, 7.0]));
+        // No active system names no origin: the caller keeps the last cross
+        // rather than snapping it to the machine origin.
+        snapshot.offsets.active_index = None;
+        assert_eq!(work_origin(&snapshot), None);
     }
 
     #[test]

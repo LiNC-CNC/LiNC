@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use egui::{Align, FontId, Rect, RichText, Stroke, Ui, Vec2};
 use linc_core::command::{MachineCommand, MdiOrigin};
-use linc_core::gcode::{parse_preview, Bounds3, PathSegment, SegmentKind};
+use linc_core::gcode::{parse_preview, parse_preview_seeded, Bounds3, PathSegment, SegmentKind};
 use linc_core::mdi_file::{self, SaveError};
 use linc_core::model::PanelMode;
 use linc_view::{arc_points, Projection, ViewMode};
@@ -651,14 +651,22 @@ fn block_segments(app: &LincApp, block: &str, start: [f64; 3]) -> Vec<PathSegmen
         return Vec::new();
     }
     // The same work offset the program preview is drawn with, so a `G54` block
-    // lands where the program's own `G54` move lands.
+    // lands where the program's own `G54` move lands. The EXT register comes
+    // with it for the same reason: the block will run in the frame the machine
+    // holds, register included.
     let offset = app.program.loaded().preview_offset.clone();
     // The block inherits the machine's modal groups. `parse_preview` starts every
     // parse absolute, in G21, XY, so without these words a `G0 X10` typed while
     // the machine sits in G91 would be drawn as a move to X10 rather than a
     // 10 mm move.
     let text = format!("{}{block}", modal_seed(app));
-    let preview = parse_preview(&text, &app.axes(), offset.as_ref(), start);
+    let preview = parse_preview_seeded(
+        &text,
+        &app.axes(),
+        offset.as_ref(),
+        start,
+        Some(&app.snapshot.offsets.g92),
+    );
     if preview.error.is_some() {
         return Vec::new();
     }
@@ -666,7 +674,7 @@ fn block_segments(app: &LincApp, block: &str, start: [f64; 3]) -> Vec<PathSegmen
 }
 
 /// Fingerprint of what decides the parse besides the block and its start: the
-/// modal groups and the work offset it is drawn against.
+/// modal groups, the work offset and the EXT register it is drawn against.
 fn modal_fingerprint(app: &LincApp) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -684,6 +692,8 @@ fn modal_fingerprint(app: &LincApp) -> u64 {
             .and_then(|offset| offset.get(axis).copied())
             .unwrap_or(0.0);
         value.to_bits().hash(&mut hasher);
+        let register = app.snapshot.offsets.g92.get(axis).copied().unwrap_or(0.0);
+        register.to_bits().hash(&mut hasher);
     }
     hasher.finish()
 }

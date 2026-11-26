@@ -22,7 +22,9 @@ it moves all nine systems at once, and the controller derives a new value for it
 from where the tool currently stands, not from the value already in effect. A
 program that sets it, a probe macro that cancels it, and a value restored from
 the last session all change where the part is cut, so the panel names it
-wherever it is non-zero.
+wherever it is non-zero. In the drawing it is a shift of the frame, not of the
+head: the path, the travel check and the work-origin marker move with it, and
+the tool marker stays where the controller reports the tip.
 
 ## Override limits
 

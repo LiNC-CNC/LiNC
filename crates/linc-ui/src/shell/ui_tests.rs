@@ -3663,6 +3663,114 @@ fn a_move_outside_the_travel_box_blocks_cycle_start() {
     );
 }
 
+/// The travel check runs on the preview, which is parsed in the frame the
+/// machine cuts in; the register is part of that frame. Checked against the raw
+/// program words instead, a shift that pushes the part past a limit passed, and
+/// the out-of-travel red was painted where the unshifted part would have been.
+#[test]
+fn an_ext_shift_moves_the_travel_check_with_the_path() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    // X0 is inside the fixture's MAX_LIMIT of 5; a 10 mm shift puts it at 10.
+    load_clean_and_show(&mut harness, "G0 X0 Y0 Z0\nM2\n");
+    harness.app.poll_backend();
+    harness.app.refresh_preview();
+    assert_eq!(
+        harness.app.program.travel_violation,
+        None,
+        "issues: {:?}",
+        harness.app.program.loaded().issues
+    );
+
+    harness.app.send(MachineCommand::SetG92Offset {
+        values: linc_core::model::AxisMap::from_entries([("X".to_string(), 10.0)]),
+    });
+
+    assert_eq!(
+        harness
+            .app
+            .program
+            .loaded()
+            .preview
+            .bounds
+            .map(|bounds| bounds.max[0]),
+        Some(10.0),
+        "the drawn path followed the register"
+    );
+    assert_eq!(
+        harness.app.program.travel_violation,
+        Some((1, "X+".into())),
+        "issues: {:?}",
+        harness.app.program.loaded().issues
+    );
+    assert!(
+        !harness.app.program_ready(),
+        "the interlock has to stay shut once the shift leaves the envelope"
+    );
+}
+
+/// The register is not an offset row and bumps no revision of its own: a shift
+/// the controller sets on its own still has to reach the preview, or the path,
+/// the red paint and the travel check stay in the frame before the shift.
+#[test]
+fn a_register_the_controller_moved_rebuilds_the_preview() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0 Y0 Z0\nM2\n");
+    harness.app.refresh_preview();
+    let generation = harness.app.program.loaded().preview_generation;
+    let revision = harness.app.snapshot.offsets.revision;
+
+    harness.move_register("X", 10.0);
+    harness.app.poll_backend();
+
+    assert_eq!(
+        harness.app.snapshot.offsets.revision, revision,
+        "the register moved without an offsets revision"
+    );
+    assert_ne!(
+        harness.app.program.loaded().preview_generation,
+        generation,
+        "the preview was parsed against the moved register"
+    );
+    assert_eq!(
+        harness.app.program.loaded().preview_register,
+        vec![10.0, 0.0, 0.0]
+    );
+}
+
+/// A running program that sets a `G92` moves the live register itself. The
+/// parse already models that block, so re-seeding from the live value would
+/// apply the program's own shift twice — to the part of the file that ran before
+/// it. The rebuild waits for the interpreter to go idle.
+#[test]
+fn a_register_the_running_program_set_does_not_rebuild_the_preview() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0 Y0 Z0\nG92 X0\nM2\n");
+    harness.app.refresh_preview();
+    let generation = harness.app.program.loaded().preview_generation;
+    let register = harness.app.program.loaded().preview_register.clone();
+
+    harness.move_register("X", 10.0);
+    harness.app.send(MachineCommand::CycleStart);
+    assert!(harness.app.snapshot.task.running, "the run started");
+    harness.app.poll_backend();
+
+    assert_eq!(
+        harness.app.program.loaded().preview_generation,
+        generation,
+        "a running program's own G92 is not a reason to re-parse"
+    );
+    assert_eq!(harness.app.program.loaded().preview_register, register);
+
+    // Once the run is over the register seeds the next parse.
+    harness.app.send(MachineCommand::AbortProgram);
+    harness.app.refresh_stale_previews();
+    assert_ne!(
+        harness.app.program.loaded().preview_generation,
+        generation,
+        "an idle interpreter takes the register the next run starts on"
+    );
+}
+
 #[test]
 fn editor_preview_updates_only_after_valid_parse() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
@@ -4821,6 +4929,9 @@ struct ProbeHarness {
     /// hold it in flight and queue the result event a worker would deliver.
     deferred: std::rc::Rc<std::cell::Cell<bool>>,
     events: std::rc::Rc<std::cell::RefCell<VecDeque<BackendEvent>>>,
+    /// One EXT register value the backend reports, as a controller that moved
+    /// its own register does: no HMI write, no offsets revision.
+    register_override: std::rc::Rc<std::cell::RefCell<Option<(String, f64)>>>,
 }
 
 impl ProbeHarness {
@@ -4835,6 +4946,7 @@ impl ProbeHarness {
         let loobric = std::rc::Rc::new(std::cell::RefCell::new(None));
         let deferred = std::rc::Rc::new(std::cell::Cell::new(false));
         let events = std::rc::Rc::new(std::cell::RefCell::new(VecDeque::new()));
+        let register_override = std::rc::Rc::new(std::cell::RefCell::new(None));
         let mut sim = linc_core::sim::SimBackend::new(profile.clone(), mode);
         sim.set_power(power);
         sim.set_program_protect(protect, true);
@@ -4845,6 +4957,7 @@ impl ProbeHarness {
             loobric: loobric.clone(),
             deferred: deferred.clone(),
             events: events.clone(),
+            register_override: register_override.clone(),
         });
         // Build the app inside a real 1280x720 pass: \`LincApp::new\` applies
         // the design zoom, and outside a pass egui reports no viewport.
@@ -4869,7 +4982,14 @@ impl ProbeHarness {
             loobric,
             deferred,
             events,
+            register_override,
         }
+    }
+
+    /// Move one axis of the EXT register the way the controller does: the value
+    /// arrives in the next snapshot with no HMI write and no offsets revision.
+    fn move_register(&self, axis: &str, value: f64) {
+        *self.register_override.borrow_mut() = Some((axis.to_string(), value));
     }
 
     /// Hold later commands in flight instead of running them, so a test can
@@ -6034,12 +6154,16 @@ struct RecordingBackend {
     loobric: std::rc::Rc<std::cell::RefCell<Option<LoobricStatus>>>,
     deferred: std::rc::Rc<std::cell::Cell<bool>>,
     events: std::rc::Rc<std::cell::RefCell<VecDeque<BackendEvent>>>,
+    register_override: std::rc::Rc<std::cell::RefCell<Option<(String, f64)>>>,
 }
 
 impl UiBackend for RecordingBackend {
     fn snapshot(&mut self) -> MachineSnapshot {
         let mut snapshot = linc_core::backend::MachineBackend::snapshot(&mut self.inner);
         snapshot.loobric = self.loobric.borrow().clone();
+        if let Some((axis, value)) = self.register_override.borrow().as_ref() {
+            snapshot.offsets.g92.insert(axis.clone(), *value);
+        }
         snapshot
     }
 
@@ -11919,7 +12043,6 @@ fn the_fault_walk_moves_through_the_front_documents_faults_only() {
             .any(|issue| issue.message.starts_with("controller:")),
         "{:?}",
         app.program.loaded().issues
-
     );
 }
 
@@ -12035,7 +12158,10 @@ fn a_verdict_about_text_that_moved_on_is_dropped() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
     app.snapshot.program.path = None;
     app.snapshot.program.content = None;
-    app.program.loaded_mut().editor.replace_text("G0 X0\nG1 X10\n".into());
+    app.program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X0\nG1 X10\n".into());
     app.save_program();
     let Some(Modal::SaveProgramAs(_)) = app.overlay.modal.clone() else {
         panic!("the save asks for a name, got {:?}", app.overlay.modal);

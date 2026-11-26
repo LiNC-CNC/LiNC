@@ -144,12 +144,8 @@ impl LincApp {
         // Keep the last known work zero: loading a program can leave the
         // snapshot without an active system for a poll, and the cross must not
         // jump to the machine origin when that happens.
-        if let Some(offset) = active_offset(&self.snapshot) {
-            self.view.origin = [
-                offset.get("X").copied().unwrap_or(0.0),
-                offset.get("Y").copied().unwrap_or(0.0),
-                offset.get("Z").copied().unwrap_or(0.0),
-            ];
+        if let Some(origin) = work_origin(&self.snapshot) {
+            self.view.origin = origin;
         }
         self.update_move_progress();
         // A touch-off or a DRO entry moves the origin the preview is drawn
@@ -320,16 +316,25 @@ impl LincApp {
     }
 
     /// Rebuild any document's preview when the controller moved the offset
-    /// rows it was parsed against. The loaded document keeps its own preview
-    /// even while the prepared file is in front: the Machine page draws it and
-    /// the interlock and the run's estimate read it.
+    /// rows or the EXT register it was parsed against. The loaded document
+    /// keeps its own preview even while the prepared file is in front: the
+    /// Machine page draws it and the interlock and the run's estimate read it.
     pub(super) fn refresh_stale_previews(&mut self) {
         let rows = offsets_signature(&self.snapshot.offsets.offsets);
+        let register = register_signature(&self.snapshot.offsets.g92);
         let offsets_revision = self.snapshot.offsets.revision;
         let has_rows = !self.snapshot.offsets.offsets.is_empty();
+        // The register is only a reason to re-parse while the interpreter is
+        // idle. A running program that sets one moves the register itself, and
+        // the parse already models that block: re-seeding the preview from the
+        // live value would apply the program's own shift twice, to the part of
+        // the file that ran before it. The next rebuild, once the program is
+        // done, seeds from the register the next run will start on.
+        let register_can_rebuild = !self.program_active();
         let stale = |doc: &Document| {
             offsets_revision != doc.preview_offsets_seen
                 || rows != doc.preview_offsets_rows
+                || (register_can_rebuild && register != doc.preview_register)
                 || (doc.preview_offset.is_none() && has_rows)
         };
         if stale(self.program.doc()) {

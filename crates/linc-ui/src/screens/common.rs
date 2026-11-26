@@ -2008,12 +2008,13 @@ pub fn trajectory(
     view.origin = origin;
     // The labels belong to the preview being drawn: a prepared file may select
     // its own work system, and the loaded program's frame would mislabel it.
+    // The EXT register is part of that frame, so it is part of what the corner
+    // labels take back off to read a work coordinate.
     view.work_offset = app.program.doc().preview_offset.as_ref().map(|map| {
-        [
-            map.get("X").copied().unwrap_or(0.0),
-            map.get("Y").copied().unwrap_or(0.0),
-            map.get("Z").copied().unwrap_or(0.0),
-        ]
+        ["X", "Y", "Z"].map(|axis| {
+            map.get(axis).copied().unwrap_or(0.0)
+                + app.snapshot.offsets.g92.get(axis).copied().unwrap_or(0.0)
+        })
     });
     if let Some((point, label)) = highlight {
         view.highlight_origin = Some(point);
@@ -2050,9 +2051,11 @@ pub fn trajectory(
         view.eaten_through = None;
     }
     // Derived from the live positions, so it absorbs the G43 tool length (which
-    // LinuxCNC folds into the machine position but the program path does not) and
-    // any G92 or WCS mismatch. Recomputed here rather than by the Program page,
-    // so every card that draws a trail is correct in the frame it is drawn.
+    // LinuxCNC folds into the machine position but the program path does not).
+    // The EXT register is deliberately not part of it: the preview adds the
+    // register to the path, so the head must not lose it as well. Recomputed
+    // here rather than by the Program page, so every card that draws a trail is
+    // correct in the frame it is drawn.
     view.live_trail_shift =
         crate::state::live_trail_shift(&app.snapshot, app.program.loaded().preview_offset.as_ref());
     view.show_legend = view.show_legend && layers.show_legend;

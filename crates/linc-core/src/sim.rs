@@ -823,6 +823,31 @@ impl SimBackend {
         Ok(())
     }
 
+    /// The shift from a machine position to the work reading the DRO shows for
+    /// one axis: the active work system plus the EXT (`G92`) register, the same
+    /// two layers the preview adds to a program word.
+    ///
+    /// One definition, so an MDI move, an activated system and a touch-off
+    /// cannot disagree about which frame the readout lives in — a reader that
+    /// took only the row off reported a value a whole register away as soon as
+    /// a shift was set.
+    fn work_shift(&self, axis: &str) -> f64 {
+        let offset = self
+            .snapshot
+            .offsets
+            .active_index
+            .and_then(|index| {
+                self.snapshot
+                    .offsets
+                    .offsets
+                    .iter()
+                    .find(|row| row.index == index)
+            })
+            .and_then(|row| row.values.get(axis).copied())
+            .unwrap_or(0.0);
+        offset + self.snapshot.offsets.g92.get(axis).copied().unwrap_or(0.0)
+    }
+
     fn apply_mdi_line(&mut self, line: &str) -> Result<(), MachineError> {
         let upper = line.to_ascii_uppercase();
         // Tool change.
@@ -892,9 +917,10 @@ impl SimBackend {
             .map(str::to_string)
             .collect();
         // The active work system applies here as well: parse_preview returns
-        // machine coordinates (program words + the WCS row), which is the frame
-        // the seeded trail is already in. Stamping the program value into both
-        // position fields left a trail mixing two frames whenever a WCS was set.
+        // machine coordinates (program words + the WCS row + the EXT register),
+        // which is the frame the seeded trail is already in. Stamping the
+        // program value into both position fields left a trail mixing two frames
+        // whenever a WCS was set.
         let active_offset = self.snapshot.offsets.active_index.and_then(|index| {
             self.snapshot
                 .offsets
@@ -909,7 +935,12 @@ impl SimBackend {
             self.current_tool_tip(),
             &self.profile.subroutines(),
             &Tools::from_rows(&self.snapshot.tool_table.rows),
-            None,
+            // The register the machine holds is in effect before the block
+            // runs, exactly as it is for the program preview: a `G0 X0` under a
+            // 10 mm EXT shift goes to machine X10 here, as it would on the
+            // controller, rather than cutting 10 mm away from where the drawing
+            // puts the part.
+            Some(&self.snapshot.offsets.g92),
         );
         // A G7 or G8 in the block itself changes the frame the DRO reads X in.
         // A block that names neither keeps the mode it was in, which a one-line
@@ -921,12 +952,13 @@ impl SimBackend {
             let start = segment.start;
             let end = segment.end;
             for (axis, index) in [("X", 0usize), ("Y", 1), ("Z", 2)] {
-                let offset = active_offset
-                    .and_then(|offset| offset.values.get(axis).copied())
-                    .unwrap_or(0.0);
+                // The parsed point is already in the frame the preview draws:
+                // the work system and the register are both on it, so the
+                // readout takes both back off.
+                let shift = self.work_shift(axis);
                 if let Some(position) = self.snapshot.positions.axes.get_mut(axis) {
                     position.machine = end[index];
-                    position.work = end[index] - offset;
+                    position.work = end[index] - shift;
                     position.dtg = 0.0;
                 }
                 if let Some(commanded) = self.snapshot.machine.commanded.get_mut(axis) {
@@ -1546,8 +1578,9 @@ impl MachineBackend for SimBackend {
                     .collect();
                 for axis in axes {
                     if let Some(offset) = values.get(&axis) {
+                        let register = self.snapshot.offsets.g92.get(&axis).copied().unwrap_or(0.0);
                         if let Some(position) = self.snapshot.positions.axes.get_mut(&axis) {
-                            position.work = position.machine - offset;
+                            position.work = position.machine - offset - register;
                         }
                     }
                 }
@@ -1611,7 +1644,9 @@ impl MachineBackend for SimBackend {
                     ));
                 }
                 // `G10 L20` makes the current position read zero, so the new
-                // offset is the machine coordinate for each selected axis.
+                // offset is the machine coordinate with the EXT register taken
+                // out: the register sits on top of the system and the readout
+                // has to come out at zero, not at minus the shift.
                 let machines: Vec<(String, f64)> = axes
                     .iter()
                     .map(|axis| {
@@ -1622,7 +1657,8 @@ impl MachineBackend for SimBackend {
                             .get(axis)
                             .map(|position| position.machine)
                             .unwrap_or(0.0);
-                        (axis.clone(), machine)
+                        let register = self.snapshot.offsets.g92.get(axis).copied().unwrap_or(0.0);
+                        (axis.clone(), machine - register)
                     })
                     .collect();
                 if let Some(offset) = self
@@ -1662,7 +1698,9 @@ impl MachineBackend for SimBackend {
                     ));
                 }
                 // `G10 L20` stores the offset that makes the position read the
-                // given coordinates, so the new offset is machine - value.
+                // given coordinates, so the new offset is machine - register -
+                // value: the register is a layer under the system, not part of
+                // it.
                 let derived: Vec<(String, f64, f64)> = values
                     .iter()
                     .map(|(axis, value)| {
@@ -1673,7 +1711,8 @@ impl MachineBackend for SimBackend {
                             .get(axis)
                             .map(|position| position.machine)
                             .unwrap_or(0.0);
-                        (axis.to_string(), machine - value, *value)
+                        let register = self.snapshot.offsets.g92.get(axis).copied().unwrap_or(0.0);
+                        (axis.to_string(), machine - register - value, *value)
                     })
                     .collect();
                 if derived.is_empty() {
@@ -2563,6 +2602,38 @@ enabled = true
         assert_eq!(backend.snapshot.offsets.g92.get("X").copied(), Some(12.5));
         assert_eq!(position.work, 17.5, "the readout moves by the shift");
         assert_eq!(position.machine, 30.0, "the machine does not move");
+    }
+
+    /// A move made while the register is set goes where the controller would
+    /// put it: the machine carries the shift and the readout still reads the
+    /// program word, so the trail lands on the path the preview draws.
+    #[test]
+    fn a_move_under_an_ext_offset_carries_the_shift_on_the_machine() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Mdi);
+        let mut values = AxisMap::new();
+        values.insert("X", 12.5);
+        backend
+            .send(MachineCommand::SetG92Offset { values })
+            .unwrap();
+
+        backend
+            .send(MachineCommand::IssueMdi {
+                block: "G0 X30".into(),
+                origin: MdiOrigin::Mdi,
+            })
+            .unwrap();
+
+        let position = backend.snapshot.positions.axes.get("X").cloned().unwrap();
+        assert_eq!(position.machine, 42.5, "the machine carries the shift");
+        assert_eq!(position.work, 30.0, "the readout reads the block's word");
+        let tip = backend
+            .snapshot
+            .live_trail
+            .last()
+            .map(|point| point.position)
+            .expect("the trail has a tip");
+        assert_eq!(tip[0], 42.5, "the trail is in the frame the preview draws");
     }
 
     /// A second edit lands on the typed number. An additive register would make
