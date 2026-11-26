@@ -3,6 +3,39 @@
 
 use super::*;
 
+/// The action name cut to the row's remaining width, with an ellipsis when it
+/// does not fit whole. A longer key leaves less room for the name; drawing
+/// both at their natural width let them overlap and read as one word.
+fn elide_label(ui: &egui::Ui, text: &str, room: f32) -> String {
+    let font = egui::FontId::proportional(theme::font_size(9.0));
+    let width = |candidate: &str| {
+        ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(candidate.to_owned(), font.clone(), Color32::WHITE)
+                .size()
+                .x
+        })
+    };
+    if width(text) <= room {
+        return text.to_owned();
+    }
+    let mut cut: String = String::new();
+    for character in text.chars() {
+        let mut next = cut.clone();
+        next.push(character);
+        next.push('\u{2026}');
+        if width(&next) > room {
+            break;
+        }
+        cut.push(character);
+    }
+    if cut.is_empty() {
+        return String::new();
+    }
+    cut.push('\u{2026}');
+    cut
+}
+
 pub(super) fn draw_nav_icon(painter: &egui::Painter, rect: egui::Rect, page: Page, color: Color32) {
     let s = egui::Stroke::new(1.5, color);
     let c = rect.center();
@@ -472,7 +505,10 @@ impl LincApp {
             self.request_files();
             return;
         }
-        if self.program.editor.dirty && self.nav.page == Page::Program && page != Page::Program {
+        if self.program.loaded().editor.dirty
+            && self.nav.page == Page::Program
+            && page != Page::Program
+        {
             self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::Navigate(page)));
         } else {
             self.set_page(page);
@@ -537,7 +573,7 @@ impl LincApp {
     }
 
     pub fn request_files(&mut self) {
-        if self.program.editor.dirty && self.nav.page == Page::Program {
+        if self.program.loaded().editor.dirty && self.nav.page == Page::Program {
             self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::OpenFiles));
         } else {
             self.open_files();
@@ -594,7 +630,7 @@ impl LincApp {
         // the loaded file. Say so here, before the operator presses CYCLE START
         // on a program that will not run.
         let left_edit = prior_mode == Some(PanelMode::Edit) && new_mode != PanelMode::Edit;
-        if left_edit && self.program.editor.dirty && self.overlay.modal.is_none() {
+        if left_edit && self.program.loaded().editor.dirty && self.overlay.modal.is_none() {
             self.overlay.modal = Some(Modal::UnsavedOnLeave);
         }
         if prior_mode.map(PanelMode::is_manual).unwrap_or(false)
@@ -926,17 +962,34 @@ impl LincApp {
                                             clicked = Some(command);
                                         }
                                     }
+                                    let key_font = egui::FontId::monospace(theme::font_size(9.0));
                                     ui.painter().text(
                                         egui::pos2(row.left() + 4.0, row.center().y),
                                         Align2::LEFT_CENTER,
                                         shortcut.key.as_str(),
-                                        egui::FontId::monospace(theme::font_size(9.0)),
+                                        key_font.clone(),
                                         theme::C3,
                                     );
+                                    // The key and its name share one narrow row. A longer
+                                    // chord would otherwise run into the name, and the
+                                    // pair would read as one word (`Ctrl+WCLOSE PREPARED`).
+                                    // Measure both and cut the name it cannot hold.
+                                    let key_width = ui.fonts_mut(|fonts| {
+                                        fonts
+                                            .layout_no_wrap(
+                                                shortcut.key.clone(),
+                                                key_font,
+                                                Color32::WHITE,
+                                            )
+                                            .size()
+                                            .x
+                                    });
+                                    let label_room = (row.width() - 8.0 - key_width - 8.0).max(0.0);
+                                    let label = elide_label(ui, shortcut.label, label_room);
                                     ui.painter().text(
                                         egui::pos2(row.right() - 4.0, row.center().y),
                                         Align2::RIGHT_CENTER,
-                                        shortcut.label,
+                                        label,
                                         egui::FontId::proportional(theme::font_size(9.0)),
                                         theme::MUTED,
                                     );
@@ -957,6 +1010,35 @@ impl LincApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_long_shortcut_name_is_cut_to_the_room_the_key_leaves() {
+        let ctx = egui::Context::default();
+        let mut picked = None;
+        let mut frame = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let room = 60.0;
+            let cut = elide_label(ui, "CLOSE PREPARED", room);
+            let width = ui.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(
+                        cut.clone(),
+                        egui::FontId::proportional(theme::font_size(9.0)),
+                        Color32::WHITE,
+                    )
+                    .size()
+                    .x
+            });
+            picked = Some((cut, width <= room, elide_label(ui, "SAVE", room)));
+        });
+        frame.textures_delta.clear();
+        let (cut, fits, short) = picked.expect("one frame");
+        assert!(
+            cut.ends_with('\u{2026}'),
+            "the cut name ends in an ellipsis: {cut}"
+        );
+        assert!(fits, "the cut name fits the room the key leaves: {cut}");
+        assert_eq!(short, "SAVE", "a name that fits is left alone");
+    }
 
     #[test]
     pub(super) fn pages_follow_physical_mode() {

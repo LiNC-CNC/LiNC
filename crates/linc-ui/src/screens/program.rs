@@ -9,7 +9,7 @@ use linc_core::gcode::{lex_line, TokenKind};
 use crate::screens::common;
 use crate::shell::LincApp;
 use crate::spacing;
-use crate::state::ProgramView;
+use crate::state::{DocumentFront, ProgramView};
 use crate::theme;
 
 fn editor_font() -> f32 {
@@ -53,16 +53,142 @@ pub fn show(app: &mut LincApp, ui: &mut Ui) {
     {
         // The lathe profile may disable the probe; Program is unaffected.
     }
-    // No page header: the panes start at the top of the page. The view flags
+    // No page header beyond the strip: the panes start under it. The view flags
     // and RUN FROM LINE live in the editor pane's header, next to the file they
     // belong to.
+    //
+    // The focus anchor comes first so the arrow keys reach the strip's handoff
+    // control before they walk on into the panes.
     common::focus_anchor(ui, "program-page-focus");
+    program_strip(app, ui);
     match app.program.view {
         ProgramView::Split => split(app, ui),
         ProgramView::Code => code(app, ui),
     }
     if unload {
         app.unload_program();
+    }
+}
+
+/// The run row above the panes while a program is being prepared: the state,
+/// the loaded file, the line and block the machine is on, and how far through
+/// the program it is. The prepared file is named in the editor's own header,
+/// not here, and the row carries no control.
+fn program_strip(app: &mut LincApp, ui: &mut Ui) {
+    if app.program.prepared.is_none() {
+        return;
+    }
+    let program = &app.snapshot.program;
+    let holds_program = program.line_count > 0;
+    let (state, state_color) = if app.snapshot.task.running {
+        ("RUNNING", theme::SUCCESS)
+    } else if program.paused {
+        ("PAUSED", theme::WARNING)
+    } else {
+        ("IDLE", theme::MUTED)
+    };
+    let name = if program.display_name.is_empty() {
+        app.program
+            .loaded()
+            .path
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    } else {
+        program.display_name.clone()
+    };
+    let line = format!("LN {}/{}", program.executing_line(), program.line_count);
+    let block = program.current_block.clone();
+    let progress = app.program.progress(program);
+
+    theme::run_strip(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        // One row, and the progress bar is the item that takes what the text
+        // leaves. Pinning the interact size keeps the row from taking the
+        // theme's 44 px touch floor.
+        const ROW_HEIGHT: f32 = 30.0;
+        ui.spacing_mut().interact_size.y = ROW_HEIGHT;
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(state)
+                    .monospace()
+                    .strong()
+                    .size(theme::font_size(12.0))
+                    .color(state_color),
+            );
+            if !holds_program {
+                ui.label(
+                    RichText::new("NO PROGRAM LOADED")
+                        .monospace()
+                        .size(theme::font_size(9.0))
+                        .color(theme::MUTED),
+                );
+                return;
+            }
+            let gap = ui.spacing().item_spacing.x;
+            let available = ui.available_width();
+            let name_room = theme::measure(ui, &name, 12.0)
+                .min(240.0)
+                .min((available * 0.30).max(60.0));
+
+            let shown = theme::fit_middle(
+                |candidate| theme::measure(ui, candidate, 12.0),
+                &name,
+                name_room,
+            );
+            let name_label = ui.label(
+                RichText::new(shown.clone())
+                    .monospace()
+                    .size(theme::font_size(12.0))
+                    .color(theme::FG),
+            );
+            if shown != name {
+                name_label.on_hover_text(&name);
+            }
+            // The name and the program text are different kinds of field: a
+            // rule between them keeps them from reading as one run-on.
+            ui.add_space(gap * 0.5);
+            ui.separator();
+            ui.add_space(gap * 0.5);
+            // The bar takes a fifth of what the rule leaves; the line and
+            // block share the rest, and the block truncates when it runs out.
+            let bar_width = (ui.available_width() * 0.20).max(40.0);
+            let (bar, _) = ui.allocate_exact_size(Vec2::new(bar_width, 7.0), egui::Sense::hover());
+            paint_run_progress(ui, bar, progress);
+            ui.label(
+                RichText::new(&line)
+                    .monospace()
+                    .size(theme::font_size(12.0))
+                    .color(theme::MUTED),
+            );
+            ui.add_space(gap * 0.5);
+            ui.separator();
+            ui.add_space(gap * 0.5);
+            let block_room = ui.available_width().max(60.0);
+            let shown_block = fit_text_sized(ui, &block, 12.0, block_room);
+            let block_label = ui.label(
+                RichText::new(shown_block.clone())
+                    .monospace()
+                    .size(theme::font_size(12.0))
+                    .color(theme::FG),
+            );
+            if shown_block != block {
+                block_label.on_hover_text(&block);
+            }
+        });
+    });
+}
+
+/// The run's progress, as a thin capsule: a dark track and the success-green
+/// fill. The number is on the bottom bar; the row carries the shape.
+fn paint_run_progress(ui: &Ui, rect: egui::Rect, fraction: f32) {
+    let radius = egui::CornerRadius::same(3);
+    ui.painter().rect_filled(rect, radius, theme::RUN_TRACK);
+    let width = rect.width() * fraction.clamp(0.0, 1.0);
+    if width > 0.5 {
+        let fill = egui::Rect::from_min_size(rect.min, Vec2::new(width, rect.height()));
+        ui.painter().rect_filled(fill, radius, theme::SUCCESS);
     }
 }
 
@@ -84,10 +210,8 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
     // the pane below it, so the two columns never ended together.
     editor_pane(app, ui, left_rect);
 
-    let codes = app
-        .snapshot
-        .program
-        .modal
+    let modal_rows = modal_rows(app);
+    let codes = modal_rows
         .iter()
         .filter(|(key, _)| key.starts_with('G'))
         .count();
@@ -106,8 +230,36 @@ fn split(app: &mut LincApp, ui: &mut Ui) {
             .max_rect(modal_rect)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
-    common::modal_pane_in(app, &mut modal_ui, 8, "split-modal", modal_rect);
+    common::modal_pane_in(&mut modal_ui, &modal_rows, 8, "split-modal", modal_rect);
     ui.advance_cursor_after_rect(egui::Rect::from_min_max(left_rect.min, right_rect.max));
+}
+
+/// The codes the MODAL pane lists for the document in front: the controller's
+/// own modal while its program is shown, and the prepared file's parsed modal
+/// while that one is. Everything the page visualises describes the document in
+/// front, and the controller's modal describes the other one.
+fn modal_rows(app: &LincApp) -> Vec<(String, String)> {
+    match app.program.front {
+        // The prepared file has no interpreter to ask, so the pane reads the
+        // parsed state at the selected line rather than the state at the end.
+        DocumentFront::Prepared => app
+            .program
+            .doc()
+            .preview
+            .modal_at_line(app.program.doc().selected_line)
+            .lines(),
+        // A running program's modal is the machine's own; an idle one is being
+        // read as a file, so the selected line is the honest state.
+        DocumentFront::Loaded if app.snapshot.task.running || app.snapshot.program.paused => {
+            app.snapshot.program.modal.clone()
+        }
+        DocumentFront::Loaded => app
+            .program
+            .doc()
+            .preview
+            .modal_at_line(app.program.doc().selected_line)
+            .lines(),
+    }
 }
 
 fn code(app: &mut LincApp, ui: &mut Ui) {
@@ -131,10 +283,8 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
                 // the height of the MODAL card change with the font scale and
                 // the number of active codes. The first frame uses these
                 // defaults and the next corrects them.
-                let codes = app
-                    .snapshot
-                    .program
-                    .modal
+                let modal_rows = modal_rows(app);
+                let codes = modal_rows
                     .iter()
                     .filter(|(key, _)| key.starts_with('G'))
                     .count();
@@ -157,7 +307,7 @@ fn code(app: &mut LincApp, ui: &mut Ui) {
                         .max_rect(modal_rect)
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                 );
-                common::modal_pane_in(app, &mut modal_ui, 4, "program-modal", modal_rect);
+                common::modal_pane_in(&mut modal_ui, &modal_rows, 4, "program-modal", modal_rect);
             },
         );
     });
@@ -186,8 +336,61 @@ fn mini_card_resized(ui: &Ui, kind: ViewKind, size: Vec2) -> bool {
     previous.is_some_and(|previous| (previous - size).length() > 0.5)
 }
 
+/// The path the toolpath card draws and the machine layer that goes with it.
+///
+/// The card draws the document in front: its last valid preview, and the line
+/// the operator is on in it. The machine's own layer - the live trail, the tool
+/// head and the executing line - belongs only to the loaded program, so it is
+/// left off while the prepared file is in front. That is the whole difference
+/// between the two drawings; the card itself is one draw path.
+pub(crate) struct GraphInputs {
+    pub preview: linc_core::gcode::Preview,
+    pub selected_line: Option<usize>,
+    pub current_line: Option<usize>,
+    pub live: bool,
+}
+
+pub(crate) fn graph_inputs(app: &LincApp) -> GraphInputs {
+    let live = app.program.front == DocumentFront::Loaded;
+    GraphInputs {
+        preview: app.program.doc().last_valid_preview.clone(),
+        selected_line: Some(app.program.doc().selected_line),
+        current_line: if live {
+            app.snapshot.program.highlight_line()
+        } else {
+            None
+        },
+        live,
+    }
+}
+
+/// The time the card reports for the document it draws: the prepared file's own
+/// total while it is in front, and the run's estimate to the end while the
+/// loaded program is. With no estimate to give the card says nothing rather than
+/// inventing a zero.
+fn card_estimate(app: &LincApp) -> Option<String> {
+    match app.program.front {
+        DocumentFront::Prepared => {
+            let doc = app.program.doc();
+            let (generation, total) = doc.cycle_plan?;
+            if generation != doc.preview_generation {
+                return None;
+            }
+            let overrides = linc_core::cycletime::Overrides::from_feed_state(&app.snapshot.feed);
+            let secs = total.scaled(overrides);
+            Some(common::estimate_clock((secs * 1000.0).round() as u64))
+        }
+        DocumentFront::Loaded => app.program.cycle.remaining_ms().map(common::estimate_clock),
+    }
+}
+
 fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) {
-    let preview = app.program.last_valid_preview.clone();
+    let inputs = graph_inputs(app);
+    // The thumbnail draws no status row, so it must not pay for the estimate.
+    let estimate = match kind {
+        ViewKind::Full => card_estimate(app),
+        ViewKind::MiniXy => None,
+    };
     // The live trail is the machine's own tool-tip path, while the program path
     // is parsed at `program words + the work offset the program selects`. The
     // two frames differ by the tool length `G43` applies; draw the trail in the
@@ -199,7 +402,14 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
                 common::card_title(ui, "PATH");
                 None
             }
-            ViewKind::Full => Some(common::toolpath_header(ui, app.graph_style.remaining)),
+            ViewKind::Full => {
+                // REMAINING is the live view of the run; a prepared path has
+                // nothing eaten, so the legend does not claim it.
+                Some(common::toolpath_header(
+                    ui,
+                    inputs.live && app.graph_style.remaining,
+                ))
+            }
         };
         // Measured from the cursor: `min_rect` already holds the minimum size
         // the shell set, so it would report the whole card as the header and
@@ -220,7 +430,7 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
         let drawn = common::trajectory(
             app,
             ui,
-            &preview,
+            &inputs.preview,
             (rect.height() - 8.0 - header_height - 2.0).max(60.0),
             view,
             &mut zoom,
@@ -229,17 +439,18 @@ fn graph_card(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect, kind: ViewKind) 
             &mut pitch,
             &mut fit,
             &mut auto_fit,
-            Some(app.program.selected_line),
-            app.snapshot.program.highlight_line(),
+            inputs.selected_line,
+            inputs.current_line,
             false,
             false,
             false,
             false,
             false,
+            inputs.live,
             None,
         );
         if let Some(header) = header {
-            common::toolpath_status(ui, header, view.label(), drawn.span_mm);
+            common::toolpath_status(ui, header, view.label(), drawn.span_mm, estimate.as_deref());
         }
         app.program.graph_zoom = zoom;
         app.program.graph_pan = pan;
@@ -284,13 +495,13 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
             // then scrolls the view to it.
             let id = egui::Id::unique("linc-program-editor");
             let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
-            let text = app.program.editor.text();
+            let text = app.program.doc().editor.text();
             let cursor = state
                 .cursor
                 .char_range()
                 .map(|range| usize::from(range.primary.index))
                 .unwrap_or(0);
-            let line_count = app.program.editor.line_count();
+            let line_count = app.program.doc().editor.line_count();
             let last = line_count.saturating_sub(1);
             let mut line = 0usize;
             for (index, character) in text.chars().enumerate() {
@@ -340,8 +551,8 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                     target_line += 1;
                 }
             }
-            app.program.selected_line = target_line;
-            app.program.code_scroll_to_line = Some(target_line);
+            app.program.doc_mut().selected_line = target_line;
+            app.program.doc_mut().code_scroll_to_line = Some(target_line);
             // The operator has taken the cursor; do not drag it back to the
             // running line until the next run starts.
             app.program.follow_current = false;
@@ -352,6 +563,7 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
         ui.horizontal(|ui| {
             let file = app
                 .program
+                .doc()
                 .editor
                 .path
                 .as_ref()
@@ -370,6 +582,8 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
             // cut in the middle, so the extension stays on screen and neither chip
             // is pushed off the card.
             let state_word = if editable { "EDITABLE" } else { "READ-ONLY" };
+            let preparing = app.program.prepared.is_some()
+                && app.program.front == crate::state::DocumentFront::Prepared;
             // The word that shares the row with the editability chip: a running
             // program, or the mark a finished one leaves until the next run.
             let run_word = if app.snapshot.task.running {
@@ -380,14 +594,28 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
                 None
             };
             let reserved = theme::measure(ui, state_word, 9.0)
+                + if preparing {
+                    theme::measure(ui, "PREPARING:", 9.0) + 8.0
+                } else {
+                    0.0
+                }
                 + run_word.map_or(0.0, |(word, _)| theme::measure(ui, word, 9.0))
-                + if app.program.editor.dirty {
+                + if app.program.doc().editor.dirty {
                     theme::measure(ui, "*", 12.0)
                 } else {
                     0.0
                 }
                 + 32.0;
             let room = (ui.available_width() - reserved).max(80.0);
+            if preparing {
+                ui.label(
+                    RichText::new("PREPARING:")
+                        .monospace()
+                        .strong()
+                        .size(theme::font_size(9.0))
+                        .color(theme::ACCENT),
+                );
+            }
             let shown =
                 theme::fit_middle(|candidate| theme::measure(ui, candidate, 12.0), &file, room);
             let name = ui.label(
@@ -399,7 +627,7 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
             if shown != file {
                 name.on_hover_text(&file);
             }
-            if app.program.editor.dirty {
+            if app.program.doc().editor.dirty {
                 ui.label(RichText::new("*").color(theme::WARNING));
             }
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
@@ -445,26 +673,26 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
         // instead of pushing the row past the pane. The walk itself has no
         // buttons: `fault_next`/`fault_prev` are the way, and the hint row names
         // them.
-        let issue_count = app.program.issues.len();
-        let (status, fault_message, status_color) =
-            match app.program.issues.get(app.program.issue_index) {
-                Some(issue) if issue_count > 1 => (
-                    format!(
-                        "SYNTAX {}/{}  LN {}: ",
-                        app.program.issue_index + 1,
-                        issue_count,
-                        issue.line
-                    ),
-                    Some(issue.message.as_str()),
-                    theme::ERROR,
+        let doc = app.program.doc();
+        let issue_count = doc.issues.len();
+        let (status, fault_message, status_color) = match doc.issues.get(doc.issue_index) {
+            Some(issue) if issue_count > 1 => (
+                format!(
+                    "SYNTAX {}/{}  LN {}: ",
+                    doc.issue_index + 1,
+                    issue_count,
+                    issue.line
                 ),
-                Some(issue) => (
-                    format!("SYNTAX LN {}: ", issue.line),
-                    Some(issue.message.as_str()),
-                    theme::ERROR,
-                ),
-                None => ("PREVIEW VALID".to_string(), None, theme::SUCCESS),
-            };
+                Some(issue.message.as_str()),
+                theme::ERROR,
+            ),
+            Some(issue) => (
+                format!("SYNTAX LN {}: ", issue.line),
+                Some(issue.message.as_str()),
+                theme::ERROR,
+            ),
+            None => ("PREVIEW VALID".to_string(), None, theme::SUCCESS),
+        };
         // Inside a subroutine the controller reports a line of the routine's own
         // file and does not publish that file's name, so the preview names it.
         let chip = subroutine_chip(app);
@@ -472,8 +700,8 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
             ui.label(
                 RichText::new(format!(
                     "LN {}  /  {} LINES",
-                    app.program.selected_line,
-                    app.program.editor.line_count()
+                    app.program.doc().selected_line,
+                    app.program.doc().editor.line_count()
                 ))
                 .monospace()
                 .size(theme::font_size(9.0))
@@ -484,9 +712,10 @@ fn editor_pane(app: &mut LincApp, ui: &mut Ui, rect: egui::Rect) {
             // preview's reading; the marker says so when the test reads the
             // machine. Cut to what the right group leaves rather than painted
             // over it.
-            if let Some(readout) =
-                crate::state::LoopReadout::current(&app.program.preview, &app.program.loop_progress)
-            {
+            if let Some(readout) = crate::state::LoopReadout::current(
+                &app.program.doc().preview,
+                &app.program.loop_progress,
+            ) {
                 let reserved = theme::measure(ui, &status, 9.0)
                     + chip
                         .as_deref()
@@ -554,8 +783,9 @@ fn subroutine_chip(app: &LincApp) -> Option<String> {
         return None;
     }
     let line = app.snapshot.program.sub_line.max(1);
-    let named = linc_core::gcode::SubroutineBody::named_at(&app.program.preview.subroutines, line)
-        .map(|body| body.name.clone());
+    let named =
+        linc_core::gcode::SubroutineBody::named_at(&app.program.doc().preview.subroutines, line)
+            .map(|body| body.name.clone());
     Some(match named {
         Some(name) => format!("SUBROUTINE {name} LN {line}"),
         None => format!("SUBROUTINE LN {line}"),
@@ -592,7 +822,11 @@ fn fitted_status(ui: &Ui, prefix: &str, message: Option<&str>, room: f32) -> Str
 }
 
 fn fit_text(ui: &Ui, text: &str, room: f32) -> String {
-    if theme::measure(ui, text, 9.0) <= room {
+    fit_text_sized(ui, text, 9.0, room)
+}
+
+fn fit_text_sized(ui: &Ui, text: &str, size: f32, room: f32) -> String {
+    if theme::measure(ui, text, size) <= room {
         return text.to_string();
     }
     const ELLIPSIS: &str = "\u{2026}";
@@ -600,7 +834,7 @@ fn fit_text(ui: &Ui, text: &str, room: f32) -> String {
     while !chars.is_empty() {
         chars.pop();
         let candidate = format!("{}{}", chars.iter().collect::<String>(), ELLIPSIS);
-        if theme::measure(ui, &candidate, 9.0) <= room {
+        if theme::measure(ui, &candidate, size) <= room {
             return candidate;
         }
     }
@@ -608,13 +842,14 @@ fn fit_text(ui: &Ui, text: &str, room: f32) -> String {
 }
 
 fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
-    let mut text = app.program.editor.text();
-    let current_line = app.program.selected_line;
+    let doc = app.program.doc();
+    let mut text = doc.editor.text();
+    let current_line = doc.selected_line;
     let search = app.program.search_needle.clone();
     let matches = app.program.search_matches.clone();
-    let issues = app.program.issues.clone();
-    let current_issue = (app.program.issue_index < issues.len()).then_some(app.program.issue_index);
-    let line_count = app.program.editor.line_count();
+    let issues = doc.issues.clone();
+    let current_issue = (doc.issue_index < issues.len()).then_some(doc.issue_index);
+    let line_count = doc.editor.line_count();
     let desired_rows = line_count.max(12);
     let gutter_font = FontId::monospace(editor_font());
     let gutter_width = ui.fonts_mut(|fonts| {
@@ -630,15 +865,16 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
     // `vertical_scroll_offset` does not move this scroll area, so the view is
     // asked to reveal a rect instead — the same call the text edit makes when
     // its cursor moves.
-    let scroll_to = app
-        .program
-        .code_scroll_to_line
-        .take()
-        .or(if app.snapshot.task.running {
-            Some(current_line)
-        } else {
-            None
-        });
+    let scroll_to =
+        app.program
+            .doc_mut()
+            .code_scroll_to_line
+            .take()
+            .or(if app.snapshot.task.running {
+                Some(current_line)
+            } else {
+                None
+            });
     let scroll = egui::ScrollArea::vertical()
         .id_salt("program-editor")
         .max_height(height)
@@ -708,16 +944,17 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                             egui::text::CCursor::new(caret),
                         )));
                     state.store(ui.ctx(), editor_id);
-                    app.program.editor.replace_text(text.clone());
+                    app.program.doc_mut().editor.replace_text(text.clone());
                     app.mark_editor_changed();
                 }
             }
+            let revision = app.program.doc().editor.revision;
             let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
                 // `pixels_per_point` is part of the key: the shell changes the
                 // design zoom with the window, and reusing a galley laid out at
                 // the old scale makes epaint warn during tessellation.
                 let key: GalleyKey = (
-                    app.program.editor.revision,
+                    revision,
                     issues
                         .iter()
                         .map(|issue| issue.line)
@@ -750,7 +987,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             // highlight: the cursor feeds `selected_line` back every frame while
             // the editor has focus, so a highlight-only move would be undone on
             // the next frame.
-            if let Some(line) = app.program.cursor_line.take() {
+            if let Some(line) = app.program.doc_mut().cursor_line.take() {
                 let id = egui::Id::unique("linc-program-editor");
                 let char_index: usize = text
                     .lines()
@@ -788,9 +1025,9 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             }
             if editable && output.response.changed() {
                 let new_text = text.clone();
-                let before = app.program.editor.text();
+                let before = app.program.doc().editor.text();
                 if before != new_text {
-                    app.program.editor.replace_text(new_text.clone());
+                    app.program.doc_mut().editor.replace_text(new_text.clone());
                     app.mark_editor_changed();
                 }
             }
@@ -804,7 +1041,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     let cursor = usize::from(range.primary.index)
                         .min(text.chars().count().saturating_sub(1));
                     let line = text.chars().take(cursor).filter(|ch| *ch == '\n').count() + 1;
-                    app.program.selected_line = line.max(1).min(line_count.max(1));
+                    app.program.doc_mut().selected_line = line.max(1).min(line_count.max(1));
                 }
             }
             // A row ends a logical line only when the text had a newline there;
@@ -862,7 +1099,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
                     continue;
                 }
                 let current_fault = issues
-                    .get(app.program.issue_index)
+                    .get(app.program.doc().issue_index)
                     .is_some_and(|issue| issue.line == *line);
                 painter.rect_filled(
                     if current_fault {
@@ -881,7 +1118,7 @@ fn scroll_editor(app: &mut LincApp, ui: &mut Ui, height: f32, editable: bool) {
             // translucent accent band across every wrapped row of the logical
             // line, and a solid bar on the rim. The shell keeps the selection
             // on the executing line while a program runs.
-            let current = app.program.selected_line.max(1);
+            let current = app.program.doc().selected_line.max(1);
             if current <= starts.len() {
                 let (top, bottom) =
                     line_span(&output.galley, output.galley_pos.y, &starts, current);

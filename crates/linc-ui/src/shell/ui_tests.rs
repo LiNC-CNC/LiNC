@@ -1329,7 +1329,12 @@ fn the_square_key_flips_the_right_pane_to_recent_files() {
 #[test]
 fn a_jog_screen_without_a_program_still_frames_the_offset() {
     let mut harness = ProbeHarness::new(PanelMode::Jog, false, true);
-    harness.app.program.editor.replace_text(String::new());
+    harness
+        .app
+        .program
+        .loaded_mut()
+        .editor
+        .replace_text(String::new());
     harness.app.snapshot.offsets.active_index = Some(1);
     if let Some(row) = harness
         .app
@@ -1351,12 +1356,13 @@ fn a_jog_screen_without_a_program_still_frames_the_offset() {
     let offset = harness
         .app
         .program
+        .loaded()
         .preview_offset
         .clone()
         .expect("the controller's offset is the frame, program or not");
     assert_eq!(offset.get("X").copied(), Some(-156.381));
     assert!(
-        harness.app.program.preview.segments.is_empty(),
+        harness.app.program.loaded().preview.segments.is_empty(),
         "no program"
     );
     // The marker lands where the work reading already is: its shift is zero,
@@ -2663,7 +2669,10 @@ fn edit_mode_starts_in_code_with_editor_focus() {
 #[test]
 fn unsaved_program_guards_navigation() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
-    app.program.editor.replace_text("G0 X0\nG1 X1\n".into());
+    app.program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X0\nG1 X1\n".into());
     assert!(app.program_dirty());
     app.request_page(Page::Tools);
     assert!(matches!(
@@ -2675,7 +2684,7 @@ fn unsaved_program_guards_navigation() {
     app.perform_pending(PendingAction::Navigate(Page::Tools));
     assert_eq!(app.nav.page, Page::Tools);
     // The buffer survives a non-destructive page change.
-    assert_eq!(app.program.editor.text(), "G0 X0\nG1 X1\n");
+    assert_eq!(app.program.loaded().editor.text(), "G0 X0\nG1 X1\n");
 }
 
 /// DISCARD is the operator agreeing to lose the edits, so it must drop the
@@ -2685,7 +2694,10 @@ fn unsaved_program_guards_navigation() {
 fn discard_reverts_the_buffer_to_the_loaded_program() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
     let loaded = app.snapshot.program.content.clone().expect("demo loaded");
-    app.program.editor.replace_text("G0 X9\n".into());
+    app.program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X9\n".into());
     assert!(app.program_dirty());
     app.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::OpenFiles));
     // What the DISCARD button does.
@@ -2693,8 +2705,8 @@ fn discard_reverts_the_buffer_to_the_loaded_program() {
     app.perform_pending(PendingAction::OpenFiles);
     assert_eq!(app.nav.page, Page::Files);
     assert!(!app.program_dirty(), "the buffer is clean again");
-    assert_eq!(app.program.editor.text(), *loaded);
-    assert_eq!(app.program.selected_line, 1);
+    assert_eq!(app.program.loaded().editor.text(), *loaded);
+    assert_eq!(app.program.loaded().selected_line, 1);
 }
 
 /// Pressing cycle start on the panel goes through the HMI now, so a press it
@@ -2722,9 +2734,14 @@ fn a_refused_cycle_start_sends_nothing_and_says_why() {
     // After the refresh: a preview rebuild polls, and the simulation's snapshot
     // has no path of its own.
     harness.app.snapshot.program.path = Some(std::path::PathBuf::from("/tmp/demo.ngc"));
-    harness.app.program.loaded_path = harness.app.snapshot.program.path.clone();
+    harness.app.program.loaded_mut().path = harness.app.snapshot.program.path.clone();
     harness.app.sync_issues();
-    harness.app.program.editor.replace_text("G0 X9\n".into());
+    harness
+        .app
+        .program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X9\n".into());
     harness.app.snapshot.panel.buttons |= 1u64 << linc_core::model::panel_button::CYCLE_START;
 
     harness.app.service_cycle_start();
@@ -2766,7 +2783,7 @@ fn an_accepted_cycle_start_sends_one_command() {
     harness.app.snapshot.panel.program_protect = false;
     harness.app.refresh_preview();
     harness.app.snapshot.program.path = Some(std::path::PathBuf::from("/tmp/demo.ngc"));
-    harness.app.program.loaded_path = harness.app.snapshot.program.path.clone();
+    harness.app.program.loaded_mut().path = harness.app.snapshot.program.path.clone();
     harness.app.sync_issues();
     assert!(
         harness.app.program_ready(),
@@ -2804,13 +2821,18 @@ fn the_header_shows_the_program_interlock() {
     let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
     harness.app.refresh_preview();
     harness.app.snapshot.program.path = Some(std::path::PathBuf::from("/tmp/demo.ngc"));
-    harness.app.program.loaded_path = harness.app.snapshot.program.path.clone();
+    harness.app.program.loaded_mut().path = harness.app.snapshot.program.path.clone();
     harness.app.sync_issues();
     let texts = top_bar_texts(&mut harness.app, &harness.ctx);
     assert!(texts.iter().any(|text| text == "PROG OK"), "{texts:?}");
     assert!(texts.iter().any(|text| text == "OK"), "{texts:?}");
 
-    harness.app.program.editor.replace_text("G0 X9\n".into());
+    harness
+        .app
+        .program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X9\n".into());
     let texts = top_bar_texts(&mut harness.app, &harness.ctx);
     assert!(
         texts.iter().any(|text| text == "NOT OK"),
@@ -2831,19 +2853,20 @@ fn a_refused_machine_check_closes_the_interlock_even_without_a_line() {
     // After the poll: a refresh replaces the snapshot with the backend's, which
     // has no path in this fixture.
     app.snapshot.program.path = Some(std::path::PathBuf::from("/tmp/demo.ngc"));
-    app.program.loaded_path = app.snapshot.program.path.clone();
+    app.program.loaded_mut().path = app.snapshot.program.path.clone();
     app.sync_issues();
     assert!(
         app.program_ready(),
         "the demo program is clean: dirty={:?} issues={:?} check={:?} loaded={:?}",
         app.program_dirty(),
         app.program
+            .loaded()
             .issues
             .iter()
             .map(|issue| (issue.line, issue.message.clone()))
             .collect::<Vec<_>>(),
         app.program.machine_check,
-        app.program.loaded_path,
+        app.program.loaded().path,
     );
 
     app.program.machine_check = Some(linc_core::verify::MachineCheck {
@@ -2859,6 +2882,104 @@ fn a_refused_machine_check_closes_the_interlock_even_without_a_line() {
     );
 }
 
+/// A snapshot revision is the controller's loaded program, not whatever the
+/// editor happens to show: the loaded document takes the new text while a
+/// prepared document keeps its own text and place in it.
+#[test]
+fn a_snapshot_revision_replaces_only_the_loaded_document() {
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    let mut prepared = Document::default();
+    prepared.editor.set_loaded(
+        std::path::PathBuf::from("/tmp/prepared.ngc"),
+        "G1 X1\nG1 X2\n".into(),
+    );
+    prepared.path = Some(std::path::PathBuf::from("/tmp/prepared.ngc"));
+    prepared.selected_line = 2;
+    app.program.prepared = Some(prepared);
+    app.program.front = DocumentFront::Prepared;
+
+    app.snapshot.program.revision = app.program.loaded().program_revision_seen + 1;
+    app.snapshot.program.content = Some(std::sync::Arc::new("G0 X9\n".to_string()));
+    app.snapshot.program.path = Some(std::path::PathBuf::from("/tmp/loaded.ngc"));
+    app.sync_program();
+
+    assert_eq!(app.program.loaded().editor.text(), "G0 X9\n");
+    assert_eq!(app.program.doc().editor.text(), "G1 X1\nG1 X2\n");
+    assert_eq!(app.program.doc().selected_line, 2);
+}
+
+/// The program interlock belongs to the loaded program: a fault in the buffer
+/// being prepared can neither shut nor open the gate the machine reads.
+#[test]
+fn a_prepared_fault_leaves_the_program_interlock_to_the_loaded_document() {
+    let (_dir, mut app) = make_app(PanelMode::Edit);
+    app.refresh_preview();
+    app.snapshot.program.path = Some(std::path::PathBuf::from("/tmp/demo.ngc"));
+    app.program.loaded_mut().path = app.snapshot.program.path.clone();
+    app.sync_issues();
+    assert!(app.program_ready(), "the fixture program is clean");
+
+    let mut prepared = Document::default();
+    prepared.editor.replace_text("G1 X\n".into());
+    prepared.issues = vec![linc_core::lint::LintIssue {
+        line: 1,
+        span: None,
+        message: "axis word without a value".into(),
+    }];
+    app.program.prepared = Some(prepared);
+    app.program.front = DocumentFront::Prepared;
+    assert!(
+        app.program_ready(),
+        "a prepared fault must not shut the loaded program's gate"
+    );
+    assert_eq!(app.program_block_reason(), None);
+
+    app.program
+        .loaded_mut()
+        .issues
+        .push(linc_core::lint::LintIssue {
+            line: 1,
+            span: None,
+            message: "loaded fault".into(),
+        });
+    assert!(
+        !app.program_ready(),
+        "the loaded document still owns the gate"
+    );
+    assert_eq!(
+        app.program_block_reason(),
+        Some("line 1: loaded fault".to_string())
+    );
+}
+
+/// Each document carries its own undo history: undoing the one in front leaves
+/// the other exactly as it was.
+#[test]
+fn undo_on_the_front_document_leaves_the_other_history_alone() {
+    let (_dir, mut app) = make_app(PanelMode::Edit);
+    app.program.loaded_mut().editor.replace_text("L1\n".into());
+    app.program
+        .loaded_mut()
+        .editor
+        .replace_text("L1\nL2\n".into());
+    let mut prepared = Document::default();
+    prepared.editor.replace_text("P1\n".into());
+    prepared.editor.replace_text("P1\nP2\n".into());
+    app.program.prepared = Some(prepared);
+    app.program.front = DocumentFront::Prepared;
+
+    app.run_shortcut(ShortcutCommand::UndoEdit);
+
+    assert_eq!(app.program.doc().editor.text(), "P1\n");
+    assert_eq!(app.program.loaded().editor.text(), "L1\nL2\n");
+
+    app.program.front = DocumentFront::Loaded;
+    app.run_shortcut(ShortcutCommand::UndoEdit);
+
+    assert_eq!(app.program.loaded().editor.text(), "L1\n");
+    assert_eq!(app.program.prepared.as_ref().unwrap().editor.text(), "P1\n");
+}
+
 /// A save is how a program typed into EDIT becomes the loaded one, and the
 /// verdict held for the old text says nothing about it: the interpreter is asked
 /// again, with a deadline, and its answer is remembered.
@@ -2869,7 +2990,10 @@ fn saving_a_program_asks_the_interpreter_again() {
     // proves the question was asked - and keeps the test off rs274's timing.
     app.profile.config.program.verify_timeout_ms = 1;
     app.program.machine_check = None;
-    app.program.editor.replace_text("G0 X0\nG1 X10\n".into());
+    app.program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X0\nG1 X10\n".into());
     app.save_program();
     // The buffer had no path, so the save asked for a name; naming it is the
     // save-as path, and it must ask the interpreter as well.
@@ -2899,8 +3023,11 @@ fn an_untitled_buffer_saves_under_a_name_it_asks_for() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
     app.snapshot.program.path = None;
     app.snapshot.program.content = None;
-    app.program.editor = linc_core::editor::Editor::new();
-    app.program.editor.replace_text("G0 X0\nG1 X10\n".into());
+    app.program.loaded_mut().editor = linc_core::editor::Editor::new();
+    app.program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X0\nG1 X10\n".into());
     app.save_program();
     let Some(Modal::SaveProgramAs(dialog)) = app.overlay.modal.clone() else {
         panic!("the save asks for a name, got {:?}", app.overlay.modal);
@@ -2915,6 +3042,7 @@ fn an_untitled_buffer_saves_under_a_name_it_asks_for() {
     assert!(app.overlay.modal.is_none());
     let path = app
         .program
+        .loaded()
         .editor
         .path
         .clone()
@@ -3239,7 +3367,10 @@ fn the_chosen_dashboard_outlives_the_session() {
 #[test]
 fn leaving_edit_with_unsaved_changes_warns_once() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
-    app.program.editor.replace_text("G0 X1\n".into());
+    app.program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X1\n".into());
     switch_mode(&mut app, PanelMode::Auto);
     assert!(matches!(app.overlay.modal, Some(Modal::UnsavedOnLeave)));
     // KEEP leaves the buffer alone; it is still there when EDIT comes back.
@@ -3260,11 +3391,14 @@ fn protect_unknown_fails_closed_in_the_ui() {
     app.snapshot.panel.program_protect_known = false;
     assert!(!app.editing_allowed());
     assert!(app.program_protected());
-    app.program.editor.replace_text("G0 X1\n".into());
-    let before = app.program.editor.text();
+    app.program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X1\n".into());
+    let before = app.program.loaded().editor.text();
     app.save_program();
-    assert_eq!(app.program.editor.text(), before);
-    assert!(app.program.editor.dirty);
+    assert_eq!(app.program.loaded().editor.text(), before);
+    assert!(app.program.loaded().editor.dirty);
     assert!(app.overlay.modal.is_none());
 }
 
@@ -3275,31 +3409,33 @@ fn protect_unknown_fails_closed_in_the_ui() {
 fn the_issue_list_walks_with_f8() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
     app.program
+        .loaded_mut()
         .editor
         .replace_text("G0 X0 Y0\nG1 X\nG1 X10 X20 F100\nM1234\nM2\n".into());
     app.refresh_preview();
     assert_eq!(
         app.program
+            .loaded()
             .issues
             .iter()
             .map(|issue| issue.line)
             .collect::<Vec<_>>(),
         vec![2, 3, 4],
         "{:?}",
-        app.program.issues
+        app.program.loaded().issues
     );
-    assert_eq!(app.program.issue_index, 0);
+    assert_eq!(app.program.loaded().issue_index, 0);
     app.cycle_issue(1);
-    assert_eq!(app.program.selected_line, 3);
-    assert_eq!(app.program.cursor_line, Some(3));
-    assert_eq!(app.program.code_scroll_to_line, Some(3));
+    assert_eq!(app.program.loaded().selected_line, 3);
+    assert_eq!(app.program.loaded().cursor_line, Some(3));
+    assert_eq!(app.program.loaded().code_scroll_to_line, Some(3));
     app.cycle_issue(1);
-    assert_eq!(app.program.selected_line, 4);
+    assert_eq!(app.program.loaded().selected_line, 4);
     // Past the last fault the walk wraps to the first rather than sticking.
     app.cycle_issue(1);
-    assert_eq!(app.program.selected_line, 2);
+    assert_eq!(app.program.loaded().selected_line, 2);
     app.cycle_issue(-1);
-    assert_eq!(app.program.selected_line, 4);
+    assert_eq!(app.program.loaded().selected_line, 4);
 }
 
 /// A repair that removes a fault keeps the operator's place when that place is
@@ -3308,26 +3444,29 @@ fn the_issue_list_walks_with_f8() {
 fn the_issue_index_survives_a_rebuild() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
     app.program
+        .loaded_mut()
         .editor
         .replace_text("G0 X0 Y0\nG1 X\nG123\nM2\n".into());
     app.refresh_preview();
     app.cycle_issue(1);
-    assert_eq!(app.program.selected_line, 3);
+    assert_eq!(app.program.loaded().selected_line, 3);
     // An edit above the fault shifts both lines down by one.
     app.program
+        .loaded_mut()
         .editor
         .replace_text("(note)\nG0 X0 Y0\nG1 X\nG123\nM2\n".into());
     app.refresh_preview();
-    assert_eq!(app.program.selected_line, 3);
-    assert_eq!(app.program.issue_index, 1);
-    assert_eq!(app.program.issues[1].line, 4);
+    assert_eq!(app.program.loaded().selected_line, 3);
+    assert_eq!(app.program.loaded().issue_index, 1);
+    assert_eq!(app.program.loaded().issues[1].line, 4);
     // The chosen fault is repaired: the index falls back inside the list.
     app.program
+        .loaded_mut()
         .editor
         .replace_text("(note)\nG0 X0 Y0\nG1 X\nG123\nM2\n".replace("G123", "G1 X1 F100"));
     app.refresh_preview();
-    assert_eq!(app.program.issues.len(), 1);
-    assert_eq!(app.program.issue_index, 0);
+    assert_eq!(app.program.loaded().issues.len(), 1);
+    assert_eq!(app.program.loaded().issue_index, 0);
 }
 
 /// The load gate: a file with a syntax fault is never handed to the
@@ -3356,11 +3495,12 @@ fn a_file_with_a_syntax_fault_is_not_loaded_into_the_interpreter() {
     // The buffer is open on the file, the fault is marked, and the interlock
     // stays shut.
     // Three blocks plus the empty line after the final newline.
-    assert_eq!(harness.app.program.editor.line_count(), 4);
+    assert_eq!(harness.app.program.loaded().editor.line_count(), 4);
     assert_eq!(
         harness
             .app
             .program
+            .loaded()
             .issues
             .iter()
             .map(|issue| issue.line)
@@ -3413,9 +3553,9 @@ fn a_clean_file_loads_and_opens_the_interlock() {
     harness.app.poll_backend();
     harness.frame(&[]);
     assert!(
-        harness.app.program.issues.is_empty(),
+        harness.app.program.loaded().issues.is_empty(),
         "{:?}",
-        harness.app.program.issues
+        harness.app.program.loaded().issues
     );
 }
 
@@ -3436,12 +3576,13 @@ fn a_move_outside_the_travel_box_blocks_cycle_start() {
         harness.app.program.travel_violation,
         Some((2, "X+".into())),
         "issues: {:?}",
-        harness.app.program.issues
+        harness.app.program.loaded().issues
     );
     assert!(
         harness
             .app
             .program
+            .loaded()
             .issues
             .iter()
             .any(|issue| issue.line == 2
@@ -3449,7 +3590,7 @@ fn a_move_outside_the_travel_box_blocks_cycle_start() {
                     .message
                     .contains("outside the machine travel envelope")),
         "{:?}",
-        harness.app.program.issues
+        harness.app.program.loaded().issues
     );
     assert!(
         !harness.app.program_ready(),
@@ -3474,15 +3615,19 @@ fn a_move_outside_the_travel_box_blocks_cycle_start() {
 fn editor_preview_updates_only_after_valid_parse() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
     app.program
+        .loaded_mut()
         .editor
         .replace_text("G0 X0 Y0\nG1 X10 Y10 F300\n".into());
     app.refresh_preview();
-    assert!(app.program.preview.error.is_none());
-    assert_eq!(app.program.last_valid_preview.segments.len(), 2);
-    app.program.editor.replace_text("G0 X0 Y0\nG1 X\n".into());
+    assert!(app.program.loaded().preview.error.is_none());
+    assert_eq!(app.program.loaded().last_valid_preview.segments.len(), 2);
+    app.program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X0 Y0\nG1 X\n".into());
     app.refresh_preview();
-    assert!(app.program.preview.error.is_some());
-    assert_eq!(app.program.last_valid_preview.segments.len(), 2);
+    assert!(app.program.loaded().preview.error.is_some());
+    assert_eq!(app.program.loaded().last_valid_preview.segments.len(), 2);
 }
 
 #[test]
@@ -3520,17 +3665,20 @@ fn clear_trail_is_view_only_and_sends_backend_request() {
 #[test]
 fn jump_to_line_clamps_and_selects() {
     let (_dir, mut app) = make_app(PanelMode::Edit);
-    app.program.editor.replace_text("L1\nL2\nL3\nL4\n".into());
+    app.program
+        .loaded_mut()
+        .editor
+        .replace_text("L1\nL2\nL3\nL4\n".into());
     app.jump_to_line(3);
-    assert_eq!(app.program.selected_line, 3);
-    assert_eq!(app.program.code_scroll_to_line, Some(3));
-    assert_eq!(app.program.cursor_line, Some(3));
+    assert_eq!(app.program.loaded().selected_line, 3);
+    assert_eq!(app.program.loaded().code_scroll_to_line, Some(3));
+    assert_eq!(app.program.loaded().cursor_line, Some(3));
     app.jump_to_line(0);
-    assert_eq!(app.program.selected_line, 1);
+    assert_eq!(app.program.loaded().selected_line, 1);
     app.jump_to_line(9999);
     assert_eq!(
-        app.program.selected_line,
-        app.program.editor.line_count().max(1)
+        app.program.loaded().selected_line,
+        app.program.loaded().editor.line_count().max(1)
     );
 }
 
@@ -3547,13 +3695,18 @@ fn finishing_a_program_puts_the_cursor_back_at_the_top() {
     // motion. `M2` on the next line is never reported.
     app.snapshot.program.current_line = 3;
     app.sync_program();
-    assert_eq!(app.program.selected_line, 3, "follow drags the selection");
+    assert_eq!(
+        app.program.loaded().selected_line,
+        3,
+        "follow drags the selection"
+    );
 
     app.snapshot.task.running = false;
     app.snapshot.task.interp = linc_core::model::InterpState::Idle;
     app.sync_program();
     assert_eq!(
-        app.program.selected_line, 1,
+        app.program.loaded().selected_line,
+        1,
         "a finished program starts at its first line again"
     );
     assert_eq!(
@@ -3566,6 +3719,34 @@ fn finishing_a_program_puts_the_cursor_back_at_the_top() {
         app.snapshot.program.current_line, 3,
         "the controller's line is left alone: progress keeps its 100% and\n         the REMAINING view keeps the path eaten"
     );
+}
+
+#[test]
+fn a_finished_program_reads_full_progress() {
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    app.snapshot.program.content = Some(std::sync::Arc::new("G0 X0\nM2\n\n".to_string()));
+    app.snapshot.program.line_count = 3;
+    // The controller stops on the last block that carried motion, one short of
+    // the M2 and the trailing blank line.
+    app.snapshot.program.current_line = 1;
+    app.snapshot.task.running = true;
+    app.snapshot.task.interp = linc_core::model::InterpState::Reading;
+    app.sync_program();
+    app.snapshot.task.running = false;
+    app.snapshot.task.interp = linc_core::model::InterpState::Idle;
+    app.sync_program();
+    assert_eq!(app.program.completed_at, Some(1));
+    app.snapshot.program.progress = 1.0 / 3.0;
+
+    assert_eq!(app.program.progress(&app.snapshot.program), 1.0);
+    let fields: Vec<String> = app
+        .status_fields()
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    let bar = fields.join(" | ");
+    assert!(bar.contains("100%"), "{bar}");
+    assert!(!bar.contains("33%"), "{bar}");
 }
 
 #[test]
@@ -3585,7 +3766,8 @@ fn a_run_stopped_part_way_keeps_the_line_it_stopped_on() {
     app.snapshot.task.interp = linc_core::model::InterpState::Idle;
     app.sync_program();
     assert_eq!(
-        app.program.selected_line, 2,
+        app.program.loaded().selected_line,
+        2,
         "a stop is answered by the line it stopped on, not by the top"
     );
     assert_eq!(app.program.completed_at, None);
@@ -3608,7 +3790,8 @@ fn an_estop_reaching_the_last_block_does_not_reset_the_cursor() {
     app.snapshot.task.interp = linc_core::model::InterpState::Idle;
     app.sync_program();
     assert_eq!(
-        app.program.selected_line, 4,
+        app.program.loaded().selected_line,
+        4,
         "an E-stop is not a finished program"
     );
     assert_eq!(app.program.completed_at, None);
@@ -4360,19 +4543,19 @@ fn servo_load_rows_follow_the_profile_and_the_machine() {
 fn stepping_the_selection_clamps_at_both_ends() {
     let (_dir, mut app) = make_app(PanelMode::Auto);
     let text: String = (1..=40).map(|n| format!("L{n}\n")).collect();
-    app.program.editor.replace_text(text);
-    let count = app.program.editor.line_count();
-    app.program.selected_line = 1;
+    app.program.loaded_mut().editor.replace_text(text);
+    let count = app.program.loaded().editor.line_count();
+    app.program.loaded_mut().selected_line = 1;
     app.step_selected_line(-1);
-    assert_eq!(app.program.selected_line, 1);
+    assert_eq!(app.program.loaded().selected_line, 1);
     app.step_selected_line(LINE_PAGE);
     assert_eq!(
-        app.program.selected_line,
+        app.program.loaded().selected_line,
         (1 + LINE_PAGE as usize).min(count)
     );
     app.step_selected_line(10_000);
-    assert_eq!(app.program.selected_line, count);
-    assert_eq!(app.program.code_scroll_to_line, Some(count));
+    assert_eq!(app.program.loaded().selected_line, count);
+    assert_eq!(app.program.loaded().code_scroll_to_line, Some(count));
 }
 
 #[test]
@@ -4470,11 +4653,13 @@ fn the_preview_uses_the_offset_the_program_selects() {
 
     // The program selects G54: drawn at the G54 origin, not machine zero.
     app.program
+        .loaded_mut()
         .editor
         .replace_text("G21 G90 G54\nG0 X0 Y0\n".into());
     app.refresh_preview();
     let end = app
         .program
+        .loaded()
         .preview
         .segments
         .last()
@@ -4485,11 +4670,13 @@ fn the_preview_uses_the_offset_the_program_selects() {
 
     // A program that selects G55 is drawn at G55, though G54 is active.
     app.program
+        .loaded_mut()
         .editor
         .replace_text("G21 G90 G55\nG0 X0 Y0\n".into());
     app.refresh_preview();
     let end = app
         .program
+        .loaded()
         .preview
         .segments
         .last()
@@ -4499,11 +4686,13 @@ fn the_preview_uses_the_offset_the_program_selects() {
 
     // With no selection the active system is the fallback.
     app.program
+        .loaded_mut()
         .editor
         .replace_text("G21 G90\nG0 X0 Y0\n".into());
     app.refresh_preview();
     let end = app
         .program
+        .loaded()
         .preview
         .segments
         .last()
@@ -4538,7 +4727,7 @@ fn run_from_line_uses_the_selected_line_not_the_controller_line() {
     app.snapshot.program.content = Some(std::sync::Arc::new("G0 X0\nG1 X10\nG1 X20\n".to_string()));
     app.snapshot.program.line_count = 3;
     app.snapshot.program.current_line = 3;
-    app.program.selected_line = 2;
+    app.program.loaded_mut().selected_line = 2;
     let (line, block) = app.run_from_line_choice();
     assert_eq!(line, 2);
     assert_eq!(block, "G1 X10");
@@ -4576,6 +4765,10 @@ struct ProbeHarness {
     app: LincApp,
     sent: std::rc::Rc<std::cell::RefCell<Vec<MachineCommand>>>,
     loobric: std::rc::Rc<std::cell::RefCell<Option<LoobricStatus>>>,
+    /// When set, `send` records the command without running it, so a test can
+    /// hold it in flight and queue the result event a worker would deliver.
+    deferred: std::rc::Rc<std::cell::Cell<bool>>,
+    events: std::rc::Rc<std::cell::RefCell<VecDeque<BackendEvent>>>,
 }
 
 impl ProbeHarness {
@@ -4588,6 +4781,8 @@ impl ProbeHarness {
         let ctx = egui::Context::default();
         let sent = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let loobric = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let deferred = std::rc::Rc::new(std::cell::Cell::new(false));
+        let events = std::rc::Rc::new(std::cell::RefCell::new(VecDeque::new()));
         let mut sim = linc_core::sim::SimBackend::new(profile.clone(), mode);
         sim.set_power(power);
         sim.set_program_protect(protect, true);
@@ -4596,6 +4791,8 @@ impl ProbeHarness {
             inner: sim,
             sent: sent.clone(),
             loobric: loobric.clone(),
+            deferred: deferred.clone(),
+            events: events.clone(),
         });
         // Build the app inside a real 1280x720 pass: \`LincApp::new\` applies
         // the design zoom, and outside a pass egui reports no viewport.
@@ -4618,7 +4815,31 @@ impl ProbeHarness {
             app,
             sent,
             loobric,
+            deferred,
+            events,
         }
+    }
+
+    /// Hold later commands in flight instead of running them, so a test can
+    /// queue the result event a real worker delivers.
+    fn defer_commands(&self) {
+        self.deferred.set(true);
+    }
+
+    /// Queue one command result for the next drain.
+    fn queue_command_result(
+        &self,
+        command: &str,
+        result: Result<(), linc_core::command::MachineError>,
+    ) {
+        self.events
+            .borrow_mut()
+            .push_back(BackendEvent::Command(CommandResult {
+                id: 0,
+                command: command.to_string(),
+                result,
+                timestamp_ms: 0,
+            }));
     }
 
     /// Publish a Loobric status through the backend snapshot, the way an
@@ -4708,6 +4929,47 @@ impl ProbeHarness {
         output
     }
 
+    /// Draw the Program page's own panes without the shell's poll first, so a
+    /// test can paint a state it has just set on the snapshot.
+    fn draw_program_page(&mut self) -> egui::FullOutput {
+        let app = &mut self.app;
+        let mut output = self.ctx.run_ui(probe_raw_input(Vec::new()), |ui| {
+            theme::apply_design_zoom(ui.ctx(), app.design_scale);
+            crate::screens::program::show(app, ui);
+        });
+        output.textures_delta.clear();
+        output
+    }
+
+    /// Click on the Program page alone, without the shell's poll, so a test can
+    /// act on a run state it has just set on the snapshot.
+    fn click_program_page(&mut self, position: egui::Pos2) -> egui::FullOutput {
+        let app = &mut self.app;
+        let mut output = self.ctx.run_ui(
+            probe_raw_input(vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]),
+            |ui| {
+                theme::apply_design_zoom(ui.ctx(), app.design_scale);
+                crate::screens::program::show(app, ui);
+            },
+        );
+        output.textures_delta.clear();
+        output
+    }
+
     /// Draw the MDI pane alone into `slot`, and report the card frames and
     /// every text it painted. Calling the pane directly keeps the slot a
     /// known number instead of the page's computed column.
@@ -4754,12 +5016,10 @@ impl ProbeHarness {
         ])
     }
 
-    /// Put one file in NC_FILES, show the Files page and select it.
-    fn files_page_with_one_file(&mut self, name: &str) -> std::path::PathBuf {
+    /// Show the Files page with `path` selected in the NC_FILES pane.
+    fn select_nc_file(&mut self, path: &std::path::Path) {
         // Keep the removable-media poll out of the test; the NC pane is enough.
         self.app.files.usb_root = Some(self.app.files.nc_root.clone());
-        let path = self.app.files.nc_root.join(name);
-        std::fs::write(&path, "G0 X0\n").unwrap();
         self.app.set_page(Page::Files);
         self.app.files.nc_current = self.app.files.nc_root.clone();
         self.app.files.nc_entries = crate::state::read_dir_entries(&self.app.files.nc_root);
@@ -4771,6 +5031,16 @@ impl ProbeHarness {
             .position(|entry| entry.path == path)
             .expect("test file is listed");
         self.app.files.nc_parent_selected = false;
+        self.app.files.usb_focused = false;
+    }
+
+    /// Put one file in NC_FILES, show the Files page and select it.
+    fn files_page_with_one_file(&mut self, name: &str) -> std::path::PathBuf {
+        // Keep the removable-media poll out of the test; the NC pane is enough.
+        self.app.files.usb_root = Some(self.app.files.nc_root.clone());
+        let path = self.app.files.nc_root.join(name);
+        std::fs::write(&path, "G0 X0\n").unwrap();
+        self.select_nc_file(&path);
         path
     }
 
@@ -5710,6 +5980,8 @@ struct RecordingBackend {
     inner: linc_core::sim::SimBackend,
     sent: std::rc::Rc<std::cell::RefCell<Vec<MachineCommand>>>,
     loobric: std::rc::Rc<std::cell::RefCell<Option<LoobricStatus>>>,
+    deferred: std::rc::Rc<std::cell::Cell<bool>>,
+    events: std::rc::Rc<std::cell::RefCell<VecDeque<BackendEvent>>>,
 }
 
 impl UiBackend for RecordingBackend {
@@ -5721,11 +5993,14 @@ impl UiBackend for RecordingBackend {
 
     fn send(&mut self, command: MachineCommand) -> Result<(), linc_core::command::MachineError> {
         self.sent.borrow_mut().push(command.clone());
+        if self.deferred.get() {
+            return Ok(());
+        }
         linc_core::backend::MachineBackend::send(&mut self.inner, command)
     }
 
     fn drain_events(&mut self) -> Vec<BackendEvent> {
-        Vec::new()
+        self.events.borrow_mut().drain(..).collect()
     }
 }
 
@@ -5971,6 +6246,7 @@ fn the_cut_shortcut_still_cuts_text_in_the_gcode_editor() {
     harness
         .app
         .program
+        .loaded_mut()
         .editor
         .replace_text("G0 X1\nG1 X2\n".into());
     harness.app.set_page(Page::Program);
@@ -5995,7 +6271,7 @@ fn the_cut_shortcut_still_cuts_text_in_the_gcode_editor() {
             .any(|command| matches!(command, egui::OutputCommand::CopyText(text) if text == "G0")),
         "the editor must cut the selection, got {commands:?}"
     );
-    assert_eq!(harness.app.program.editor.text(), " X1\nG1 X2\n");
+    assert_eq!(harness.app.program.loaded().editor.text(), " X1\nG1 X2\n");
     assert!(
         harness.probe_writes().is_empty(),
         "{:?}",
@@ -6052,6 +6328,7 @@ fn the_code_thumbnail_draws_the_operator_view_and_keeps_its_angles() {
     harness
         .app
         .program
+        .loaded_mut()
         .editor
         .replace_text("G0 X0 Y0 Z0\nG1 X20 Y10 Z-40\n".into());
     harness.app.refresh_preview();
@@ -6093,6 +6370,7 @@ fn the_code_thumbnail_refits_when_the_card_changes_size() {
     harness
         .app
         .program
+        .loaded_mut()
         .editor
         .replace_text("G0 X0 Y0 Z0\nG1 X20 Y10 Z-40\n".into());
     harness.app.refresh_preview();
@@ -6330,6 +6608,7 @@ fn the_zoom_chords_work_while_the_gcode_editor_holds_the_keyboard() {
     harness
         .app
         .program
+        .loaded_mut()
         .editor
         .replace_text("G0 X1\nG1 X2\nG1 X3\n".into());
     harness.app.set_page(Page::Program);
@@ -6382,6 +6661,7 @@ fn ctrl_zero_refits_the_toolpath_and_the_mm_status_follows_it() {
     harness
         .app
         .program
+        .loaded_mut()
         .editor
         .replace_text("G0 X1\nG1 X2\nG1 X3\n".into());
     harness.app.set_page(Page::Program);
@@ -6445,6 +6725,7 @@ fn clicking_the_toolpath_hands_it_the_keyboard_and_the_pan_chords_work() {
     harness
         .app
         .program
+        .loaded_mut()
         .editor
         .replace_text("G0 X1\nG1 X2\nG1 X3\n".into());
     harness.app.set_page(Page::Program);
@@ -6485,6 +6766,7 @@ fn a_focused_editor_keeps_ctrl_up_down_and_ctrl_left_right() {
     harness
         .app
         .program
+        .loaded_mut()
         .editor
         .replace_text("G0 X1\nG1 X2\nG1 X3\n".into());
     harness.app.set_page(Page::Program);
@@ -6516,14 +6798,14 @@ fn a_focused_editor_keeps_ctrl_up_down_and_ctrl_left_right() {
     // only takes the chord when the page allows an edit.
     // Line 2 moves up past line 1: the line move answers Ctrl+Up only for a
     // line that has one above it.
-    harness.app.program.selected_line = 2;
+    harness.app.program.loaded_mut().selected_line = 2;
     harness.frame_with(&[(egui::Key::ArrowUp, ctrl())]);
     assert_eq!(
         harness.app.program.graph_pan, pan,
         "Ctrl+Up moves the selected line, not the view"
     );
     assert_eq!(
-        harness.app.program.editor.text(),
+        harness.app.program.loaded().editor.text(),
         "G1 X2\nG0 X1\nG1 X3\n",
         "the selected block moved up, so the chord reached the editor"
     );
@@ -6543,6 +6825,7 @@ fn a_navigation_click_releases_the_keyboard_from_the_gcode_editor() {
     harness
         .app
         .program
+        .loaded_mut()
         .editor
         .replace_text("G0 X1\nG1 X2\nG1 X3\n".into());
     harness.app.set_page(Page::Program);
@@ -6859,6 +7142,7 @@ fn ctrl_arrow_stays_in_a_focused_text_editor() {
     harness
         .app
         .program
+        .loaded_mut()
         .editor
         .replace_text("G0 X1\nG1 X2\n".into());
     harness.app.set_page(Page::Program);
@@ -8736,7 +9020,7 @@ fn a_block_previews_in_the_machines_distance_mode() {
     let mut harness = mdi_harness();
     harness.frame(&[]);
     // No work offset: the block's numbers are the machine's in this test.
-    harness.app.program.preview_offset = None;
+    harness.app.program.loaded_mut().preview_offset = None;
     // Away from zero, or an absolute move and a relative one would land on
     // the same number and the test would prove nothing.
     if let Some(x) = harness.app.snapshot.positions.axes.get_mut("X") {
@@ -8768,7 +9052,7 @@ fn the_overlay_starts_at_the_tool_and_ends_where_the_block_says() {
     harness.frame(&[]);
     // A known frame: no work offset, so the block's numbers are the
     // machine's in this test.
-    harness.app.program.preview_offset = None;
+    harness.app.program.loaded_mut().preview_offset = None;
     let start = harness.app.tool_tip();
     harness.app.mdi.input = "G1 X10".into();
     let segments = crate::screens::mdi::overlay(&mut harness.app).to_vec();
@@ -8819,7 +9103,7 @@ fn the_overlay_is_parsed_once_per_change() {
     let typed = harness.app.mdi.overlay.as_ref().expect("cached").generation;
     assert!(typed > first, "the input changed");
     harness.app.mdi.input.pop();
-    harness.app.program.preview_offset = Some(linc_core::model::AxisMap::new());
+    harness.app.program.loaded_mut().preview_offset = Some(linc_core::model::AxisMap::new());
     crate::screens::mdi::overlay(&mut harness.app);
     let modal = harness.app.mdi.overlay.as_ref().expect("cached").generation;
     assert!(modal > typed, "the modal state changed");
@@ -9188,7 +9472,7 @@ fn ctrl_g_selects_a_buffer_line_and_leaves_the_program_goto_alone() {
         Some(Modal::GoToLine { mdi: false, .. })
     ));
     harness.app.go_to_line(1, false);
-    assert_eq!(harness.app.program.selected_line, 1);
+    assert_eq!(harness.app.program.loaded().selected_line, 1);
     assert_eq!(
         harness.app.mdi.selection,
         Some(1),
@@ -9447,12 +9731,1932 @@ fn the_selected_line_follows_the_cut_so_the_graph_has_a_current_segment() {
     app.snapshot.program.running = true;
     app.snapshot.task.interp = linc_core::model::InterpState::Reading;
     app.snapshot.program.current_line = 2;
-    app.program.selected_line = 1;
+    app.program.loaded_mut().selected_line = 1;
     app.sync_program();
-    assert_eq!(app.program.selected_line, 2, "follow drags the highlight");
+    assert_eq!(
+        app.program.loaded().selected_line,
+        2,
+        "follow drags the highlight"
+    );
     assert_eq!(
         app.snapshot.program.highlight_line(),
         Some(2),
         "the view receives the executing line"
+    );
+}
+
+// ---- Files PREPARE: the prepared document --------------------------
+
+/// Put one program on the controller, through the same load the Files page
+/// sends, so the loaded document has its path and text.
+fn load_for_prepare(harness: &mut ProbeHarness, text: &str) -> std::path::PathBuf {
+    let path = harness._dir.path().join("gcode").join("running.ngc");
+    std::fs::write(&path, text).unwrap();
+    harness.app.load_program(path.clone());
+    harness.app.poll_backend();
+    // The recording backend sends no result event, so the load is committed by
+    // hand the way the shell would on that event.
+    harness.app.sync_program();
+    harness.app.commit_load();
+    assert_eq!(harness.app.nav.page, Page::Program, "the load landed");
+    path
+}
+
+/// Put a clean program on the controller and show it on the Program page. The
+/// recording backend reports no command results, so the commit that a real
+/// backend's verdict drives is made here.
+fn load_clean_and_show(harness: &mut ProbeHarness, text: &str) -> std::path::PathBuf {
+    let path = harness._dir.path().join("gcode").join("running.ngc");
+    std::fs::write(&path, text).unwrap();
+    harness.app.load_program(path.clone());
+    harness.app.poll_backend();
+    harness.app.sync_program();
+    harness.app.commit_load();
+    path
+}
+
+/// A second NC_FILES program opens in the editor while the machine cuts: the
+/// prepared document is read here, and the controller is never asked to open
+/// it. The run keeps its own place in the loaded document.
+#[test]
+fn prepare_reads_a_second_file_while_the_program_runs() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_for_prepare(&mut harness, "G0 X0\nG1 X10 F100\nG1 X20\nM2\n");
+
+    // The machine is cutting: the Files page must not need it stopped.
+    harness.app.send(MachineCommand::CycleStart);
+    assert!(harness.app.snapshot.task.running, "the run started");
+
+    harness.frame(&[egui::Key::F6]);
+    assert_eq!(
+        harness.app.nav.page,
+        Page::Files,
+        "F6 opens Files while a program runs"
+    );
+
+    let next = harness.app.files.nc_root.join("next.ngc");
+    std::fs::write(&next, "G0 X1\nG1 X2\nM2\n").unwrap();
+    harness.select_nc_file(&next);
+    let listing: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        listing.iter().any(|text| text == "PREPARE"),
+        "the shortcut row sits beside Enter: {listing:?}"
+    );
+
+    harness.sent.borrow_mut().clear();
+    harness.frame(&[egui::Key::P]);
+
+    assert_eq!(harness.app.program.front, DocumentFront::Prepared);
+    assert_eq!(
+        harness.app.program.doc().path.as_deref(),
+        Some(next.as_path())
+    );
+    assert_eq!(
+        harness.app.program.doc().editor.text(),
+        "G0 X1\nG1 X2\nM2\n"
+    );
+    assert_eq!(
+        harness.app.nav.page,
+        Page::Program,
+        "the prepared file is shown in the editor"
+    );
+    assert!(
+        harness.sent.borrow().is_empty(),
+        "PREPARE reached the controller: {:?}",
+        harness.sent_debug()
+    );
+    let painted: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        painted.iter().any(|text| text == "next.ngc"),
+        "the editor names the prepared file: {painted:?}"
+    );
+
+    // The run follows the loaded document, not the one in front.
+    harness.app.snapshot.program.current_line = 3;
+    harness.app.snapshot.program.motion_line = 0;
+    harness.app.sync_program();
+    assert_eq!(harness.app.program.loaded().selected_line, 3);
+    assert_eq!(
+        harness.app.program.prepared.as_ref().unwrap().selected_line,
+        1,
+        "the prepared document has its own place"
+    );
+}
+
+/// The controller's own program cannot be prepared: the action says why and
+/// leaves the editor alone.
+#[test]
+fn prepare_refuses_the_loaded_program() {
+    let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+    let loaded = load_for_prepare(&mut harness, "G0 X0\nG1 X10\nM2\n");
+    let before = harness.app.program.doc().editor.text();
+    harness.select_nc_file(&loaded);
+
+    harness.frame(&[egui::Key::P]);
+
+    assert!(harness.app.program.prepared.is_none());
+    assert_eq!(harness.app.program.front, DocumentFront::Loaded);
+    assert_eq!(harness.app.program.doc().editor.text(), before);
+    assert!(
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text.contains("loaded program")),
+        "the refusal is stated: {:?}",
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .map(|toast| &toast.text)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// One prepared document at a time: a second PREPARE asks before replacing a
+/// dirty buffer, and CANCEL keeps the first.
+#[test]
+fn preparing_over_a_dirty_prepared_buffer_asks_first() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.files_page_with_one_file("first.ngc");
+    harness.frame(&[egui::Key::P]);
+    assert_eq!(harness.app.program.front, DocumentFront::Prepared);
+    let first = harness.app.program.doc().path.clone().unwrap();
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X9\n".into());
+
+    let second = harness.app.files.nc_root.join("second.ngc");
+    std::fs::write(&second, "G0 X2\n").unwrap();
+    harness.select_nc_file(&second);
+    harness.frame(&[egui::Key::P]);
+    assert!(
+        matches!(
+            harness.app.overlay.modal,
+            Some(Modal::ConfirmDiscard(PendingAction::PrepareProgram(ref path))) if path == &second
+        ),
+        "the dirty prepared buffer asks: {:?}",
+        harness.app.overlay.modal
+    );
+
+    // CANCEL: the first buffer keeps its text and its dirty marker.
+    harness.app.overlay.modal = None;
+    let prepared = harness.app.program.prepared.as_ref().expect("first stays");
+    assert_eq!(prepared.path.as_deref(), Some(first.as_path()));
+    assert_eq!(prepared.editor.text(), "G0 X9\n");
+    assert!(prepared.editor.dirty);
+
+    // DISCARD: the second file replaces it.
+    harness
+        .app
+        .perform_pending(PendingAction::PrepareProgram(second.clone()));
+    let prepared = harness
+        .app
+        .program
+        .prepared
+        .as_ref()
+        .expect("the second buffer is open");
+    assert_eq!(prepared.path.as_deref(), Some(second.as_path()));
+    assert_eq!(prepared.editor.text(), "G0 X2\n");
+    assert!(!prepared.editor.dirty);
+}
+
+/// Closing the prepared document asks only when it has unsaved changes, and
+/// either way the editor goes back to the loaded program.
+#[test]
+fn closing_the_prepared_document_asks_only_when_it_is_dirty() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_for_prepare(&mut harness, "G0 X0\nG1 X10\nM2\n");
+    let loaded_text = harness.app.program.loaded().editor.text();
+    let next = harness.app.files.nc_root.join("next.ngc");
+
+    harness.files_page_with_one_file("next.ngc");
+    harness.frame(&[egui::Key::P]);
+    harness.app.request_close_prepared();
+    assert!(
+        harness.app.overlay.modal.is_none(),
+        "a clean prepared buffer closes without a question"
+    );
+    assert!(harness.app.program.prepared.is_none());
+    assert_eq!(harness.app.program.front, DocumentFront::Loaded);
+    assert_eq!(harness.app.program.doc().editor.text(), loaded_text);
+
+    // Dirty: the question names the prepared document, CANCEL keeps it.
+    harness.select_nc_file(&next);
+    harness.frame(&[egui::Key::P]);
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X5\n".into());
+    harness.app.request_close_prepared();
+    assert!(matches!(
+        harness.app.overlay.modal,
+        Some(Modal::ConfirmDiscard(PendingAction::ClosePrepared))
+    ));
+    harness.app.overlay.modal = None;
+    assert!(harness.app.program.prepared.is_some());
+    assert_eq!(harness.app.program.front, DocumentFront::Prepared);
+
+    // DISCARD: close it, and the loaded program is the one that comes back.
+    harness.app.request_close_prepared();
+    harness.app.perform_pending(PendingAction::ClosePrepared);
+    assert!(harness.app.program.prepared.is_none());
+    assert_eq!(harness.app.program.front, DocumentFront::Loaded);
+    assert_eq!(harness.app.program.doc().editor.text(), loaded_text);
+    assert!(
+        !harness.app.program.loaded().editor.dirty,
+        "the loaded buffer was not the one asked about"
+    );
+}
+
+/// The prepared buffer belongs to the session, not to the Program page.
+#[test]
+fn leaving_the_program_page_keeps_the_prepared_buffer_without_a_prompt() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.files_page_with_one_file("next.ngc");
+    harness.frame(&[egui::Key::P]);
+    let path = harness.app.program.doc().path.clone();
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X7\n".into());
+
+    harness.app.set_page(Page::Program);
+    harness.app.request_files();
+
+    assert_eq!(harness.app.nav.page, Page::Files);
+    assert!(
+        harness.app.overlay.modal.is_none(),
+        "the navigation guard asks about the loaded buffer only"
+    );
+    let prepared = harness
+        .app
+        .program
+        .prepared
+        .as_ref()
+        .expect("kept for the session");
+    assert_eq!(prepared.path, path);
+    assert_eq!(prepared.editor.text(), "G0 X7\n");
+    assert!(prepared.editor.dirty);
+}
+
+/// A read that fails reports why and changes nothing about the prepared
+/// document or its dirty state.
+#[test]
+fn an_unreadable_file_leaves_the_prepared_document_untouched() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let first = harness.files_page_with_one_file("first.ngc");
+    harness.frame(&[egui::Key::P]);
+    assert_eq!(harness.app.program.front, DocumentFront::Prepared);
+
+    let gone = harness.app.files.nc_root.join("gone.ngc");
+    std::fs::write(&gone, "G0 X0\n").unwrap();
+    harness.select_nc_file(&gone);
+    std::fs::remove_file(&gone).unwrap();
+    harness.sent.borrow_mut().clear();
+    harness.frame(&[egui::Key::P]);
+
+    let prepared = harness
+        .app
+        .program
+        .prepared
+        .as_ref()
+        .expect("still the first file");
+    assert_eq!(prepared.path.as_deref(), Some(first.as_path()));
+    assert_eq!(prepared.editor.text(), "G0 X0\n");
+    assert!(!prepared.editor.dirty);
+    assert_eq!(harness.app.program.front, DocumentFront::Prepared);
+    assert!(
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text.contains("gone.ngc")),
+        "the reason names the file: {:?}",
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .map(|toast| &toast.text)
+            .collect::<Vec<_>>()
+    );
+    assert!(harness.sent.borrow().is_empty());
+}
+
+/// LOAD is about the loaded document: a dirty prepared buffer neither prompts
+/// nor loses its text.
+#[test]
+fn a_load_with_a_dirty_prepared_buffer_does_not_ask_or_discard_it() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    harness.files_page_with_one_file("next.ngc");
+    harness.frame(&[egui::Key::P]);
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X7\n".into());
+
+    let other = harness.app.files.nc_root.join("other.ngc");
+    std::fs::write(&other, "G0 X0 Y0\nM2\n").unwrap();
+    harness.sent.borrow_mut().clear();
+    harness.app.request_load(other.clone());
+
+    assert!(
+        harness.app.overlay.modal.is_none(),
+        "LOAD asks about the loaded buffer, not the prepared one"
+    );
+    let prepared = harness
+        .app
+        .program
+        .prepared
+        .as_ref()
+        .expect("LOAD keeps the prepared text");
+    assert_eq!(prepared.editor.text(), "G0 X7\n");
+    assert!(prepared.editor.dirty);
+    assert!(
+        harness.sent.borrow().iter().any(
+            |command| matches!(command, MachineCommand::LoadProgram { path, .. } if path == &other)
+        ),
+        "LOAD still reaches the controller: {:?}",
+        harness.sent_debug()
+    );
+}
+
+/// Put one program on the Files page, prepare it and leave the editor on it.
+fn prepare_file(harness: &mut ProbeHarness, name: &str, text: &str) -> std::path::PathBuf {
+    let path = harness.app.files.nc_root.join(name);
+    std::fs::write(&path, text).unwrap();
+    harness.select_nc_file(&path);
+    harness.frame(&[egui::Key::P]);
+    assert_eq!(harness.app.program.front, DocumentFront::Prepared);
+    path
+}
+
+#[test]
+fn preparing_a_file_puts_the_keyboard_in_the_editor() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+
+    assert!(
+        harness.app.program.focus_editor,
+        "preparing a file asks for the editor"
+    );
+    harness.draw_program_page();
+    assert!(!harness.app.program.focus_editor, "the request is one-shot");
+    assert!(
+        harness
+            .ctx
+            .memory(|memory| memory.has_focus(egui::Id::unique("linc-program-editor"))),
+        "the editor holds the keyboard"
+    );
+    assert_eq!(
+        harness.app.program.doc().selected_line,
+        1,
+        "the caret starts on the first line"
+    );
+}
+
+/// The handoff is one command that carries the buffer's text; the accepted
+/// result makes the prepared document the loaded one and the editor follows it.
+#[test]
+fn handoff_writes_the_prepared_buffer_and_makes_it_the_loaded_program() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    let prepared = prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+    harness.sent.borrow_mut().clear();
+
+    harness.app.handoff_prepared();
+
+    let sent = harness.sent.borrow();
+    assert_eq!(sent.len(), 1, "{:?}", harness.sent_debug());
+    assert!(
+        matches!(
+            &sent[0],
+            MachineCommand::LoadPreparedProgram { path, content }
+                if path == &prepared && content == "G0 X3\nM2\n"
+        ),
+        "the handoff carries the buffer's text: {:?}",
+        harness.sent_debug()
+    );
+    drop(sent);
+
+    assert_eq!(std::fs::read_to_string(&prepared).unwrap(), "G0 X3\nM2\n");
+    assert!(
+        harness.app.program.prepared.is_none(),
+        "the prepared document is consumed by the handoff"
+    );
+    assert_eq!(harness.app.program.front, DocumentFront::Loaded);
+    assert_eq!(
+        harness.app.program.loaded().path.as_deref(),
+        Some(prepared.as_path())
+    );
+    assert_eq!(harness.app.program.loaded().editor.text(), "G0 X3\nM2\n");
+    assert!(!harness.app.program.pending_handoff);
+}
+
+/// While the handoff is in flight the press is taken once, and the prepared
+/// buffer's marker waits for the result.
+#[test]
+fn two_handoff_presses_send_one_command_while_one_is_in_flight() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+    harness.defer_commands();
+    harness.sent.borrow_mut().clear();
+
+    harness.app.handoff_prepared();
+    assert!(
+        harness.app.program.pending_handoff,
+        "the press is pending until the result arrives"
+    );
+    assert!(
+        !harness.app.program.prepared.as_ref().unwrap().editor.dirty,
+        "acceptance clears the marker; the result decides whether it stays"
+    );
+    harness.app.handoff_prepared();
+
+    assert_eq!(harness.sent.borrow().len(), 1, "{:?}", harness.sent_debug());
+
+    harness.queue_command_result("Load prepared program", Ok(()));
+    harness.app.poll_backend();
+
+    assert!(!harness.app.program.pending_handoff);
+    assert!(harness.app.program.prepared.is_none());
+    assert_eq!(harness.app.program.front, DocumentFront::Loaded);
+    assert_eq!(harness.app.program.loaded().editor.text(), "G0 X3\nM2\n");
+}
+
+/// A handoff that would replace unsaved loaded text asks first, and asking
+/// sends nothing.
+#[test]
+fn a_handoff_with_unsaved_loaded_text_asks_before_replacing_the_program() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X9\nM2\n".into());
+    harness.sent.borrow_mut().clear();
+
+    harness.app.request_handoff_prepared();
+
+    assert!(
+        matches!(
+            harness.app.overlay.modal,
+            Some(Modal::ConfirmDiscard(PendingAction::HandoffPrepared))
+        ),
+        "the question is about the loaded buffer: {:?}",
+        harness.app.overlay.modal
+    );
+    assert!(
+        harness.sent.borrow().is_empty(),
+        "asking is not handing off: {:?}",
+        harness.sent_debug()
+    );
+}
+
+/// A refused handoff puts the prepared buffer's dirty marker back and keeps
+/// its text, while the loaded program stays as it was.
+#[test]
+fn a_refused_handoff_restores_the_prepared_buffers_dirty_state() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let loaded = load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+    harness.defer_commands();
+    harness.queue_command_result(
+        "Load prepared program",
+        Err(linc_core::command::MachineError::ProgramProtected),
+    );
+    harness.sent.borrow_mut().clear();
+
+    harness.app.handoff_prepared();
+
+    assert!(!harness.app.program.pending_handoff);
+    let prepared = harness
+        .app
+        .program
+        .prepared
+        .as_ref()
+        .expect("a refused handoff keeps the prepared document");
+    assert_eq!(prepared.editor.text(), "G0 X3\nM2\n");
+    assert!(
+        prepared.editor.dirty,
+        "the unsaved marker comes back with the error"
+    );
+    assert!(
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text.contains("protect is ON")),
+        "the failure is reported: {:?}",
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .map(|toast| &toast.text)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        harness.app.program.loaded().path.as_deref(),
+        Some(loaded.as_path()),
+        "the loaded program is unchanged"
+    );
+}
+
+/// PROTECT refuses the handoff, and the prepared buffer keeps its text and
+/// dirty state.
+#[test]
+fn a_handoff_under_protect_reports_the_reason_and_keeps_the_buffer() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, true, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+    harness.sent.borrow_mut().clear();
+
+    harness.app.handoff_prepared();
+
+    assert!(!harness.app.program.pending_handoff);
+    let prepared = harness
+        .app
+        .program
+        .prepared
+        .as_ref()
+        .expect("the buffer survives the refusal");
+    assert_eq!(prepared.editor.text(), "G0 X3\nM2\n");
+    assert!(prepared.editor.dirty);
+    assert!(
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text.contains("protect is ON")),
+        "the protect reason is reported: {:?}",
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .map(|toast| &toast.text)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// LOAD of the file being prepared is the handoff: it writes and opens the
+/// buffer and leaves no second document on the same file.
+#[test]
+fn load_of_the_prepared_file_is_the_handoff() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    let prepared = prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+    harness.sent.borrow_mut().clear();
+
+    harness.app.request_load(prepared.clone());
+
+    let sent = harness.sent.borrow();
+    assert!(
+        sent.iter().any(
+            |command| matches!(command, MachineCommand::LoadPreparedProgram { path, .. } if path == &prepared)
+        ),
+        "LOAD of the prepared file hands it off: {:?}",
+        harness.sent_debug()
+    );
+    assert!(
+        !sent
+            .iter()
+            .any(|command| matches!(command, MachineCommand::LoadProgram { .. })),
+        "it is not a plain load: {:?}",
+        harness.sent_debug()
+    );
+    drop(sent);
+
+    assert_eq!(std::fs::read_to_string(&prepared).unwrap(), "G0 X3\nM2\n");
+    assert!(
+        harness.app.program.prepared.is_none(),
+        "no prepared document remains"
+    );
+    assert_eq!(harness.app.program.front, DocumentFront::Loaded);
+    assert_eq!(harness.app.program.loaded().editor.text(), "G0 X3\nM2\n");
+}
+
+/// The unsaved-changes question a prepared action asks: it names the prepared
+/// file and offers DISCARD or CANCEL, with no SAVE between them.
+fn assert_prepared_discard_dialog(output: &egui::FullOutput, name: &str) {
+    let painted = painted_text(output);
+    assert!(
+        painted
+            .iter()
+            .any(|(text, _)| text == "UNSAVED CHANGES IN THE PREPARED PROGRAM"),
+        "the question names the prepared document: {painted:?}"
+    );
+    assert!(
+        painted.iter().any(|(text, _)| text.contains(name)),
+        "the question names {name}: {painted:?}"
+    );
+    let discard = painted
+        .iter()
+        .find(|(text, _)| text == "DISCARD")
+        .map(|(_, rect)| *rect)
+        .expect("DISCARD is offered");
+    let cancel = painted
+        .iter()
+        .find(|(text, _)| text == "CANCEL")
+        .map(|(_, rect)| *rect)
+        .expect("CANCEL is offered");
+    assert!(
+        painted.iter().all(|(text, rect)| !(text == "SAVE"
+            && rect.left() >= discard.right() - 1.0
+            && rect.right() <= cancel.left() + 1.0)),
+        "the prepared question must not offer SAVE: {painted:?}"
+    );
+}
+
+/// Ctrl+W closes a clean prepared document and gives the editor back to the
+/// loaded program, without asking and without touching the controller.
+#[test]
+fn ctrl_w_closes_a_clean_prepared_document() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    assert_eq!(harness.app.program.front, DocumentFront::Prepared);
+    harness.sent.borrow_mut().clear();
+
+    harness.frame_with(&[(egui::Key::W, ctrl())]);
+
+    assert!(
+        harness.app.program.prepared.is_none(),
+        "a clean prepared buffer closes without a question"
+    );
+    assert_eq!(harness.app.program.front, DocumentFront::Loaded);
+    assert_eq!(harness.app.program.doc().editor.text(), "G0 X0\nM2\n");
+    assert!(
+        harness.sent.borrow().is_empty(),
+        "closing the prepared document reaches no controller: {:?}",
+        harness.sent_debug()
+    );
+}
+
+/// Ctrl+W on a dirty prepared document asks first; CANCEL keeps the buffer and
+/// its text.
+#[test]
+fn ctrl_w_on_a_dirty_prepared_document_asks_and_cancel_keeps_it() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+
+    harness.frame_with(&[(egui::Key::W, ctrl())]);
+
+    assert!(
+        matches!(
+            harness.app.overlay.modal,
+            Some(Modal::ConfirmDiscard(PendingAction::ClosePrepared))
+        ),
+        "a dirty prepared buffer asks: {:?}",
+        harness.app.overlay.modal
+    );
+    assert_prepared_discard_dialog(&harness.frame_full(Vec::new()), "next.ngc");
+
+    // CANCEL: the buffer keeps its text and the editor stays on it.
+    harness.frame(&[egui::Key::Escape]);
+    assert!(harness.app.overlay.modal.is_none());
+    let prepared = harness
+        .app
+        .program
+        .prepared
+        .as_ref()
+        .expect("CANCEL keeps the prepared buffer");
+    assert_eq!(prepared.editor.text(), "G0 X3\nM2\n");
+    assert!(prepared.editor.dirty);
+    assert_eq!(harness.app.program.front, DocumentFront::Prepared);
+}
+
+/// Ctrl+S is the document in front: the prepared file is written through the
+/// file-only verb and the controller's program is left alone; the loaded
+/// program keeps its own save.
+#[test]
+fn ctrl_s_saves_the_document_in_front() {
+    // Prepared in front: a file write, not a controller save.
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    let loaded = load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    let prepared = prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+    harness.sent.borrow_mut().clear();
+
+    harness.frame_with(&[(egui::Key::S, ctrl())]);
+
+    assert!(
+        harness.sent.borrow().iter().any(|command| matches!(
+            command,
+            MachineCommand::SaveProgramFile { path, content }
+                if path == &prepared && content == "G0 X3\nM2\n"
+        )),
+        "the prepared save is a file write: {:?}",
+        harness.sent_debug()
+    );
+    assert!(
+        !harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::SaveProgram { .. })),
+        "the loaded program's save is not sent: {:?}",
+        harness.sent_debug()
+    );
+    assert_eq!(std::fs::read_to_string(&prepared).unwrap(), "G0 X3\nM2\n");
+    assert!(
+        !harness.app.program.prepared.as_ref().unwrap().editor.dirty,
+        "the accepted write clears the prepared marker"
+    );
+    assert_eq!(
+        harness.app.snapshot.program.path.as_deref(),
+        Some(loaded.as_path()),
+        "the controller still holds its own program"
+    );
+    assert_eq!(
+        harness.app.program.loaded().editor.text(),
+        "G0 X0\nM2\n",
+        "the loaded document is untouched"
+    );
+    assert!(!harness.app.program.loaded().editor.dirty);
+
+    // Loaded in front: the existing save, with no prepared command.
+    let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+    let loaded = load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    harness
+        .app
+        .program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X0\nG1 X5\nM2\n".into());
+    harness.sent.borrow_mut().clear();
+
+    harness.frame_with(&[(egui::Key::S, ctrl())]);
+
+    assert!(
+        harness.sent.borrow().iter().any(|command| matches!(
+            command,
+            MachineCommand::SaveProgram { path, .. } if path == &loaded
+        )),
+        "the loaded save keeps its own command: {:?}",
+        harness.sent_debug()
+    );
+    assert!(
+        !harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::SaveProgramFile { .. })),
+        "nothing writes a prepared file: {:?}",
+        harness.sent_debug()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&loaded).unwrap(),
+        "G0 X0\nG1 X5\nM2\n"
+    );
+    assert!(!harness.app.program.loaded().editor.dirty);
+}
+
+/// A question about the loaded buffer offers SAVE, and that SAVE writes the
+/// loaded file even while the prepared document is the one in front.
+#[test]
+fn save_on_a_question_about_the_loaded_buffer_writes_the_loaded_file() {
+    let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+    let loaded = load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    let prepared = prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X9\nM2\n".into());
+
+    harness.app.request_handoff_prepared();
+    assert!(
+        matches!(
+            harness.app.overlay.modal,
+            Some(Modal::ConfirmDiscard(PendingAction::HandoffPrepared))
+        ),
+        "the handoff asks about the loaded buffer: {:?}",
+        harness.app.overlay.modal
+    );
+    let painted = painted_text(&harness.frame_full(Vec::new()));
+    let discard = painted
+        .iter()
+        .find(|(text, _)| text == "DISCARD")
+        .map(|(_, rect)| *rect)
+        .expect("DISCARD is offered");
+    let cancel = painted
+        .iter()
+        .find(|(text, _)| text == "CANCEL")
+        .map(|(_, rect)| *rect)
+        .expect("CANCEL is offered");
+    let save = painted
+        .iter()
+        .find(|(text, rect)| {
+            text == "SAVE"
+                && rect.left() >= discard.right() - 1.0
+                && rect.right() <= cancel.left() + 1.0
+        })
+        .map(|(_, rect)| rect.center())
+        .expect("the loaded question offers SAVE");
+
+    harness.sent.borrow_mut().clear();
+    harness.click_at(save);
+
+    assert!(
+        harness.sent.borrow().iter().any(|command| matches!(
+            command,
+            MachineCommand::SaveProgram { path, .. } if path == &loaded
+        )),
+        "SAVE writes the loaded file: {:?}",
+        harness.sent_debug()
+    );
+    assert!(
+        !harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::SaveProgramFile { .. })),
+        "the prepared file is not the question's subject: {:?}",
+        harness.sent_debug()
+    );
+    assert_eq!(std::fs::read_to_string(&loaded).unwrap(), "G0 X9\nM2\n");
+    assert!(!harness.app.program.loaded().editor.dirty);
+    // Answering SAVE lets the handoff it interrupted proceed: the prepared
+    // buffer, unchanged, becomes the loaded program.
+    assert_eq!(std::fs::read_to_string(&prepared).unwrap(), "G0 X1\nM2\n");
+    assert!(
+        harness.app.program.prepared.is_none(),
+        "the handoff the question interrupted runs after SAVE"
+    );
+    assert_eq!(harness.app.program.front, DocumentFront::Loaded);
+}
+
+/// A queued prepared write holds the answer asynchronously: the marker goes on
+/// acceptance, a refusal puts it back and reports why, and a second press while
+/// one write is in flight sends nothing.
+/// A protect switch closes the prepared document's typing and saving together;
+/// the text and its marker stay, and the reason names protect.
+#[test]
+fn protect_locks_the_prepared_document_without_losing_its_text() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+    harness.app.snapshot.panel.program_protect = true;
+    harness.app.snapshot.panel.program_protect_known = true;
+
+    assert!(!harness.app.editing_allowed(), "typing is locked");
+    harness.app.save_program();
+
+    assert!(
+        harness.app.program.prepared.as_ref().unwrap().editor.dirty,
+        "the marker stays"
+    );
+    assert_eq!(
+        harness.app.program.prepared.as_ref().unwrap().editor.text(),
+        "G0 X3\nM2\n",
+        "the text stays"
+    );
+    assert!(
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text.contains("PROTECT")),
+        "the reason names protect: {:?}",
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .map(|toast| &toast.text)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A dead panel link locks typing and saving for the prepared document, and the
+/// save names the link rather than failing quietly.
+#[test]
+fn a_dead_panel_link_locks_the_prepared_document() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+    harness.app.snapshot.panel.connected = false;
+
+    assert!(!harness.app.editing_allowed(), "typing is locked");
+    harness.app.save_program();
+
+    assert!(
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text.contains("panel link")),
+        "the reason names the link: {:?}",
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .map(|toast| &toast.text)
+            .collect::<Vec<_>>()
+    );
+    assert!(harness.app.program.prepared.as_ref().unwrap().editor.dirty);
+}
+
+/// Typing works without a known panel mode; a write does not, because the
+/// backend refuses one.
+#[test]
+fn an_unknown_panel_mode_blocks_the_prepared_save_but_not_typing() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+    harness.app.snapshot.panel.mode = linc_core::model::PanelModeValidity::Unknown;
+
+    assert!(harness.app.editing_allowed(), "typing needs no mode");
+    harness.app.save_program();
+
+    assert!(
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text.contains("known panel mode")),
+        "the reason names the mode: {:?}",
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .map(|toast| &toast.text)
+            .collect::<Vec<_>>()
+    );
+    assert!(harness.app.program.prepared.as_ref().unwrap().editor.dirty);
+}
+
+#[test]
+fn a_queued_prepared_save_clears_on_acceptance_and_restores_on_error() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    let prepared = prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+    harness.defer_commands();
+    harness.sent.borrow_mut().clear();
+
+    harness.app.save_program();
+
+    assert!(
+        harness.app.program.pending_prepared_save,
+        "the press is in flight until the result arrives"
+    );
+    assert!(
+        !harness.app.program.prepared.as_ref().unwrap().editor.dirty,
+        "an accepted press clears the marker before the result"
+    );
+    assert_eq!(harness.sent.borrow().len(), 1, "{:?}", harness.sent_debug());
+
+    // A second press while the write is in flight sends nothing.
+    harness.sent.borrow_mut().clear();
+    harness.frame_with(&[(egui::Key::S, ctrl())]);
+    assert!(
+        harness.sent.borrow().is_empty(),
+        "one write at a time: {:?}",
+        harness.sent_debug()
+    );
+
+    // The backend refuses the write: the text and the marker come back.
+    harness.queue_command_result(
+        "Save prepared program",
+        Err(linc_core::command::MachineError::ProgramProtected),
+    );
+    harness.app.poll_backend();
+    assert!(!harness.app.program.pending_prepared_save);
+    let buffer = harness.app.program.prepared.as_ref().unwrap();
+    assert_eq!(buffer.editor.text(), "G0 X3\nM2\n");
+    assert!(
+        buffer.editor.dirty,
+        "the refusal does not silently drop work"
+    );
+    assert!(
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .any(|toast| toast.text.contains("protect is ON")),
+        "the reason is reported: {:?}",
+        harness
+            .app
+            .overlay
+            .toasts
+            .iter()
+            .map(|toast| &toast.text)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&prepared).unwrap(),
+        "G0 X1\nM2\n",
+        "a refused write leaves the file as it was"
+    );
+
+    // A second attempt that is accepted settles the marker for good.
+    harness.sent.borrow_mut().clear();
+    harness.app.save_program();
+    assert_eq!(harness.sent.borrow().len(), 1, "{:?}", harness.sent_debug());
+    harness.queue_command_result("Save prepared program", Ok(()));
+    harness.app.poll_backend();
+    assert!(!harness.app.program.pending_prepared_save);
+    assert!(
+        !harness.app.program.prepared.as_ref().unwrap().editor.dirty,
+        "the confirmed write clears the marker"
+    );
+}
+
+#[test]
+fn quitting_with_both_buffers_dirty_asks_about_each_before_the_session_ends() {
+    let mut harness = ProbeHarness::new(PanelMode::Edit, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+    harness
+        .app
+        .program
+        .loaded_mut()
+        .editor
+        .replace_text("G0 X4\nM2\n".into());
+
+    harness.frame_with(&[(egui::Key::Q, ctrl())]);
+    assert!(
+        matches!(
+            harness.app.overlay.modal,
+            Some(Modal::ConfirmDiscard(PendingAction::QuitPrepared))
+        ),
+        "the prepared buffer is asked about first: {:?}",
+        harness.app.overlay.modal
+    );
+
+    // DISCARD the prepared buffer, and the loaded one still gets its question.
+    harness.app.overlay.modal = None;
+    harness.app.perform_pending(PendingAction::QuitPrepared);
+    assert!(
+        matches!(
+            harness.app.overlay.modal,
+            Some(Modal::ConfirmDiscard(PendingAction::Quit))
+        ),
+        "a dirty loaded buffer is asked about next: {:?}",
+        harness.app.overlay.modal
+    );
+    assert!(!harness.app.chrome.quit_requested);
+
+    harness.app.overlay.modal = None;
+    harness.app.perform_pending(PendingAction::Quit);
+    assert!(
+        harness.app.chrome.quit_requested,
+        "both questions answered, the session ends"
+    );
+}
+
+/// Quitting with only a dirty prepared buffer asks, and leaving the Program
+/// page keeps the buffer for the session without a question.
+#[test]
+fn quitting_with_a_dirty_prepared_buffer_asks_but_leaving_the_page_does_not() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    let prepared = prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+
+    // Leaving the page is not a question: the buffer belongs to the session.
+    harness.app.request_files();
+    assert!(harness.app.overlay.modal.is_none());
+    assert_eq!(harness.app.nav.page, Page::Files);
+    assert_eq!(
+        harness
+            .app
+            .program
+            .prepared
+            .as_ref()
+            .unwrap()
+            .path
+            .as_deref(),
+        Some(prepared.as_path())
+    );
+    assert!(harness.app.program.prepared.as_ref().unwrap().editor.dirty);
+    harness.app.set_page(Page::Program);
+
+    // Quitting is: the buffer goes with the session.
+    harness.frame_with(&[(egui::Key::Q, ctrl())]);
+    assert!(
+        matches!(
+            harness.app.overlay.modal,
+            Some(Modal::ConfirmDiscard(PendingAction::QuitPrepared))
+        ),
+        "quitting with a dirty prepared buffer asks: {:?}",
+        harness.app.overlay.modal
+    );
+    assert!(
+        !harness.app.chrome.quit_requested,
+        "the question comes before the session ends"
+    );
+    assert_prepared_discard_dialog(&harness.frame_full(Vec::new()), "next.ngc");
+
+    // CANCEL: the session and the buffer stay.
+    harness.frame(&[egui::Key::Escape]);
+    assert!(!harness.app.chrome.quit_requested);
+    assert!(harness.app.program.prepared.as_ref().unwrap().editor.dirty);
+    assert_eq!(harness.app.program.front, DocumentFront::Prepared);
+
+    // DISCARD: the session ends.
+    harness.frame_with(&[(egui::Key::Q, ctrl())]);
+    harness.app.perform_pending(PendingAction::QuitPrepared);
+    assert!(harness.app.chrome.quit_requested);
+}
+
+/// Esc keeps resetting a running program while the prepared document is in
+/// front, and the prepared buffer stays open.
+#[test]
+fn escape_during_a_run_resets_the_program_and_keeps_the_prepared_buffer() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_for_prepare(&mut harness, "G0 X0\nG1 X10\nM2\n");
+    harness.app.send(MachineCommand::CycleStart);
+    assert!(harness.app.snapshot.task.running, "the run started");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    assert_eq!(harness.app.program.front, DocumentFront::Prepared);
+    assert!(
+        harness.app.editing_allowed(),
+        "the prepared text is editable while the program runs"
+    );
+    harness.sent.borrow_mut().clear();
+
+    harness.frame(&[egui::Key::Escape]);
+
+    assert!(
+        harness
+            .sent
+            .borrow()
+            .iter()
+            .any(|command| matches!(command, MachineCommand::AbortProgram)),
+        "Esc still resets the run: {:?}",
+        harness.sent_debug()
+    );
+    assert!(
+        harness.app.program.prepared.is_some(),
+        "the prepared buffer is not the run's to close"
+    );
+    assert_eq!(harness.app.program.front, DocumentFront::Prepared);
+}
+
+/// Ctrl+N runs the handoff even while the editor holds the keyboard: the chord
+/// is consumed before any widget draws.
+#[test]
+fn ctrl_n_hands_off_while_the_editor_holds_the_keyboard() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness.app.program.focus_editor = true;
+    harness.frame(&[]);
+    assert!(
+        harness
+            .ctx
+            .memory(|memory| memory.has_focus(egui::Id::unique("linc-program-editor"))),
+        "the editor holds the keyboard"
+    );
+    harness.sent.borrow_mut().clear();
+
+    harness.frame_with(&[(egui::Key::N, ctrl())]);
+
+    assert_eq!(
+        harness
+            .sent
+            .borrow()
+            .iter()
+            .filter(|command| matches!(command, MachineCommand::LoadPreparedProgram { .. }))
+            .count(),
+        1,
+        "one press sends one handoff: {:?}",
+        harness.sent_debug()
+    );
+}
+
+/// The handoff is still one press: `Ctrl+N` sends it while the prepared file
+/// exists, and the sidebar row runs the same command.
+#[test]
+fn ctrl_n_hands_off_the_prepared_program() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness.sent.borrow_mut().clear();
+    harness.frame_with(&[(egui::Key::N, ctrl())]);
+    assert_eq!(
+        harness
+            .sent
+            .borrow()
+            .iter()
+            .filter(|command| matches!(command, MachineCommand::LoadPreparedProgram { .. }))
+            .count(),
+        1,
+        "one press sends one handoff: {:?}",
+        harness.sent_debug()
+    );
+    assert_eq!(harness.app.nav.page, Page::Program);
+}
+
+/// The texts on the run row, which carries no title: anchored on the state word
+/// below the banners, because the top bar also names the task state.
+fn strip_texts(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
+    let texts = painted_text(output);
+    let Some(anchor) = texts
+        .iter()
+        .filter(|(text, _)| matches!(text.as_str(), "RUNNING" | "PAUSED" | "IDLE"))
+        .map(|(_, rect)| *rect)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+    else {
+        return Vec::new();
+    };
+    texts
+        .into_iter()
+        .filter(|(_, rect)| {
+            rect.top() < anchor.bottom() + 4.0 && rect.bottom() > anchor.top() - 4.0
+        })
+        .collect()
+}
+
+/// The run row paints the loaded state, name, line and current block; with
+/// nothing on the controller it says so instead of naming a stale program, and
+/// with nothing prepared it is not there at all.
+#[test]
+fn the_strip_names_the_loaded_program_state_line_and_block() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G21 G90\nG1 X60 F600\nG1 X120 F600\nM2\n");
+
+    // Nothing is being prepared, so there is no strip: the panes take the page.
+    assert!(
+        strip_texts(&harness.draw_program_page()).is_empty(),
+        "the strip waits for a prepared program"
+    );
+
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    // Set the run after preparing: the preparation syncs the snapshot, and a
+    // state set before it would be replaced by the controller's.
+    harness.app.snapshot.program.running = true;
+    harness.app.snapshot.program.current_line = 2;
+    harness.app.snapshot.program.motion_line = 2;
+    harness.app.snapshot.program.current_block = "G1 X120 F600".into();
+    harness.app.snapshot.task.running = true;
+    harness.app.snapshot.task.interp = linc_core::model::InterpState::Reading;
+
+    let strip = strip_texts(&harness.draw_program_page());
+    for expected in ["running.ngc", "RUNNING", "LN 2/4", "G1 X120 F600"] {
+        assert!(
+            strip.iter().any(|(text, _)| text == expected),
+            "{expected} missing from the strip: {strip:?}"
+        );
+    }
+    assert!(
+        !strip.iter().any(|(text, _)| text == "PREPARED"),
+        "the prepared file is not in the strip: {strip:?}"
+    );
+    assert!(
+        !strip.iter().any(|(text, _)| text == "42%"),
+        "the run's percent is not the strip's job: {strip:?}"
+    );
+
+    // Nothing on the controller: the row says so, even though the editor still
+    // holds the text of the program that just ran.
+    harness.app.snapshot.program = ProgramState::default();
+    let strip = strip_texts(&harness.draw_program_page());
+    assert!(
+        strip.iter().any(|(text, _)| text == "NO PROGRAM LOADED"),
+        "the empty controller is said plainly: {strip:?}"
+    );
+}
+
+/// The prepared file is named by the editor's header, with its dirty marker,
+/// not by the run row.
+#[test]
+fn the_editor_header_names_the_prepared_program() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    harness
+        .app
+        .program
+        .prepared
+        .as_mut()
+        .unwrap()
+        .editor
+        .replace_text("G0 X3\nM2\n".into());
+
+    let painted: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        painted.iter().any(|text| text == "PREPARING:"),
+        "the editor header names the prepared document: {painted:?}"
+    );
+    assert!(
+        painted.iter().any(|text| text == "next.ngc"),
+        "the prepared file's name: {painted:?}"
+    );
+    assert!(
+        painted.iter().any(|text| text == "*"),
+        "the prepared buffer's dirty marker: {painted:?}"
+    );
+    let strip = strip_texts(&harness.draw_program_page());
+    assert!(
+        !strip.iter().any(|(text, _)| text == "next.ngc"),
+        "the run row does not carry the prepared name: {strip:?}"
+    );
+
+    // Back on the loaded program, the header stops naming a prepared file.
+    harness.app.program.front = DocumentFront::Loaded;
+    harness.app.refresh_preview();
+    let painted: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        !painted.iter().any(|text| text == "PREPARING:"),
+        "no prepared document in front: {painted:?}"
+    );
+}
+
+/// At the 1280 baseline a long loaded name truncates, and the current block
+/// keeps its room on the page.
+#[test]
+fn the_strip_keeps_the_block_at_1280() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    let loaded_name = format!("{}-running-part.ngc", "long-name-".repeat(12));
+    let prepared_name = format!("{}-next-job.ngc", "prepared-part-".repeat(12));
+    harness.app.snapshot.program.display_name = loaded_name.clone();
+    harness.app.snapshot.program.current_block = "G1 X120 F600".into();
+    let path = harness.app.files.nc_root.join(&prepared_name);
+    std::fs::write(&path, "G0 X1\nM2\n").unwrap();
+    harness.app.open_prepared(path);
+
+    let strip = strip_texts(&harness.draw_program_page());
+    let words: Vec<&str> = strip.iter().map(|(text, _)| text.as_str()).collect();
+    assert!(
+        words.contains(&"G1 X120 F600"),
+        "the block keeps its room: {words:?}"
+    );
+    let rect = strip
+        .iter()
+        .find(|(text, _)| text == "G1 X120 F600")
+        .map(|(_, rect)| *rect)
+        .expect("the block");
+    assert!(
+        rect.left() >= 0.0 && rect.right() <= 1280.0,
+        "the block is off the page: {rect:?}"
+    );
+    assert!(
+        !words.contains(&loaded_name.as_str()),
+        "the loaded name truncates: {words:?}"
+    );
+}
+
+/// A block longer than the room left after the bar keeps to that room and ends
+/// in an ellipsis, with the full text on the hover.
+#[test]
+fn a_long_block_ends_in_an_ellipsis_at_1280() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+    let block = "G1 X120.000 Y45.500 Z-3.250 F600 (a long comment that runs past the room left on the row and keeps going well past the right edge of the page)";
+    harness.app.snapshot.program.current_block = block.into();
+
+    let strip = strip_texts(&harness.draw_program_page());
+    let words: Vec<&str> = strip.iter().map(|(text, _)| text.as_str()).collect();
+    assert!(
+        !words.contains(&block),
+        "the block is cut to the room: {words:?}"
+    );
+    let shown = strip
+        .iter()
+        .find(|(text, _)| text.ends_with('\u{2026}'))
+        .map(|(text, rect)| (text.clone(), *rect))
+        .expect("an ellipsized block");
+    assert!(
+        shown.1.left() >= 0.0 && shown.1.right() <= 1280.0,
+        "the block is off the page: {:?}",
+        shown.1
+    );
+}
+
+/// The run row is a report: no start, pause, resume or handoff control lives in
+/// it.
+#[test]
+fn the_strip_carries_no_machine_control() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G0 X0\nM2\n");
+    prepare_file(&mut harness, "next.ngc", "G0 X1\nM2\n");
+
+    let strip = strip_texts(&harness.draw_program_page());
+    for word in [
+        "START",
+        "PAUSE",
+        "RESUME",
+        "STOP",
+        "JOG",
+        "CYCLE",
+        "LOAD PREPARED",
+    ] {
+        assert!(
+            !strip.iter().any(|(text, _)| text.contains(word)),
+            "{word} control in the strip: {strip:?}"
+        );
+    }
+}
+
+/// The toolpath card draws the document in front: the prepared file's own path
+/// with no live layer, and the loaded program's path with the trail, tool head
+/// and executing-line marker that belong to the run.
+#[test]
+fn the_toolpath_card_draws_the_document_in_front_with_the_live_layer_only_on_the_program() {
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    let loaded_path = std::path::PathBuf::from("/tmp/loaded.ngc");
+    app.program
+        .loaded_mut()
+        .editor
+        .set_loaded(loaded_path.clone(), "G0 X0\nG1 X50 F600\nM2\n".into());
+    app.program.loaded_mut().path = Some(loaded_path);
+    app.snapshot.program = ProgramState {
+        running: true,
+        current_line: 2,
+        line_count: 3,
+        ..Default::default()
+    };
+    app.snapshot.task.running = true;
+    app.refresh_preview();
+
+    let loaded = crate::screens::program::graph_inputs(&app);
+    assert!(loaded.live, "the program in front carries its live layer");
+    assert_eq!(loaded.current_line, Some(2), "the executing-line marker");
+    assert_eq!(loaded.selected_line, Some(1));
+    assert!(
+        loaded
+            .preview
+            .segments
+            .iter()
+            .any(|segment| segment.end[0] >= 49.9),
+        "the loaded path reaches X50: {:?}",
+        loaded.preview.segments
+    );
+
+    let prepared_path = std::path::PathBuf::from("/tmp/prepared.ngc");
+    let mut prepared = Document::default();
+    prepared
+        .editor
+        .set_loaded(prepared_path.clone(), "G0 X0\nG1 X5 F600\nM2\n".into());
+    prepared.path = Some(prepared_path);
+    app.program.prepared = Some(prepared);
+    app.program.front = DocumentFront::Prepared;
+    app.refresh_preview();
+
+    let prepared = crate::screens::program::graph_inputs(&app);
+    assert!(
+        !prepared.live,
+        "the prepared file is not the run: no trail and no tool head"
+    );
+    assert_eq!(
+        prepared.current_line, None,
+        "the executing-line marker belongs to the loaded program"
+    );
+    assert!(
+        prepared
+            .preview
+            .segments
+            .iter()
+            .any(|segment| segment.end[0] >= 4.9),
+        "the card draws the prepared path's own cut: {:?}",
+        prepared.preview.segments
+    );
+    assert!(
+        prepared
+            .preview
+            .segments
+            .iter()
+            .all(|segment| segment.end[0] <= 5.1),
+        "the loaded program's cut is not in the prepared drawing: {:?}",
+        prepared.preview.segments
+    );
+}
+
+/// The MODAL pane names the codes of the document in front: the prepared file's
+/// parsed modal while it is shown, and the controller's own modal while the
+/// program is.
+#[test]
+fn the_modal_pane_follows_the_document_in_front() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G21 G90\nG1 X1 F300\nM2\n");
+    let next = harness.app.files.nc_root.join("next.ngc");
+    std::fs::write(&next, "G21 G91\nG1 X2 F300\nM2\n").unwrap();
+    harness.app.open_prepared(next);
+    harness.frame(&[]);
+
+    let painted: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        painted.iter().any(|text| text == "G91"),
+        "the prepared preview's distance mode: {painted:?}"
+    );
+    assert!(
+        !painted.iter().any(|text| text == "G90"),
+        "the controller's modal must not describe the prepared file: {painted:?}"
+    );
+
+    harness.app.program.front = DocumentFront::Loaded;
+    harness.frame(&[]);
+    let painted: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        painted.iter().any(|text| text == "G90"),
+        "the controller's modal while its program is in front: {painted:?}"
+    );
+    assert!(
+        !painted.iter().any(|text| text == "G91"),
+        "the prepared file's codes are not the program's: {painted:?}"
+    );
+}
+
+/// The MODAL pane reads the state at the selected line, not the state the file
+/// ends in.
+#[test]
+fn the_modal_pane_reads_the_selected_line() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G21 G90\nG0 X0\nM2\n");
+    let next = harness.app.files.nc_root.join("next.ngc");
+    std::fs::write(&next, "G21 G90\nG0 X0\nG1 X10 F300\nG91\nG1 X2\nM2\n").unwrap();
+    harness.app.open_prepared(next);
+
+    // The editor holds the keyboard, so the text cursor is the selection.
+    harness.app.program.doc_mut().cursor_line = Some(3);
+    let painted: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        painted.iter().any(|text| text == "G90"),
+        "line 3 runs in G90: {painted:?}"
+    );
+    assert!(
+        !painted.iter().any(|text| text == "G91"),
+        "the later G91 must not describe line 3: {painted:?}"
+    );
+
+    harness.app.program.doc_mut().cursor_line = Some(4);
+    let painted: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        painted.iter().any(|text| text == "G91"),
+        "line 4 sets G91: {painted:?}"
+    );
+}
+
+/// The toolpath card carries the estimate of the document it draws: the
+/// prepared file's whole program while it is in front, and the run's own
+/// estimate to the end while the loaded program is.
+#[test]
+fn the_toolpath_card_carries_the_estimate_of_the_document_it_draws() {
+    let mut harness = ProbeHarness::new(PanelMode::Auto, false, true);
+    load_clean_and_show(&mut harness, "G21 G90\nG1 X60 F600\nG1 X120 F600\nM2\n");
+    let next = harness.app.files.nc_root.join("next.ngc");
+    std::fs::write(&next, "G21 G90\nG1 X30 F600\nM2\n").unwrap();
+    harness.app.open_prepared(next);
+    harness.frame(&[]);
+
+    let plan = linc_core::cycletime::Plan::from_preview(
+        &harness.app.program.doc().last_valid_preview,
+        &harness.app.profile.machine_ini,
+    );
+    let overrides = linc_core::cycletime::Overrides::from_feed_state(&harness.app.snapshot.feed);
+    let prepared = crate::screens::common::estimate_clock(
+        (plan.parts_total().scaled(overrides) * 1000.0).round() as u64,
+    );
+    let painted: Vec<String> = painted_text(&harness.frame_full(Vec::new()))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        painted.iter().any(|text| text.contains(&prepared)),
+        "the prepared file's own total {prepared}: {painted:?}"
+    );
+
+    // The loaded program in front, running: the card reports the run's estimate
+    // to the end of the program.
+    harness.app.close_prepared();
+    assert_eq!(harness.app.program.front, DocumentFront::Loaded);
+    harness.app.snapshot.tool_tip = Some([0.0, 0.0, 0.0]);
+    harness.app.snapshot.program.running = true;
+    harness.app.snapshot.task.running = true;
+    harness.app.snapshot.program.current_line = 2;
+    harness.app.tick_cycle_time();
+    assert_eq!(harness.app.program.cycle.remaining_ms(), Some(12_000));
+    // The page is drawn without a poll, so the run state set above is the one
+    // the card reads.
+    let painted: Vec<String> = painted_text(&harness.draw_program_page())
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect();
+    assert!(
+        painted.iter().any(|text| text.contains("~0:00:12")),
+        "the run's remaining time: {painted:?}"
+    );
+}
+
+/// The strip reads the run's clock, not the page's document: with a prepared
+/// file in front, the loaded program's remaining time keeps falling while its
+/// buffer is clean, is withheld when it is dirty, and is omitted rather than
+/// invented when the controller has no estimate.
+#[test]
+fn the_run_clock_keeps_timing_the_loaded_program_while_the_prepared_file_is_in_front() {
+    let (_dir, mut app) = make_app(PanelMode::Auto);
+    let text = "G21 G90\nG1 X60 F600\nG1 X120 F600\nM2\n";
+    app.snapshot.program = ProgramState {
+        content: Some(std::sync::Arc::new(text.to_string())),
+        line_count: text.lines().count(),
+        revision: 9,
+        running: true,
+        current_line: 2,
+        ..Default::default()
+    };
+    app.snapshot.task.running = true;
+    app.sync_program();
+    app.snapshot.tool_tip = Some([0.0, 0.0, 0.0]);
+
+    let mut prepared = Document::default();
+    prepared.editor.set_loaded(
+        std::path::PathBuf::from("/tmp/prepared.ngc"),
+        "G21 G90\nG1 X600 F600\nM2\n".into(),
+    );
+    prepared.path = Some(std::path::PathBuf::from("/tmp/prepared.ngc"));
+    app.program.prepared = Some(prepared);
+    app.program.front = DocumentFront::Prepared;
+    app.refresh_preview();
+
+    app.tick_cycle_time();
+    assert_eq!(
+        app.program.cycle.remaining_ms(),
+        Some(12_000),
+        "the loaded program's two planned cuts, not the prepared file's one"
+    );
+    // The cut moves through the first move; the remaining time falls with it.
+    app.program.loop_progress.cursor = 1;
+    app.tick_cycle_time();
+    assert_eq!(app.program.cycle.remaining_ms(), Some(6_000));
+
+    // A dirty loaded buffer is a preview of text the controller is not running,
+    // so the estimate is withheld rather than read off it.
+    app.program
+        .loaded_mut()
+        .editor
+        .replace_text("G21 G90\nG1 X70 F600\nG1 X120 F600\nM2\n".into());
+    app.tick_cycle_time();
+    assert_eq!(app.program.cycle.remaining_ms(), None);
+
+    // No program for the controller to estimate: the clock says nothing rather
+    // than inventing a zero.
+    app.snapshot.program.line_count = 0;
+    app.snapshot.program.running = false;
+    app.snapshot.task.running = false;
+    app.tick_cycle_time();
+    assert_eq!(app.program.cycle.remaining_ms(), None);
+    assert_eq!(app.program.cycle.total_ms(), None);
+}
+
+/// The fault keys walk the faults of the document in front, and the controller's
+/// verdict stays a fault of the loaded program's list alone.
+#[test]
+fn the_fault_walk_moves_through_the_front_documents_faults_only() {
+    let (_dir, mut app) = make_app(PanelMode::Edit);
+    let loaded_text = "G0 X0 Y0\nG1 X\nG1 X10 X20 F100\nM2\n";
+    app.program.loaded_mut().editor.set_loaded(
+        std::path::PathBuf::from("/tmp/loaded.ngc"),
+        loaded_text.into(),
+    );
+    app.program.loaded_mut().path = Some(std::path::PathBuf::from("/tmp/loaded.ngc"));
+    app.program.machine_check = Some(linc_core::verify::MachineCheck {
+        outcome: linc_core::verify::CheckOutcome::Refused,
+        message: Some("Cannot use g53 incremental".into()),
+        block: Some("G91 G53 G0 X10".into()),
+        line: Some(1),
+    });
+    app.refresh_preview();
+    assert_eq!(
+        app.program
+            .loaded()
+            .issues
+            .iter()
+            .map(|issue| issue.line)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3],
+        "the controller's refusal joins the loaded list: {:?}",
+        app.program.loaded().issues
+    );
+
+    let mut prepared = Document::default();
+    prepared.editor.set_loaded(
+        std::path::PathBuf::from("/tmp/prepared.ngc"),
+        "G0 X0\nG1 X\nG1 X10 X20 F100\nM2\n".into(),
+    );
+    prepared.path = Some(std::path::PathBuf::from("/tmp/prepared.ngc"));
+    app.program.prepared = Some(prepared);
+    app.program.front = DocumentFront::Prepared;
+    app.refresh_preview();
+
+    let prepared_issues: Vec<usize> = app
+        .program
+        .doc()
+        .issues
+        .iter()
+        .map(|issue| issue.line)
+        .collect();
+    assert_eq!(
+        prepared_issues,
+        vec![2, 3],
+        "the prepared file's own faults"
+    );
+    assert!(
+        app.program
+            .doc()
+            .issues
+            .iter()
+            .all(|issue| !issue.message.starts_with("controller:")),
+        "the controller's verdict is not the prepared file's fault: {:?}",
+        app.program.doc().issues
+    );
+
+    // An edit to the prepared buffer is not a repair of the loaded program:
+    // the controller's verdict stands, and with it the interlock.
+    app.mark_editor_changed();
+    assert!(
+        app.program.machine_check.is_some(),
+        "editing the prepared document must not clear the loaded verdict"
+    );
+    assert!(!app.program_ready());
+
+    let loaded_index = app.program.loaded().issue_index;
+    let loaded_selected = app.program.loaded().selected_line;
+    app.cycle_issue(1);
+    assert_eq!(app.program.prepared.as_ref().unwrap().issue_index, 1);
+    assert_eq!(app.program.prepared.as_ref().unwrap().selected_line, 3);
+    assert_eq!(
+        app.program.loaded().issue_index,
+        loaded_index,
+        "the loaded document's place is not the one being walked"
+    );
+    assert_eq!(app.program.loaded().selected_line, loaded_selected);
+    // And the loaded list still carries the controller's fault after the walk.
+    app.refresh_loaded_preview();
+    assert!(
+        app.program
+            .loaded()
+            .issues
+            .iter()
+            .any(|issue| issue.message.starts_with("controller:")),
+        "{:?}",
+        app.program.loaded().issues
     );
 }

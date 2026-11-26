@@ -108,8 +108,8 @@ else, so it cannot shadow another page's command.
 |---|---|
 | Machine (MAIN) | `Ctrl+F10`/`Ctrl+▢` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+M` REMAINING view, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail, `Ctrl+R` run from line, `Ctrl+G` go to a line number |
 | Machine (MAIN), MDI pane | `Enter` issue and commit the block, `Up`/`Down` recall a buffer line into the input, `Ctrl+Up`/`Ctrl+Down` move the selected line in the buffer (`Ctrl` because the panel keyboard has no Shift), `Ctrl+G` go to a buffer line, `Ctrl+R` run the selected line, `Ctrl+Backspace` delete the selected line or clear the input, `Ctrl+S` save the buffer to a new `.ngc` file under `PROGRAM_PREFIX`, `Esc` clear the uncommitted input; while the pane is up these replace the Machine bindings in the row above |
-| Program | `FILE` open the file browser, `Ctrl+S` save, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+M` REMAINING view, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
-| Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `C` copy to the other pane, `D` duplicate in place, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
+| Program | `FILE` open the file browser, `Ctrl+S` save, `Ctrl+W` close the prepared program, `Ctrl+N` load the prepared program, `Ctrl+Z`/`Ctrl+Y` undo/redo, `Ctrl+A`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V` editing, `Ctrl+D` duplicate line, `Ctrl+K` delete line, `Ctrl+Up`/`Ctrl+Down` move line, `WIN`/`F10` toggle `SPLIT`/`CODE`, `Ctrl+R` run from line, `Ctrl+G` go to a line number, `Ctrl+F10` cycle the view ISO/X/Y/Z, `Ctrl+B` show/hide the program bounds, `Ctrl+M` REMAINING view, `Ctrl+0` fit the toolpath, `Ctrl+L` clear the live trail |
+| Files | `Left`/`Right` switch pane, `Up`/`Down` move, `PageUp`/`PageDown` page, `Enter` open or copy to `NC_FILES`, `P` read the selected program into the prepared document, `C` copy to the other pane, `D` duplicate in place, `R` rename in place, `N` new program, `Ctrl+R` refresh, `E` eject, `Delete`/`Backspace` delete |
 | Help | `/` or `Ctrl+F` focus search, `Up`/`Down` select, `Enter` open the reference, `Backspace` back in the reference dialog |
 | Offsets | `Up`/`Down` select a row, `X`/`Y`/`Z` edit the DRO, `A` activate the selected work system; the preview answers the same view keys as MAIN (`Ctrl+F10`/`Ctrl+▢` cycle ISO/X/Y/Z, `Ctrl+0` fit, `Ctrl+B` bounds, `Ctrl+M` REMAINING) |
 | Tools | Arrows select a row, `Enter` edit the selected cell, `T` load the selected row's tool (`Tn M6` + `G43 Hn`), `Ctrl+T` type a tool number and load it, `Z` open the tool-position dialog, `D` duplicate the selected tool |
@@ -129,8 +129,11 @@ field and no other page claims it.
 
 A page-local binding is only listed in the sidebar's `SHORTCUTS` pane while its
 page is in front (the pane scrolls when a page has more commands than the
-sidebar holds); nav keys are never listed. The list is grouped by purpose
-(`VIEW`, `PROGRAM`) with half a text line between entries; the view toggles read
+sidebar holds); nav keys are never listed. The Program page adds
+`CLOSE PREP` and `LOAD PREP` only while a prepared program exists,
+because neither has anything to act on before that. The list is grouped by
+purpose (`VIEW`, `PROGRAM`) with half a text line between entries; the view
+toggles read
 `▢` and `Ctrl+▢` on a panel, or `F10` and `Ctrl+F10` when `[ui] keyboard =
 "pc"` names the keys a normal keyboard sends (see CONFIGURATION §9). Only the
 navigation pairs a name with its key, `MAIN · F5`, `FILE · F6`, `TOOL · F7`,
@@ -609,7 +612,10 @@ Default page. The layout is selected by `machine.gui`.
 
 ### 6.2 Program
 
-Two layouts, selected by the header toggle or `FILE`:
+Two layouts, selected by the header toggle or `FILE`. While a prepared program
+exists, a pinned strip above the panes shows it first and the loaded program
+after it; otherwise there is no strip, and the editor holds the loaded program
+alone.
 
 #### SPLIT
 
@@ -671,6 +677,60 @@ running the view follows the executing line, but a line the operator picks with
 `Ctrl+G` or the arrows is kept until the next run starts, instead of being
 dragged back on the next status poll.
 
+#### PREPARED PROGRAM
+
+The page holds two documents. The loaded program is the controller's; the
+prepared program is a file being written for the next cycle, and there is at
+most one. They are separate files: the prepared document is read from its own
+file and written back to it, so preparing, editing or saving it never reaches
+the controller. Only the handoff opens it there.
+
+- The run row exists only while a prepared program does. It is a single line:
+  the state word (`RUNNING` in the success green, `PAUSED`, `IDLE`), the loaded
+  file, a rule, a thin progress bar that fills with the controller's percent,
+  the line it is on, a second rule, then the block it is executing. The row has a faint
+  green-tinted background and rim, so it reads as live machine state rather
+  than a card. The bar holds a fifth of what the rule leaves; the block takes what is left
+  and ends in an ellipsis when it does not fit, with the full block on the
+  hover. A run that reached its last command reads 100 %, even when the
+  controller stopped on an earlier line because the rest is blank. With
+  nothing loaded the row says `NO PROGRAM LOADED` and shows no bar.
+- The editor's own header names the document in front. While the prepared file
+  is shown it reads `PREPARING: <file>` with the dirty marker; the loaded
+  program's header has no such prefix.
+- The handoff is `Ctrl+N` or the sidebar's `LOAD PREP` row, both acting on the
+  prepared document. The row reports the run only: it starts, pauses and resets
+  nothing.
+- `PREPARE` in Files (`P`) reads a file into the prepared document and leaves
+  the controller alone, so it works in every machine state. A read that fails
+  reports why and leaves the prepared document as it was. The editor takes the
+  keyboard as the prepared file comes to the front.
+- The editor shows the prepared document from the moment it is prepared. While
+  it is in front, the toolpath card, the `MODAL` pane, the fault list and the
+  card's estimated total time all describe the prepared file. The live layer —
+  the live trail, the tool head and the executing-line marker — belongs to the
+  loaded program, so it is off, and `REMAINING` has nothing eaten to draw.
+- The prepared buffer accepts typing while the panel link is up and `PROTECT`
+  is known off. The panel mode and the interpreter's state are the loaded
+  program's business, so neither gates a file the controller does not hold.
+- `Ctrl+W` closes the prepared document and gives the editor back to the loaded
+  one, asking first when the prepared buffer is dirty.
+- `Ctrl+S` saves the document in front. A prepared save is a file-only write:
+  it replaces the file atomically, never opens it in the interpreter, and
+  leaves the loaded program, its running text and the interlock untouched. It
+  refuses a target that resolves onto the loaded program's path, because the
+  running program's file is never the file being written. There is no save-as
+  for a prepared document: it was read from a file.
+- The handoff is one press. The backend writes the prepared buffer's text and
+  then opens that file through the load sequence, so `AUTO` starts the text the
+  operator checked. It asks first when the loaded buffer has unsaved changes,
+  offering `DISCARD`, `SAVE` of the loaded buffer, or `CANCEL`. It refuses
+  while a program runs or the interpreter is not idle, and a press already in
+  flight ignores further presses. A failed handoff keeps the prepared buffer
+  and its dirty marker, leaves the loaded program as it was, and names the
+  failure in a notice. Loading the prepared file from Files is the same
+  handoff, not a second load.
+
 #### EDIT state
 
 The physical panel's `EDIT` position selects Program, switches to the CODE
@@ -722,8 +782,9 @@ becomes editable.
 Program rules:
 
 - G-code is token-highlighted (see §7.3).
-- The graph always draws the **loaded program's full toolpath** and the
-  **live toolpath** as separate layers. The program path uses the program
+- The graph draws the **full toolpath of the document in front** — the loaded
+  program's, or a prepared file's while that one is in front — and the **live
+  toolpath** as a separate layer. The program path uses the program
   colour (cut) and muted dotted rapids; the live trail uses a distinct
   `--success` stroke, solid for a cut and dotted for a rapid, so both layers
   read a rapid the same way.
@@ -951,12 +1012,16 @@ Program rules:
   refusal blocks the load with its own words. Its message carries no line number
   except for o-word label faults, so the block it echoes is matched back against
   the file; a missing `rs274` skips the check instead of failing the load.
-- While running, the editor is read-only and auto-scrolls to the current line,
-  centring its whole wrapped block rather than its first row. The MAIN program
-  card does the same, measured in the rows the lines really take, so wrapped
-  code above the executing line cannot push it down the card.
-- Edits and saves are allowed only when stopped, `program_protect` is off and
-  the panel is in `EDIT`.
+- The loaded program is read-only while it runs, and the editor auto-scrolls
+  its view to the current line, centring its whole wrapped block rather than
+  its first row. The MAIN program card does the same, measured in the rows the
+  lines really take, so wrapped code above the executing line cannot push it
+  down the card. A prepared document is not read-only then: it is another file,
+  and preparing it during a run is what the second document is for.
+- Editing and saving the loaded program is allowed only when stopped,
+  `program_protect` is off and the panel is in `EDIT`. The prepared document
+  answers a different gate: the panel link and `PROTECT` off, and nothing from
+  the loaded program's mode or run.
 - The physical panel's **PROGRAM PROTECT** switch is authoritative. While it
   is on, the controller is editing-locked: no cursor edits, saves, offset/tool
   table writes, file imports, or probe-result applies. Show a persistent
@@ -1275,7 +1340,8 @@ previous page.
   `Up`/`Down` move the
   selection and `PageUp`/`PageDown` move a page, with the list scrolling the
   cursor into view; `Enter` opens a program from `NC_FILES` or copies a file from USB
-  into `NC_FILES`; `C` copies the selected entry to
+  into `NC_FILES`; `P` prepares the selected `NC_FILES` program for the next
+  cycle (see below); `C` copies the selected entry to
   the other pane; `D` duplicates it in the same directory under the next free
   `-copy` name; `R` renames it in place (the NAME cell becomes a field with the
   name without its extension selected; Enter commits, Escape restores);
@@ -1314,9 +1380,20 @@ previous page.
   start is written. Creation is blocked by program protect. The new row is
   scrolled into view before its name field takes the keyboard, so a list longer
   than the pane does not hide the field the operator is typing into.
+- `P` is `PREPARE`, the right pane's verb beside `LOAD`: it reads the selected
+  program into the prepared document and never asks the controller to open it,
+  so it works in every machine state, a run included. The read is refused for
+  the loaded program's own file, because there is nothing to prepare about the
+  text the machine already holds; for a file outside `NC_FILES`; for an
+  extension the profile does not load; and when the read itself fails. A
+  refusal reports and leaves the prepared document as it was. A USB row is
+  copied, not prepared: the left pane has no second verb.
 - `Enter` on a program accepts only configured G-code extensions from
-  `NC_FILES`; it loads but never starts the program. Loading and writes to `NC_FILES` are disabled
-  while running, and imports are blocked by program protect.
+  `NC_FILES`; it loads but never starts the program. Loading and writes to
+  `NC_FILES` are disabled while running; browsing and `P` are not, because
+  reading a file for the next cycle touches nothing the machine holds. Imports
+  are blocked by program protect. `LOAD` of the file the prepared document
+  holds is the handoff, not a second load.
 - On a successful load: close Files, switch to Program, force the `SPLIT`
   layout, fit the toolpath and highlight the current line. This overrides the
   remembered Program layout, including `CODE`. On failure, stay in Files and
@@ -1864,6 +1941,16 @@ etc.
 - Jog is physical only.
 - Program protect is a physical panel input. It blocks every controller-side
   write and is treated as ON when unknown or stale.
+- The editor's gate follows the document in front. The loaded program needs the
+  panel in `EDIT`, an idle interpreter, `PROTECT` known off and a live panel
+  link. The prepared document needs the link and `PROTECT` known off: it is a
+  file the controller does not hold, so the mode and the run decide nothing
+  about typing into it.
+- A prepared write needs a live panel link, a valid panel mode and `PROTECT`
+  known off. The handoff adds an idle interpreter with no program running,
+  because it replaces the text AUTO starts. An unknown or stale protect input
+  counts as on, and the backend rechecks it on every write. A prepared write
+  that resolves onto the loaded program's path is refused.
 - The GUI may load programs, edit G-code, edit offsets/tools, and issue MDI,
   probe and tool-change commands within the gating above.
 - LiNC writes only its declared `linc.*` HAL outputs; it never writes arbitrary
@@ -2012,7 +2099,12 @@ HAL pins is still open.
   `jog-speed`, `machine-off`, `net-safe`, `program-ok`). It never writes
   arbitrary HAL pins or machine motion/spindle/coolant/cycle pins.
 - Validate machine ON, homed, idle, program protect and no active program
-  before MDI, probe, tool-change and program/offset/tool writes.
+  before MDI, probe, tool-change and offset/tool-table writes. Program-file
+  writes are gated in §8.2: the loaded program's save needs the panel in
+  `EDIT`, an idle interpreter and protect off; the prepared write and the
+  handoff need the panel link, a valid panel mode and protect off, with an idle
+  interpreter for the handoff. The file being prepared is never the file the
+  controller holds.
 - MDI, probe and tool-change commands use Probe Basic `issue_mdi` semantics:
   they execute immediately after an explicit operator action, may temporarily
   select MDI, and restore the prior task mode. There is no staged-command path

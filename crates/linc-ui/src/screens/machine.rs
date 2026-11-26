@@ -653,7 +653,7 @@ fn line_base(rows: usize, height: f32) -> f32 {
 }
 
 fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
-    let preview = app.program.last_valid_preview.clone();
+    let preview = app.program.loaded().last_valid_preview.clone();
     let mut view = app.program.graph_view;
     if view == ViewMode::LatheXz {
         view = ViewMode::Iso3d;
@@ -690,13 +690,14 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 &mut pitch,
                 &mut fit,
                 &mut auto_fit,
-                Some(app.program.selected_line),
+                Some(app.program.loaded().selected_line),
                 app.snapshot.program.highlight_line(),
                 false,
                 false,
                 false,
                 false,
                 false,
+                true,
                 None,
             );
             app.program.graph_zoom = zoom;
@@ -705,7 +706,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
             app.program.graph_pitch = pitch;
             app.program.fit_requested = false;
             app.program.graph_auto_fit = auto_fit;
-            common::toolpath_status(ui, header, view.label(), drawn.span_mm);
+            common::toolpath_status(ui, header, view.label(), drawn.span_mm, None);
             // The block the MDI pane is composing, drawn over the program in
             // the pane's own colour. Nothing is drawn for an empty or
             // unparsable block, and the pane is only up in MDI.
@@ -735,7 +736,7 @@ fn graph_panel(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 // page's status line. Dropped first when the card is narrow:
                 // the listing carries it too.
                 if let Some(readout) = crate::state::LoopReadout::current(
-                    &app.program.preview,
+                    &app.program.loaded().preview,
                     &app.program.loop_progress,
                 ) {
                     ui.label(
@@ -814,7 +815,7 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                             );
                         });
                     });
-                    let preview = app.program.last_valid_preview.clone();
+                    let preview = app.program.loaded().last_valid_preview.clone();
                     let mut zoom = app.program.graph_zoom;
                     let mut pan = app.program.graph_pan;
                     let mut yaw = app.program.graph_yaw;
@@ -833,13 +834,14 @@ fn lathe(app: &mut LincApp, ui: &mut Ui) {
                         &mut pitch,
                         &mut fit,
                         &mut auto_fit,
-                        Some(app.program.selected_line),
+                        Some(app.program.loaded().selected_line),
                         app.snapshot.program.highlight_line(),
                         false,
                         false,
                         false,
                         false,
                         false,
+                        true,
                         None,
                     )
                     .response;

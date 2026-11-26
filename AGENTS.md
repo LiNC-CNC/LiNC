@@ -192,6 +192,12 @@ had refused.
 - The DRO readout is one line: axis name at the coordinate's own size, the value, and a dimmed `M …`
   dropped whole when it would touch the value. Card heights are `theme::DRO_CARD_*`; the freed row goes
   to the toolpath, not to page slack.
+- The Program page holds two documents: the loaded program and at most one prepared program, a file being written for the next cycle. A pinned
+  run row appears only while one is prepared: the state word, the loaded file, its line and current block, then a progress bar, on a faint
+  green-tinted row. The line and block stay fed from the loaded document whatever the editor shows, and the row carries no control. The
+  prepared file is named by the editor header (`PREPARING: <file>`), and the handoff is `Ctrl+N` or the sidebar's `LOAD PREP` row. While the prepared file is in front the graph, MODAL pane,
+  fault list and estimate describe that file, and the live trail, tool head and executing-line marker are left off. Nothing on that surface
+  starts, pauses or resets a program, and a prepared write never touches the file the controller holds.
 - Use `theme` constants and the `SPEC.md §7` palette, not literals.
 - The program editor soft-wraps long lines at the editor width. The gutter paints
   one number at each logical line's first galley row, and the selection band covers
@@ -211,7 +217,8 @@ Source: `../qmk_firmware/cnckeyboard/keyboards/cnckeyboard/keymaps/doubletap/key
   Machine in AUTO/MDI), F6 Program (again → Files), F7 Tools, F8 Offsets, `Ctrl+D` Diagnostics, `Ctrl+H` G-code Help,
   `M` Messages, `Ctrl+Q` guarded quit, Esc, arrows/Page/Home/End, Enter. `[keys]` drives the shell; `Keymap::from_config` is the only source.
 - Everything else is page-local and consumed only on that page: `Ctrl+S`, `Ctrl+Z/Y`, editor keys, `Ctrl+R` run-from-line, `Ctrl+0` fit, `Ctrl+L`
-  clear trail, Files copy/delete, MDI buffer recall, line move and issue. A page-local key consumed elsewhere shadows another page's command.
+  clear trail, `Ctrl+W` close prepared and `Ctrl+N` hand off the prepared program (`Ctrl+N` is a new tool row on TOOLS), Files copy/delete, MDI
+  buffer recall, line move and issue. A page-local key consumed elsewhere shadows another page's command.
   The pane's line move is `Ctrl+Up`/`Ctrl+Down` because the panel keyboard has no Shift key.
 - The toolpath view zooms with `Ctrl++`/`Ctrl+-` on any page that draws one — page-scoped like `Ctrl+0`, because those chords collide with nothing a
   text field uses. `Ctrl++` also accepts Shift+`=` (what a normal keyboard sends for `+`). The ceiling belongs to the view, not the

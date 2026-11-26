@@ -482,10 +482,16 @@ quit_requires_idle = true
 confirm_quit = true
 ```
 
-The loader must reject a profile that changes these to weaker values. The HMI
-may edit offsets, tool data and the program when idle, subject to
-`program_protect` and LinuxCNC state. It may issue explicit MDI, probe and
-tool-change commands through Probe Basic `issue_mdi`; it never starts AUTO.
+The loader must reject a profile that changes these to weaker values.
+`program_edit_while_running = "read-only"` is the loaded program's rule: the
+controller's own text is never typed into while it runs. The HMI may edit
+offsets, tool data and that program when idle, subject to `program_protect` and
+LinuxCNC state. A prepared program is a second document, written for the next
+cycle: it may be edited and saved during a run, subject to the panel link, a
+known panel mode and `program_protect`, and no write it makes reaches the file
+the controller holds.
+It may issue explicit MDI, probe and tool-change commands through Probe Basic
+`issue_mdi`; it never starts AUTO.
 
 `program_protect` is the physical panel switch. While ON, the controller is
 editing-locked: program edits/saves, offset/tool writes, NC_FILES imports and
@@ -793,7 +799,7 @@ The bindings do not change: the panel's navigation keys already send `F5` to
 | `[homing]` | `auto_open`, `close_on_mode_exit` |
 | `[mdi]` | `execute_on_enter`, `auto_focus`, `history_limit`, `max_command_length`, `save_preamble`, `save_postamble` |
 | `[toolpath]` | `show_grid`, `show_live_trail`, `trail_max_points`, `clear_trail_action`, `show_program_bounds`, `show_machine_bounds`, `show_stock`, `stock_alpha`, `bounds_mode` (preference), `show_program_labels`, `show_machine_labels`, `show_program_ticks`, `show_machine_ticks`, `perspective`, `multitool_colors`, `highlight_selected_line` |
-| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `tool_number`, `spindle_speed_up`, `spindle_speed_down`, `spindle_speed`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds`, `remaining`, `toggle_lathe_mirror`, `toggle_lathe_diameter`, `limit_recovery`, `fault_next`, `fault_prev` |
+| `[keys]` | `machine`, `program`, `program_cycle_view`, `tools`, `offsets`, `tool_number`, `spindle_speed_up`, `spindle_speed_down`, `spindle_speed`, `diagnostics`, `help`, `messages`, `back`, `quit`, `focus_next`, `focus_prev`, `activate`, `open`, `save`, `undo`, `redo`, `find`, `select_all`, `copy`, `cut`, `paste`, `refresh`, `mdi_issue`, `mdi_clear`, `mdi_history_up`, `mdi_history_down`, `mdi_buffer_delete`, `help_search`, `goto_line`, `view_cycle`, `toggle_bounds`, `remaining`, `toggle_lathe_mirror`, `toggle_lathe_diameter`, `limit_recovery`, `fault_next`, `fault_prev`, `prepared_close`, `prepared_handoff` |
 | `[help]` | `source`, `bundle`, `search`, `history_limit` |
 | `[safety]` | `machine_control`, `software_estop`, `software_cycle_control`, `software_jog`, `software_spindle`, `software_coolant`, `software_overrides`, `program_edit_while_running`, `program_protect`, `save_requires_idle`, `confirm_discard`, `mdi_execution`, `quit_requires_idle`, `confirm_quit` |
 | `[backend]` | `kind`, `transport`, `status_hz`, `hal_hz`, `connect_timeout_ms` |
@@ -1152,6 +1158,23 @@ page-local, so the two pages can share them, exactly as `save` and
 |---|---|---|
 | `fault_next` | `Ctrl+PageDown` | Next fault. |
 | `fault_prev` | `Ctrl+PageUp` | Previous fault. |
+
+### `[keys]` prepared-program bindings
+
+Page-local to Program. Both act on the prepared document only: the close gives
+the editor back to the loaded program, and the handoff writes the prepared
+buffer and opens it as the loaded program, the same press as the strip's
+`LOAD PREPARED` chip. With no prepared document both do nothing, and the
+sidebar lists neither.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `prepared_close` | `Ctrl+W` | Close the prepared program. A dirty prepared buffer asks first. |
+| `prepared_handoff` | `Ctrl+N` | Write the prepared buffer and open it as the loaded program. Refused while a program runs or the interpreter is not idle; unsaved changes in the loaded buffer are asked about first, with `SAVE` among the answers. |
+
+`Ctrl+N` opens a new tool row on TOOLS and `Ctrl+W` is a text chord, which is
+why the pair is page-scoped and consumed before any widget draws: a focused
+editor cannot take them first, and no other page loses its own binding.
 
 ### `[keys]` lathe view bindings
 

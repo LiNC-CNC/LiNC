@@ -784,6 +784,134 @@ impl ModalSummary {
     }
 }
 
+/// The modal words in force at one block, packed so a program can carry one
+/// per block without a string allocation for each.
+///
+/// The editor's MODAL pane shows the state at the selected line, not the state
+/// at the end of the file. A whole `ModalSummary` per line would allocate the
+/// code list thousands of times; this keeps the same facts in four bytes and
+/// builds the summary only for the line on screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LineModal(u32);
+
+impl Default for LineModal {
+    fn default() -> Self {
+        // Before the first block the interpreter is in its defaults: G0, G90,
+        // G21, G17, G54. Absolute and metric are the bits the packed form
+        // otherwise leaves clear, so the zero value is not the default state.
+        Self((1 << 25) | (1 << 26))
+    }
+}
+
+impl LineModal {
+    const WCS: [&'static str; 9] = [
+        "G54", "G55", "G56", "G57", "G58", "G59", "G59.1", "G59.2", "G59.3",
+    ];
+
+    fn new(
+        motion: u16,
+        absolute: bool,
+        metric: bool,
+        plane: Plane,
+        wcs: &str,
+        comp: Option<bool>,
+    ) -> Self {
+        let plane = match plane {
+            Plane::Xy => 0,
+            Plane::Xz => 1,
+            Plane::Yz => 2,
+            Plane::Uv => 3,
+            Plane::Uw => 4,
+            Plane::Vw => 5,
+        };
+        let wcs = Self::WCS.iter().position(|name| *name == wcs).unwrap_or(0) as u32;
+        let comp = match comp {
+            None => 0,
+            Some(true) => 1,
+            Some(false) => 2,
+        };
+        let mut packed = motion as u32 | (plane << 16) | (wcs << 19) | (comp << 23);
+        if absolute {
+            packed |= 1 << 25;
+        }
+        if metric {
+            packed |= 1 << 26;
+        }
+        Self(packed)
+    }
+
+    fn motion(self) -> u16 {
+        (self.0 & 0xffff) as u16
+    }
+
+    fn plane(self) -> Plane {
+        match (self.0 >> 16) & 0x7 {
+            1 => Plane::Xz,
+            2 => Plane::Yz,
+            3 => Plane::Uv,
+            4 => Plane::Uw,
+            5 => Plane::Vw,
+            _ => Plane::Xy,
+        }
+    }
+
+    fn wcs(self) -> &'static str {
+        Self::WCS[((self.0 >> 19) & 0xf) as usize % Self::WCS.len()]
+    }
+
+    fn comp(self) -> Option<bool> {
+        match (self.0 >> 23) & 0x3 {
+            1 => Some(true),
+            2 => Some(false),
+            _ => None,
+        }
+    }
+
+    fn absolute(self) -> bool {
+        self.0 & (1 << 25) != 0
+    }
+
+    fn metric(self) -> bool {
+        self.0 & (1 << 26) != 0
+    }
+
+    /// The G codes this state stands for, in the order the pane reads them.
+    pub fn summary(self) -> ModalSummary {
+        let units = if self.metric() { "G21" } else { "G20" };
+        let distance_mode = if self.absolute() { "G90" } else { "G91" };
+        let plane = match self.plane() {
+            Plane::Xy => "G17",
+            Plane::Xz => "G18",
+            Plane::Yz => "G19",
+            Plane::Uv => "G17.1",
+            Plane::Uw => "G18.1",
+            Plane::Vw => "G19.1",
+        };
+        let wcs = self.wcs();
+        let mut gcodes = vec![
+            format_g(self.motion() as f64),
+            distance_mode.into(),
+            units.into(),
+            plane.into(),
+            wcs.into(),
+        ];
+        if let Some(left) = self.comp() {
+            gcodes.push(if left { "G41" } else { "G42" }.into());
+        }
+        ModalSummary {
+            gcodes,
+            mcodes: Vec::new(),
+            feed: None,
+            speed: None,
+            tool: None,
+            wcs: wcs.into(),
+            units: units.into(),
+            plane: plane.into(),
+            distance_mode: distance_mode.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preview {
     pub segments: Vec<PathSegment>,
@@ -797,6 +925,10 @@ pub struct Preview {
     /// error keys. It is gathered by [crate::lint] plus that fatal fault.
     pub issues: Vec<crate::lint::LintIssue>,
     pub modal: ModalSummary,
+    /// The modal state in force at each block that has words, in file order.
+    /// `modal` above is the state at the end of the file; this is what the
+    /// editor's MODAL pane reads for the selected line.
+    pub modal_at: Vec<(usize, LineModal)>,
     pub tools: Vec<u16>,
     pub program_number: Option<String>,
     /// G7 lathe diameter mode was in force at the end of the program. The
@@ -1048,6 +1180,19 @@ impl SubroutineBody {
 }
 
 impl Preview {
+    /// The modal state in force at `line`: the last block at or before it. A
+    /// line before the first block keeps the interpreter's defaults.
+    pub fn modal_at_line(&self, line: usize) -> ModalSummary {
+        let index = self.modal_at.partition_point(|(at, _)| *at <= line);
+        match index
+            .checked_sub(1)
+            .and_then(|index| self.modal_at.get(index))
+        {
+            Some((_, state)) => state.summary(),
+            None => LineModal::default().summary(),
+        }
+    }
+
     pub fn empty() -> Self {
         Self {
             segments: Vec::new(),
@@ -1065,6 +1210,7 @@ impl Preview {
                 ..Default::default()
             },
             tools: Vec::new(),
+            modal_at: Vec::new(),
             program_number: None,
             lathe_diameter: false,
             uses_live_tool: false,
@@ -4827,6 +4973,24 @@ pub fn parse_preview_full(
             }
         }
 
+        // The state this block runs in. Its own modal words are already read;
+        // a cycle this block requests counts before it is installed below. The
+        // editor's MODAL pane reads this entry for the line under the cursor.
+        let modal_motion = cycle_request
+            .or_else(|| drill_cycle.as_ref().map(|cycle| cycle.kind))
+            .unwrap_or(motion as u16);
+        preview.modal_at.push((
+            line_no,
+            LineModal::new(
+                modal_motion,
+                absolute,
+                units == "G21",
+                plane,
+                &wcs,
+                comp_request.or(comp).map(|comp| comp.left),
+            ),
+        ));
+
         // G53 names machine coordinates, so the interpreter reads it narrowly:
         // absolute mode only ("Cannot use g53 incremental"), no cutter radius
         // compensation ("Cannot use g53 with cutter radius comp"), and no arc
@@ -7261,6 +7425,30 @@ mod tests {
         // A probe is not a cut, so it is not counted as one, and it is not a
         // rapid either.
         assert_eq!(preview.rapids, 1, "only the G0 is a rapid");
+    }
+
+    #[test]
+    fn the_modal_state_is_read_at_the_selected_line_not_at_the_end() {
+        let text = "G21 G90 G17 G54\nG0 X0 Y0\nG1 X10 F100\nG55 G20 G91\nG0 X1\nM2\n";
+        let axes = vec!["X".to_string(), "Y".to_string(), "Z".to_string()];
+        let preview = parse_preview(text, &axes, None, [0.0, 0.0, 0.0]);
+        let codes = |line: usize| preview.modal_at_line(line).gcodes;
+        assert!(codes(1).contains(&"G21".to_string()), "{:?}", codes(1));
+        assert!(codes(1).contains(&"G54".to_string()), "{:?}", codes(1));
+        assert!(codes(2).contains(&"G0".to_string()), "{:?}", codes(2));
+        assert!(codes(3).contains(&"G1".to_string()), "{:?}", codes(3));
+        assert!(codes(4).contains(&"G91".to_string()), "{:?}", codes(4));
+        assert!(codes(4).contains(&"G20".to_string()), "{:?}", codes(4));
+        assert!(codes(4).contains(&"G55".to_string()), "{:?}", codes(4));
+        assert!(!codes(4).contains(&"G90".to_string()), "{:?}", codes(4));
+        assert!(codes(6).contains(&"G91".to_string()), "{:?}", codes(6));
+        assert!(
+            codes(1).contains(&"G90".to_string()),
+            "the state at line 1 is before the later G91: {:?}",
+            codes(1)
+        );
+        assert!(codes(0).contains(&"G90".to_string()), "{:?}", codes(0));
+        assert!(codes(0).contains(&"G21".to_string()), "{:?}", codes(0));
     }
 
     #[test]

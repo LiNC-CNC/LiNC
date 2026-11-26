@@ -164,12 +164,21 @@ impl LincApp {
         // the wrong place - `live_trail_shift` then shifts the tool marker by the
         // whole offset, which is the "toolhead sits at machine home" report.
         let rows = offsets_signature(&self.snapshot.offsets.offsets);
-        let offsets_changed = self.snapshot.offsets.revision != self.program.preview_offsets_seen
-            || rows != self.program.preview_offsets_rows;
-        let offset_now_available =
-            self.program.preview_offset.is_none() && !self.snapshot.offsets.offsets.is_empty();
-        if offsets_changed || offset_now_available {
+        let offsets_revision = self.snapshot.offsets.revision;
+        let has_rows = !self.snapshot.offsets.offsets.is_empty();
+        let stale = |doc: &Document| {
+            offsets_revision != doc.preview_offsets_seen
+                || rows != doc.preview_offsets_rows
+                || (doc.preview_offset.is_none() && has_rows)
+        };
+        if stale(self.program.doc()) {
             self.refresh_preview();
+        }
+        // The loaded document keeps its own preview, which the Machine page draws
+        // and the interlock and the run's estimate read: with a prepared file in
+        // front, an offset the controller moved still has to reach that one.
+        if self.program.front != DocumentFront::Loaded && stale(self.program.loaded()) {
+            self.refresh_loaded_preview();
         }
         // RAPID changes the jog ceiling, so the published speed follows it.
         // Compared against what we last sent, not against the snapshot: the
@@ -237,6 +246,10 @@ impl LincApp {
         }
         let mut loaded = false;
         let mut load_failed = false;
+        let mut handoff_landed = false;
+        let mut handoff_failed = false;
+        let mut prepared_save_landed = false;
+        let mut prepared_save_failed = false;
         self.chrome.last_snapshot_ms = now_ms();
         let events = self.backend.drain_events();
         for event in events {
@@ -248,6 +261,12 @@ impl LincApp {
                         if command == "Load program" {
                             loaded = true;
                         }
+                        if command == linc_core::command::PREPARED_LOAD_LABEL {
+                            handoff_landed = true;
+                        }
+                        if command == linc_core::command::PREPARED_SAVE_LABEL {
+                            prepared_save_landed = true;
+                        }
                         self.log_ui(
                             AlarmSeverity::Info,
                             AlarmSource::Ui,
@@ -258,6 +277,12 @@ impl LincApp {
                     Err(error) => {
                         if command == "Load program" {
                             load_failed = true;
+                        }
+                        if command == linc_core::command::PREPARED_LOAD_LABEL {
+                            handoff_failed = true;
+                        }
+                        if command == linc_core::command::PREPARED_SAVE_LABEL {
+                            prepared_save_failed = true;
                         }
                         // The recovery dialog is async: the backend's refusal
                         // arrives here, not from `send`. Put it on the dialog,
@@ -292,6 +317,20 @@ impl LincApp {
             } else if load_failed {
                 // Stay in Files so the operator sees the error next to the file.
                 self.program.pending_load = false;
+            }
+        }
+        if self.program.pending_handoff {
+            if handoff_landed {
+                self.commit_handoff();
+            } else if handoff_failed {
+                self.abandon_handoff();
+            }
+        }
+        if self.program.pending_prepared_save {
+            if prepared_save_landed {
+                self.commit_prepared_save();
+            } else if prepared_save_failed {
+                self.abandon_prepared_save();
             }
         }
     }

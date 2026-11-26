@@ -97,16 +97,21 @@ const ROW_GAP: f32 = 5.0;
 
 /// Active G-code modal groups as cells of group label and active code.
 ///
-/// The Machine dashboard and the Program side pane share the cells; the column
-/// count changes with the width available, and `mnemonics` adds the third line
-/// naming what the code means (`G21` → `MM`). The dashboard leaves it off: that
-/// strip sits under sixteen lines of G-code and its two-line cells are what the
-/// card is sized for.
-pub fn modal_grid(app: &LincApp, ui: &mut Ui, columns: usize, mnemonics: bool, id_salt: &str) {
-    let codes = app
-        .snapshot
-        .program
-        .modal
+/// `rows` is what the caller's document says is modal: the controller's own
+/// summary for the program it holds, and the parsed preview's for the file being
+/// prepared. The Machine dashboard and the Program side pane share the cells; the
+/// column count changes with the width available, and `mnemonics` adds the third
+/// line naming what the code means (`G21` → `MM`). The dashboard leaves it off:
+/// that strip sits under sixteen lines of G-code and its two-line cells are what
+/// the card is sized for.
+pub fn modal_grid(
+    ui: &mut Ui,
+    rows: &[(String, String)],
+    columns: usize,
+    mnemonics: bool,
+    id_salt: &str,
+) {
+    let codes = rows
         .iter()
         .filter(|(key, _)| key.starts_with('G'))
         .map(|(key, value)| {
@@ -289,14 +294,36 @@ pub fn toolpath_header(ui: &mut Ui, remaining: bool) -> egui::Rect {
 /// Painted after the card draws, so the number is the scale that is on screen
 /// rather than a prediction of it: a fit changes the zoom inside the draw, and
 /// a status drawn before it would report the frame before.
-pub fn toolpath_status(ui: &Ui, row: egui::Rect, view: &str, span_mm: f32) {
+pub fn toolpath_status(ui: &Ui, row: egui::Rect, view: &str, span_mm: f32, estimate: Option<&str>) {
+    // The estimate comes first: it is the figure the operator is looking for, and
+    // the view name and the span are the reference beside it.
+    let status = match estimate {
+        Some(estimate) => format!(
+            "{estimate}  •  {view}  •  {}",
+            linc_view::span_label_mm(span_mm)
+        ),
+        None => format!("{view}  •  {}", linc_view::span_label_mm(span_mm)),
+    };
     ui.painter().text(
         row.right_center(),
         egui::Align2::RIGHT_CENTER,
-        format!("{view}  •  {}", linc_view::span_label_mm(span_mm)),
+        status,
         egui::FontId::monospace(theme::font_size(9.0)),
         theme::MUTED,
     );
+}
+
+/// A modelled duration written the way the bottom bar's cycle clock is, with a
+/// `~` in front: the figure is the moves' own length and feed, not the
+/// controller's measured count.
+pub fn estimate_clock(ms: u64) -> String {
+    let seconds = ms / 1000;
+    format!(
+        "~{}:{:02}:{:02}",
+        seconds / 3600,
+        (seconds / 60) % 60,
+        seconds % 60
+    )
 }
 
 /// MODAL pane drawn into an exact rect.
@@ -304,10 +331,16 @@ pub fn toolpath_status(ui: &Ui, row: egui::Rect, view: &str, span_mm: f32) {
 /// The card is forced to the rect's size rather than to its content: a frame
 /// sizes to content, and the few pixels of difference were enough to leave the
 /// column beside the editor ending on a different line.
-pub fn modal_pane_in(app: &LincApp, ui: &mut Ui, columns: usize, id_salt: &str, rect: egui::Rect) {
+pub fn modal_pane_in(
+    ui: &mut Ui,
+    rows: &[(String, String)],
+    columns: usize,
+    id_salt: &str,
+    rect: egui::Rect,
+) {
     shell_card(ui, rect, |ui| {
         card_title(ui, "MODAL");
-        modal_grid(app, ui, columns, true, id_salt);
+        modal_grid(ui, rows, columns, true, id_salt);
     });
 }
 
@@ -1316,7 +1349,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                     let focus = if is_running {
                         current
                     } else {
-                        app.program.selected_line.clamp(1, total)
+                        app.program.loaded().selected_line.clamp(1, total)
                     };
                     let number_font = FontId::monospace(theme::font_size(7.5));
                     let number_width = ui.fonts_mut(|fonts| {
@@ -1487,7 +1520,13 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                 band_ui.set_clip_rect(band.intersect(ui.clip_rect()));
                 theme::separator(&mut band_ui);
                 field_label(&mut band_ui, "MODAL");
-                modal_grid(app, &mut band_ui, 6, false, "program_modal_fields");
+                modal_grid(
+                    &mut band_ui,
+                    &app.snapshot.program.modal,
+                    6,
+                    false,
+                    "program_modal_fields",
+                );
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                     ui.horizontal(|ui| {
@@ -1503,7 +1542,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                                 "LN {}/{}  {:.0}%",
                                 app.snapshot.program.executing_line(),
                                 app.snapshot.program.line_count,
-                                app.snapshot.program.progress * 100.0
+                                app.program.progress(&app.snapshot.program) * 100.0
                             ))
                             .monospace()
                             .size(theme::font_size(9.0))
@@ -1523,7 +1562,7 @@ pub fn program_card_sized(app: &LincApp, ui: &mut Ui, height: f32) {
                         });
                     });
                     ui.add(
-                        egui::ProgressBar::new(app.snapshot.program.progress.clamp(0.0, 1.0))
+                        egui::ProgressBar::new(app.program.progress(&app.snapshot.program))
                             .desired_width(ui.available_width())
                             .desired_height(6.0)
                             .fill(theme::ACCENT)
@@ -1940,6 +1979,10 @@ pub fn trajectory(
     origin_tether: bool,
     // Keep the machine envelope on regardless of the Ctrl+B cycle.
     machine_bounds_always: bool,
+    // Draw the machine's own layer: the live trail, the tool head and the line
+    // the interpreter is on. The prepared document's path is drawn without it -
+    // it is a file, not the run - and REMAINING has nothing to eat there.
+    live: bool,
     // A second origin marker, in the current-line colour: the OFFSETS page
     // highlights the row being edited without moving the active cross.
     highlight: Option<([f64; 3], String)>,
@@ -1953,7 +1996,9 @@ pub fn trajectory(
         app.profile.variant,
     );
     view.origin = origin;
-    view.work_offset = app.program.preview_offset.as_ref().map(|map| {
+    // The labels belong to the preview being drawn: a prepared file may select
+    // its own work system, and the loaded program's frame would mislabel it.
+    view.work_offset = app.program.doc().preview_offset.as_ref().map(|map| {
         [
             map.get("X").copied().unwrap_or(0.0),
             map.get("Y").copied().unwrap_or(0.0),
@@ -1987,12 +2032,19 @@ pub fn trajectory(
         current_line,
         eaten_through(&app.graph_style, &app.snapshot.program),
     );
+    if !live {
+        view.show_live_trail = false;
+        view.tool_tip = None;
+        view.current_line = None;
+        view.remaining = false;
+        view.eaten_through = None;
+    }
     // Derived from the live positions, so it absorbs the G43 tool length (which
     // LinuxCNC folds into the machine position but the program path does not) and
     // any G92 or WCS mismatch. Recomputed here rather than by the Program page,
     // so every card that draws a trail is correct in the frame it is drawn.
     view.live_trail_shift =
-        crate::state::live_trail_shift(&app.snapshot, app.program.preview_offset.as_ref());
+        crate::state::live_trail_shift(&app.snapshot, app.program.loaded().preview_offset.as_ref());
     view.show_legend = view.show_legend && show_legend;
     let response = draw_trajectory(ui, &mut view);
     // A click on the card hands it the keyboard. The shell's pan chords are
@@ -2413,7 +2465,7 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32, legend:
         };
         let header_height = ui.cursor().top() - body_top;
         let graph_height = (rect.height() - 8.0 - header_height - 2.0).max(60.0);
-        let preview = app.program.last_valid_preview.clone();
+        let preview = app.program.loaded().last_valid_preview.clone();
         let current_line = app.snapshot.program.highlight_line();
         let view = app.manual.view;
         let mut zoom = app.manual.zoom;
@@ -2440,11 +2492,12 @@ pub fn live_graph_card(app: &mut LincApp, ui: &mut Ui, card_height: f32, legend:
             // Frame the program and the live tool head together.
             false,
             true,
+            true,
             false,
             false,
             None,
         );
-        toolpath_status(ui, header, view.label(), drawn.span_mm);
+        toolpath_status(ui, header, view.label(), drawn.span_mm, None);
         app.manual.zoom = zoom;
         app.manual.pan = pan;
         app.manual.yaw = yaw;
@@ -3441,7 +3494,7 @@ file = "{root}/prefs/{{profile}}.preferences.toml"
         app.snapshot.program.motion_line = 4;
         app.snapshot.program.current_line = 4;
         app.snapshot.task.running = running;
-        app.program.selected_line = 4;
+        app.program.loaded_mut().selected_line = 4;
         app.snapshot.program.modal = (0..3)
             .map(|index| (format!("G{}", index + 1), "1.0".to_string()))
             .collect();

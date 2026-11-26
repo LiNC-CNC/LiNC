@@ -348,6 +348,26 @@ pub fn raised_card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         .inner
 }
 
+/// A pinned one-row strip above a page's panes: the card's surface and border
+/// without the card's margins, so the row is as tall as the text it carries and
+/// the page below keeps the rest of its height.
+/// The run row's background: the panel tinted toward the success green, so the
+/// line reads as a live machine state rather than another card.
+pub const RUN_STRIP_BG: Color32 = Color32::from_rgb(0x0e, 0x17, 0x12);
+pub const RUN_STRIP_BORDER: Color32 = Color32::from_rgb(0x2b, 0x4a, 0x39);
+/// The unfilled part of the run's progress bar.
+pub const RUN_TRACK: Color32 = Color32::from_rgb(0x1b, 0x2a, 0x22);
+
+pub fn run_strip<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    Frame::new()
+        .fill(RUN_STRIP_BG)
+        .stroke(Stroke::new(1.0, RUN_STRIP_BORDER))
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(Margin::symmetric(12, 3))
+        .show(ui, add)
+        .inner
+}
+
 pub fn section_header(ui: &mut Ui, title: &str) {
     ui.label(
         RichText::new(title)

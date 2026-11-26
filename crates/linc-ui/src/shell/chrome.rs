@@ -410,7 +410,7 @@ impl LincApp {
         let mut extent: f64 = 0.0;
         for bounds in [
             self.machine_bounds(),
-            self.program.last_valid_preview.bounds,
+            self.program.loaded().last_valid_preview.bounds,
         ]
         .into_iter()
         .flatten()

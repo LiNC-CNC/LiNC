@@ -32,9 +32,14 @@ traps. This file states the conditions that decide whether a change is correct.
 
 ## Controller boundary
 
-- Saving a program must reopen it in the interpreter before the save is reported
-  done. The interpreter keeps the program it opened in its own state, so a
-  buffer written to disk alone leaves AUTO running the pre-edit text.
+- Saving the loaded program must reopen it in the interpreter before the save
+  is reported done. The interpreter keeps the program it opened in its own
+  state, so a buffer written to disk alone leaves AUTO running the pre-edit
+  text.
+- A write for a program the controller does not hold must not reopen the
+  interpreter, and must refuse any target that resolves onto the loaded
+  program's path. Reopening would replace what AUTO runs; writing the loaded
+  path would change the file under the running program.
 - Write work offsets in absolute machine units. A display unit carried into a
   write lands the offset off by the machine's scale factor.
 - Read tool, parameter, and status state back only after the interpreter is

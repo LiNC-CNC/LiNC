@@ -497,6 +497,12 @@ pub struct KeysConfig {
     /// Page-local to Program: jump to a line number.
     pub goto_line: String,
     pub program_run_from_line: String,
+    /// Page-local to Program: close the prepared program and give the editor
+    /// back to the loaded one. A dirty prepared buffer asks first.
+    pub prepared_close: String,
+    /// Page-local to Program: write the prepared buffer and open it as the
+    /// loaded program. The strip's handoff chip is the same press.
+    pub prepared_handoff: String,
     /// Page-local to Program: walk the syntax faults marked in the editor,
     /// wrapping at both ends. Two chords rather than a Shift pair: the panel's
     /// keyboard has no Shift key, and F8 is the OFFSETS page. The manual screens
@@ -573,6 +579,8 @@ impl KeysConfig {
             spindle_speed: "Ctrl+S".into(),
             goto_line: "Ctrl+G".into(),
             program_run_from_line: "Ctrl+R".into(),
+            prepared_close: "Ctrl+W".into(),
+            prepared_handoff: "Ctrl+N".into(),
             fault_next: "Ctrl+PageDown".into(),
             fault_prev: "Ctrl+PageUp".into(),
             files_delete: "Delete".into(),

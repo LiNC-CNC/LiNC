@@ -185,14 +185,15 @@ impl LincApp {
             },
             view: self.program.graph_view.label().into(),
             zoom: self.program.graph_zoom,
-            selected_line: (self.program.selected_line > 0).then_some(self.program.selected_line),
+            selected_line: (self.program.doc().selected_line > 0)
+                .then_some(self.program.doc().selected_line),
             current_line: {
                 let line = self.snapshot.program.executing_line();
                 (line > 0).then_some(line)
             },
             selected_axis: None,
             program_name: self.snapshot.program.display_name.clone(),
-            program_dirty: self.program.editor.dirty,
+            program_dirty: self.program.loaded().editor.dirty,
             panel_online: self.snapshot.panel.connected,
             fps: self.fps,
             toasts: self

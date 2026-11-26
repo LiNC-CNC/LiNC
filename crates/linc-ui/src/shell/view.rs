@@ -12,6 +12,14 @@ pub(super) const VIEW_PAN_STEP: f32 = 40.0;
 /// Zoom per key press, matching one wheel notch.
 pub(super) const VIEW_ZOOM_STEP: f32 = 1.25;
 
+/// Which document a preview rebuild is for: the one the editor shows, or the
+/// controller's. The two are the same document until a file is prepared.
+#[derive(Clone, Copy)]
+enum PreviewTarget {
+    Loaded,
+    Front,
+}
+
 /// Is this snapshot's trail still the one from before `Ctrl+L`?
 ///
 /// The backend applies the clear on its next conversion. Until then its
@@ -34,8 +42,23 @@ pub(super) fn cleared_trail_pending(
 }
 
 impl LincApp {
+    /// Rebuild the preview of the document in front, and the issue list that
+    /// goes with it.
     pub fn refresh_preview(&mut self) {
-        let text = self.program.editor.text();
+        self.refresh_preview_in(PreviewTarget::Front);
+    }
+
+    /// Rebuild the loaded document's preview, whichever document is in front.
+    ///
+    /// The interlock, the travel check and the run's estimate are questions
+    /// about the program the machine holds, so an external change to it rebuilds
+    /// this document and never the buffer being prepared.
+    pub(crate) fn refresh_loaded_preview(&mut self) {
+        self.refresh_preview_in(PreviewTarget::Loaded);
+    }
+
+    fn refresh_preview_in(&mut self, target: PreviewTarget) {
+        let text = self.preview_document(target).editor.text();
         // The frame is the controller's offset, program or not. A jog screen that
         // has never loaded a program still has to place the tool at its machine
         // position: with preview_offset left at None, live_trail_shift collapses
@@ -43,14 +66,26 @@ impl LincApp {
         // coordinate - machine home once the operator goes to WCS zero, and off
         // by the whole offset before that.
         let offset = self.preview_offset(&text);
-        self.program.preview_offset = offset.clone();
-        self.program.preview_offsets_seen = self.snapshot.offsets.revision;
-        self.program.preview_offsets_rows = offsets_signature(&self.snapshot.offsets.offsets);
+        let offsets_revision = self.snapshot.offsets.revision;
+        let offsets_rows = offsets_signature(&self.snapshot.offsets.offsets);
+        {
+            let doc = self.preview_document_mut(target);
+            doc.preview_offset = offset.clone();
+            doc.preview_offsets_seen = offsets_revision;
+            doc.preview_offsets_rows = offsets_rows;
+        }
+        // The controller's verdict and the travel violation are facts about the
+        // program the machine holds, so only that document's list carries them.
+        let loaded =
+            matches!(target, PreviewTarget::Loaded) || self.program.front == DocumentFront::Loaded;
         if text.is_empty() {
-            self.program.preview = Preview::empty();
-            self.program.last_valid_preview = Preview::empty();
-            self.program.issues.clear();
-            self.program.issue_index = 0;
+            {
+                let doc = self.preview_document_mut(target);
+                doc.preview = Preview::empty();
+                doc.last_valid_preview = Preview::empty();
+                doc.issues.clear();
+                doc.issue_index = 0;
+            }
             // An empty buffer is not a program to run: the interlock closes here
             // too, not only on the next frame that rebuilds a preview.
             self.sync_program_ok();
@@ -77,59 +112,112 @@ impl LincApp {
         // program start. Keep the program geometry; do not draw that connector.
         preview.trim_approach(self.tool_tip());
         let valid = preview.error.is_none();
-        if valid {
-            self.program.last_valid_preview = preview.clone();
+        {
+            let doc = self.preview_document_mut(target);
+            if valid {
+                doc.last_valid_preview = preview.clone();
+            }
+            doc.preview = preview;
+            doc.preview_generation = doc.preview_generation.wrapping_add(1);
         }
-        self.program.preview = preview;
-        self.program.preview_generation = self.program.preview_generation.wrapping_add(1);
-        self.sync_issues();
+        // The prepared card reports the file's whole-program time. Building that
+        // plan walks every segment, so it is done once per preview rebuild and
+        // cached with the generation it belongs to, not once per frame.
+        if matches!(target, PreviewTarget::Front) && self.program.front == DocumentFront::Prepared {
+            let plan = linc_core::cycletime::Plan::from_preview(
+                &self.program.doc().last_valid_preview,
+                &self.profile.machine_ini,
+            );
+            let total = (!plan.is_empty()).then(|| plan.parts_total());
+            let doc = self.program.doc_mut();
+            doc.cycle_plan = total.map(|total| (doc.preview_generation, total));
+        }
+        self.sync_issues_in(loaded);
         self.sync_program_ok();
+    }
+
+    fn preview_document(&self, target: PreviewTarget) -> &Document {
+        match target {
+            PreviewTarget::Loaded => self.program.loaded(),
+            PreviewTarget::Front => self.program.doc(),
+        }
+    }
+
+    fn preview_document_mut(&mut self, target: PreviewTarget) -> &mut Document {
+        match target {
+            PreviewTarget::Loaded => self.program.loaded_mut(),
+            PreviewTarget::Front => self.program.doc_mut(),
+        }
     }
 
     /// Take the fault list the preview just built, keeping the operator's place
     /// in it when that place still exists: an edit above the fault shifts its
     /// line but must not lose the marker the operator was working on.
     pub(super) fn sync_issues(&mut self) {
-        let previous = self.program.issues.get(self.program.issue_index).cloned();
-        self.program.issues = self.program.preview.issues.clone();
+        let loaded = self.program.front == DocumentFront::Loaded;
+        self.sync_issues_in(loaded);
+    }
+
+    /// `loaded` names the document the list belongs to. The controller's verdict
+    /// and the travel violation are injected only into the loaded document's
+    /// list; a prepared document's issues are its own preview's alone.
+    fn sync_issues_in(&mut self, loaded: bool) {
+        let previous = {
+            let doc = self.issues_document(loaded);
+            doc.issues.get(doc.issue_index).cloned()
+        };
+        let preview_issues = self.issues_document(loaded).preview.issues.clone();
         // A program the machine cannot reach is not a syntax fault, but it is
         // exactly what the interlock is for: the 3D view paints those moves red
         // and cycle start must refuse them. One issue, on the first offending
         // line, so the error keys walk it like any other fault.
-        self.program.travel_violation = self.outside_travel();
-        if let Some((line, label)) = self.program.travel_violation.clone() {
-            self.program.issues.push(linc_core::lint::LintIssue {
+        let travel_violation = if loaded {
+            self.program.travel_violation = self.outside_travel();
+            self.program.travel_violation.clone()
+        } else {
+            None
+        };
+        // The controller's own verdict is one more fault to walk when it names a
+        // line: the operator must be able to reach the block the machine refused,
+        // and it may be a block the block-level checks accept.
+        let controller_refusal = if loaded {
+            self.program.machine_check.as_ref().and_then(|check| {
+                if check.outcome != linc_core::verify::CheckOutcome::Refused {
+                    return None;
+                }
+                let line = check.marked_line().or_else(|| {
+                    check
+                        .message
+                        .as_deref()
+                        .and_then(linc_core::verify::line_from_message)
+                })?;
+                Some((line, check.message.clone()?))
+            })
+        } else {
+            None
+        };
+        let doc = self.issues_document_mut(loaded);
+        doc.issues = preview_issues;
+        if let Some((line, label)) = travel_violation {
+            doc.issues.push(linc_core::lint::LintIssue {
                 line,
                 span: None,
                 message: format!("outside the machine travel envelope ({label})"),
             });
-            self.program.issues.sort_by_key(|issue| issue.line);
+            doc.issues.sort_by_key(|issue| issue.line);
         }
-        // The controller's own verdict is one more fault to walk when it names a
-        // line: the operator must be able to reach the block the machine refused,
-        // and it may be a block the block-level checks accept.
-        if let Some(check) = &self.program.machine_check {
-            let line = check.marked_line().or_else(|| {
-                check
-                    .message
-                    .as_deref()
-                    .and_then(linc_core::verify::line_from_message)
-            });
-            if let (linc_core::verify::CheckOutcome::Refused, Some(line), Some(message)) =
-                (check.outcome, line, check.message.clone())
-            {
-                if !self.program.issues.iter().any(|issue| issue.line == line) {
-                    self.program.issues.push(linc_core::lint::LintIssue {
-                        line,
-                        span: None,
-                        message: format!("controller: {message}"),
-                    });
-                    self.program.issues.sort_by_key(|issue| issue.line);
-                }
+        if let Some((line, message)) = controller_refusal {
+            if !doc.issues.iter().any(|issue| issue.line == line) {
+                doc.issues.push(linc_core::lint::LintIssue {
+                    line,
+                    span: None,
+                    message: format!("controller: {message}"),
+                });
+                doc.issues.sort_by_key(|issue| issue.line);
             }
         }
-        if self.program.issues.is_empty() {
-            self.program.issue_index = 0;
+        if doc.issues.is_empty() {
+            doc.issue_index = 0;
             return;
         }
         // Same fault, same line: an edit elsewhere below it changes nothing.
@@ -137,19 +225,33 @@ impl LincApp {
         // is still looking at the fault he chose, not at whatever now occupies
         // its old line number. Otherwise the index only has to stay in range.
         let kept = previous.as_ref().and_then(|previous| {
-            self.program
-                .issues
+            doc.issues
                 .iter()
                 .position(|issue| issue.line == previous.line && issue.message == previous.message)
                 .or_else(|| {
-                    self.program
-                        .issues
+                    doc.issues
                         .iter()
                         .position(|issue| issue.message == previous.message)
                 })
         });
-        self.program.issue_index =
-            kept.unwrap_or(self.program.issue_index.min(self.program.issues.len() - 1));
+        let in_range = doc.issue_index.min(doc.issues.len() - 1);
+        doc.issue_index = kept.unwrap_or(in_range);
+    }
+
+    fn issues_document(&self, loaded: bool) -> &Document {
+        if loaded {
+            self.program.loaded()
+        } else {
+            self.program.doc()
+        }
+    }
+
+    fn issues_document_mut(&mut self, loaded: bool) -> &mut Document {
+        if loaded {
+            self.program.loaded_mut()
+        } else {
+            self.program.doc_mut()
+        }
     }
 
     /// The first move in the preview that leaves the machine's travel box, with
@@ -160,7 +262,8 @@ impl LincApp {
     /// start is the block that turns red, not a neighbour of it.
     fn outside_travel(&self) -> Option<(usize, String)> {
         let limits = self.machine_bounds()?;
-        for segment in &self.program.preview.segments {
+        let preview = &self.program.loaded().preview;
+        for segment in &preview.segments {
             // Straight moves are one segment; arcs are the chords the card draws.
             let chords: Vec<([f64; 3], [f64; 3])> = match &segment.arc {
                 Some(arc) => linc_view::arc_points(segment, arc)
@@ -190,9 +293,9 @@ impl LincApp {
     /// Whether the interpreter holds exactly the program on screen, with no fault
     /// in it: the condition the machine HAL needs to allow cycle start.
     pub(super) fn program_ready(&self) -> bool {
-        let loaded = self
-            .program
-            .loaded_path
+        let loaded_doc = self.program.loaded();
+        let loaded = loaded_doc
+            .path
             .as_deref()
             .zip(self.snapshot.program.path.as_deref())
             .is_some_and(|(shown, loaded)| shown == loaded);
@@ -206,7 +309,7 @@ impl LincApp {
                 linc_core::verify::CheckOutcome::Refused | linc_core::verify::CheckOutcome::Crashed
             )
         });
-        loaded && !self.program.editor.dirty && self.program.issues.is_empty() && controller_ok
+        loaded && !loaded_doc.editor.dirty && loaded_doc.issues.is_empty() && controller_ok
     }
 
     /// Why the interlock is shut, in one sentence the operator can act on.
@@ -215,21 +318,21 @@ impl LincApp {
     /// than that, and so does the top bar's indicator. The order is the order the
     /// checks are made: the first thing that is wrong is the one to fix first.
     pub(super) fn program_block_reason(&self) -> Option<String> {
-        let loaded = self
-            .program
-            .loaded_path
+        let loaded_doc = self.program.loaded();
+        let loaded = loaded_doc
+            .path
             .as_deref()
             .zip(self.snapshot.program.path.as_deref());
         match loaded {
             Some((shown, controller)) if shown == controller => {}
-            _ if self.program.loaded_path.is_none() && self.snapshot.program.path.is_none() => {
+            _ if loaded_doc.path.is_none() && self.snapshot.program.path.is_none() => {
                 return Some("no program is loaded — pick one in FILES".into());
             }
             _ => {
                 return Some("the controller holds a different file than the one on screen".into());
             }
         }
-        if self.program.editor.dirty {
+        if loaded_doc.editor.dirty {
             return Some("the buffer has unsaved changes — save it (Ctrl+S)".into());
         }
         if let Some(check) = self.program.machine_check.as_ref().filter(|check| {
@@ -243,7 +346,7 @@ impl LincApp {
                 check.message.as_deref().unwrap_or("no reason given")
             ));
         }
-        if let Some(issue) = self.program.issues.first() {
+        if let Some(issue) = loaded_doc.issues.first() {
             return Some(format!("line {}: {}", issue.line, issue.message));
         }
         None
@@ -267,17 +370,18 @@ impl LincApp {
     /// plain jump, this moves the caret as well: the text cursor feeds
     /// `selected_line` back every frame while the editor has focus.
     pub fn cycle_issue(&mut self, step: isize) {
-        let count = self.program.issues.len();
+        let doc = self.program.doc_mut();
+        let count = doc.issues.len();
         if count == 0 {
             return;
         }
-        let current = self.program.issue_index.min(count - 1) as isize;
+        let current = doc.issue_index.min(count - 1) as isize;
         let next = (current + step).rem_euclid(count as isize) as usize;
-        self.program.issue_index = next;
-        let line = self.program.issues[next].line.max(1);
-        self.program.selected_line = line;
-        self.program.cursor_line = Some(line);
-        self.program.code_scroll_to_line = Some(line);
+        doc.issue_index = next;
+        let line = doc.issues[next].line.max(1);
+        doc.selected_line = line;
+        doc.cursor_line = Some(line);
+        doc.code_scroll_to_line = Some(line);
         // The operator has taken the cursor; do not drag it back to the running
         // line until the next run starts.
         self.program.follow_current = false;
@@ -302,19 +406,19 @@ impl LincApp {
     pub fn tick_loops(&mut self) {
         let motion = self.snapshot.program.motion_line;
         let tip = self.tool_tip();
-        let generation = self.program.preview_generation;
         let crate::state::ProgramUi {
-            preview,
+            loaded,
             loop_progress,
             ..
         } = &mut self.program;
-        loop_progress.follow(preview, motion, tip, generation);
+        let generation = loaded.preview_generation;
+        loop_progress.follow(&loaded.preview, motion, tip, generation);
     }
 
     pub fn tick_preview(&mut self) {
-        if let Some(due) = self.program.preview_due {
+        if let Some(due) = self.program.doc().preview_due {
             if Instant::now() >= due {
-                self.program.preview_due = None;
+                self.program.doc_mut().preview_due = None;
                 self.view.preview_ticks += 1;
                 self.refresh_preview();
             }

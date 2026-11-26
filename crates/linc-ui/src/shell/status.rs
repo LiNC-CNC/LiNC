@@ -226,9 +226,9 @@ pub fn machine_bounds(profile: &Profile) -> Option<Bounds3> {
 /// running are both normal and stay quiet.
 pub(super) fn program_state_word(program: &ProgramState) -> (&'static str, Color32) {
     if program.paused {
-        ("PAUSED", theme::WARNING)
+        ("PAUSE", theme::WARNING)
     } else if program.running {
-        ("RUNNING", theme::SUCCESS)
+        ("RUN", theme::SUCCESS)
     } else {
         ("IDLE", theme::MUTED)
     }
@@ -500,7 +500,7 @@ impl LincApp {
         let program = &self.snapshot.program;
         if program.line_count > 0 {
             let line = program.executing_line().max(1);
-            let percent = (program.progress.clamp(0.0, 1.0) * 100.0).round() as i32;
+            let percent = (self.program.progress(program) * 100.0).round() as i32;
             // Before the first cycle start the bar shows where the program is
             // loaded to. Once the clock runs, the cycle time is the wider claim
             // and the exact line gives way to the percentage: the listing still
@@ -590,9 +590,9 @@ mod tests {
         let mut program = ProgramState::default();
         assert_eq!(program_state_word(&program).0, "IDLE");
         program.running = true;
-        assert_eq!(program_state_word(&program).0, "RUNNING");
+        assert_eq!(program_state_word(&program).0, "RUN");
         program.paused = true;
-        assert_eq!(program_state_word(&program).0, "PAUSED");
+        assert_eq!(program_state_word(&program).0, "PAUSE");
     }
 
     #[test]

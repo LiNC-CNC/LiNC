@@ -234,6 +234,13 @@ spindle_speed = "Ctrl+S"
 goto_line = "Ctrl+G"
 # Page-local to Program: start the loaded program at a line.
 program_run_from_line = "Ctrl+R"
+# Page-local to Program: close the prepared program and give the editor back to
+# the loaded one. A dirty prepared buffer asks first. Ctrl+W is a text chord
+# elsewhere; the page consumes it before any widget draws.
+prepared_close = "Ctrl+W"
+# Page-local to Program: write the prepared buffer and open it as the loaded
+# program. The strip's LOAD PREPARED chip is the same press.
+prepared_handoff = "Ctrl+N"
 # Page-local to Program: walk the syntax faults marked in the editor, wrapping at
 # both ends. Two chords, not a Shift pair: the panel's keyboard has no Shift key,
 # and F8 is the OFFSETS page. The manual screens bind the same two chords to the

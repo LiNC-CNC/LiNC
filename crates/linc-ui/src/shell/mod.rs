@@ -245,13 +245,16 @@ impl LincApp {
             snapshot: snapshot.clone(),
             graph_style,
             program: ProgramUi {
-                editor,
-                preview: preview.clone(),
-                last_valid_preview: preview,
-                program_revision_seen: snapshot.program.revision,
-                loaded_path: program_path,
-                selected_line: snapshot.program.current_line.max(1),
-                cursor_line: None,
+                loaded: Document {
+                    editor,
+                    preview: preview.clone(),
+                    last_valid_preview: preview,
+                    program_revision_seen: snapshot.program.revision,
+                    path: program_path,
+                    selected_line: snapshot.program.current_line.max(1),
+                    cursor_line: None,
+                    ..Default::default()
+                },
                 graph_view: if profile.variant == MachineVariant::Lathe {
                     linc_view::ViewMode::LatheXz
                 } else {

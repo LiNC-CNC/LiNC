@@ -135,6 +135,8 @@ impl LincApp {
         let mut quit = false;
         let mut request_files = false;
         let mut save = false;
+        let mut close_prepared = false;
+        let mut handoff_prepared = false;
         let mut cycle_view = false;
         let mut graph_fit = false;
         let mut graph_clear = false;
@@ -452,6 +454,19 @@ impl LincApp {
             {
                 save = true;
             }
+            // Page-local to Program like the save chord, and page-scoped for
+            // the same reason: Ctrl+N is a new tool row on TOOLS, and Ctrl+W
+            // is a text chord. Consumed here, before any widget draws, so a
+            // focused editor cannot take them.
+            if self.nav.page == Page::Program {
+                let k = &self.prefs.keymap;
+                if input.consume_key(k.prepared_close.modifiers, k.prepared_close.key) {
+                    close_prepared = true;
+                }
+                if input.consume_key(k.prepared_handoff.modifiers, k.prepared_handoff.key) {
+                    handoff_prepared = true;
+                }
+            }
             if self.nav.page == Page::Help
                 && input.consume_key(self.prefs.keymap.find.modifiers, self.prefs.keymap.find.key)
             {
@@ -672,36 +687,46 @@ impl LincApp {
         if save && self.nav.page == Page::Program {
             self.run_shortcut(ShortcutCommand::SaveProgram);
         }
+        if close_prepared && self.nav.page == Page::Program {
+            self.run_shortcut(ShortcutCommand::ClosePrepared);
+        }
+        if handoff_prepared && self.nav.page == Page::Program {
+            self.run_shortcut(ShortcutCommand::PreparedHandoff);
+        }
         if refresh && self.nav.page == Page::Files {
             self.run_shortcut(ShortcutCommand::RefreshFiles);
         }
         if self.nav.page == Page::Program {
-            let selected = self.program.selected_line;
+            let selected = self.program.doc().selected_line;
             if duplicate_line && self.editing_allowed() {
-                if let Some(line) = self.program.editor.duplicate_line(selected) {
-                    self.program.selected_line = line;
-                    self.program.code_scroll_to_line = Some(line);
+                if let Some(line) = self.program.doc_mut().editor.duplicate_line(selected) {
+                    let doc = self.program.doc_mut();
+                    doc.selected_line = line;
+                    doc.code_scroll_to_line = Some(line);
                     self.mark_editor_changed();
                 }
             }
             if delete_line && self.editing_allowed() {
-                if let Some(line) = self.program.editor.delete_line(selected) {
-                    self.program.selected_line = line;
-                    self.program.code_scroll_to_line = Some(line);
+                if let Some(line) = self.program.doc_mut().editor.delete_line(selected) {
+                    let doc = self.program.doc_mut();
+                    doc.selected_line = line;
+                    doc.code_scroll_to_line = Some(line);
                     self.mark_editor_changed();
                 }
             }
             if move_line_up && self.editing_allowed() {
-                if let Some(line) = self.program.editor.move_line_up(selected) {
-                    self.program.selected_line = line;
-                    self.program.code_scroll_to_line = Some(line);
+                if let Some(line) = self.program.doc_mut().editor.move_line_up(selected) {
+                    let doc = self.program.doc_mut();
+                    doc.selected_line = line;
+                    doc.code_scroll_to_line = Some(line);
                     self.mark_editor_changed();
                 }
             }
             if move_line_down && self.editing_allowed() {
-                if let Some(line) = self.program.editor.move_line_down(selected) {
-                    self.program.selected_line = line;
-                    self.program.code_scroll_to_line = Some(line);
+                if let Some(line) = self.program.doc_mut().editor.move_line_down(selected) {
+                    let doc = self.program.doc_mut();
+                    doc.selected_line = line;
+                    doc.code_scroll_to_line = Some(line);
                     self.mark_editor_changed();
                 }
             }
@@ -880,7 +905,7 @@ impl LincApp {
             ShortcutCommand::UndoEdit => {
                 if self.nav.page == Page::Program
                     && self.editing_allowed()
-                    && self.program.editor.undo()
+                    && self.program.doc_mut().editor.undo()
                 {
                     self.mark_editor_changed();
                 }
@@ -888,21 +913,28 @@ impl LincApp {
             ShortcutCommand::RedoEdit => {
                 if self.nav.page == Page::Program
                     && self.editing_allowed()
-                    && self.program.editor.redo()
+                    && self.program.doc_mut().editor.redo()
                 {
                     self.mark_editor_changed();
                 }
             }
             ShortcutCommand::UnloadProgram => self.unload_program(),
-            ShortcutCommand::SaveMdi => self.request_mdi_save(),
-            ShortcutCommand::ClearMdiInput => self.mdi.clear_input(),
-            ShortcutCommand::OpenBrowser => {
-                if self.snapshot.task.running {
-                    self.toast("cannot open files while running", theme::ERROR);
-                } else {
-                    self.request_files();
+            // The prepared document's two commands. A click on their hint rows
+            // reaches them from the sidebar, and the keyboard reaches them by
+            // the page-local chords above; both are the same press.
+            ShortcutCommand::ClosePrepared => {
+                if self.nav.page == Page::Program {
+                    self.request_close_prepared();
                 }
             }
+            ShortcutCommand::PreparedHandoff => {
+                if self.nav.page == Page::Program {
+                    self.request_handoff_prepared();
+                }
+            }
+            ShortcutCommand::SaveMdi => self.request_mdi_save(),
+            ShortcutCommand::ClearMdiInput => self.mdi.clear_input(),
+            ShortcutCommand::OpenBrowser => self.request_files(),
             ShortcutCommand::OpenMessages => self.overlay.messages_dialog = true,
             ShortcutCommand::RefreshFiles => {
                 if self.nav.page == Page::Files {
@@ -928,6 +960,7 @@ impl LincApp {
             | ShortcutCommand::FilesDelete
             | ShortcutCommand::FilesEject
             | ShortcutCommand::FilesToggleRecent
+            | ShortcutCommand::FilesPrepare
             | ShortcutCommand::ToolsSearch
             | ShortcutCommand::ToolsEdit
             | ShortcutCommand::ToolsLoad

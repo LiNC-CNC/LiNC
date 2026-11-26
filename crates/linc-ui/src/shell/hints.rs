@@ -184,10 +184,6 @@ impl LincApp {
                         },
                     ));
                 }
-                groups.push(ShortcutGroup {
-                    title: "VIEW",
-                    items: view_items,
-                });
                 let mut program_items: Vec<Shortcut> = Vec::new();
                 if self.editing_allowed() {
                     program_items.push(Shortcut::hint("Ctrl+↑/↓", "MOVE LINE"));
@@ -211,6 +207,23 @@ impl LincApp {
                     // releases the external-link interlock.
                     Shortcut::run("Ctrl+U", "UNLOAD", ShortcutCommand::UnloadProgram),
                 ]);
+                if self.program.prepared.is_some() {
+                    // The prepared document has its own close, and the handoff
+                    // is the strip's chip by another route. Neither is offered
+                    // without a prepared buffer to act on.
+                    program_items.extend([
+                        Shortcut::run(
+                            k.prepared_close.label(),
+                            "CLOSE PREP",
+                            ShortcutCommand::ClosePrepared,
+                        ),
+                        Shortcut::run(
+                            k.prepared_handoff.label(),
+                            "LOAD PREP",
+                            ShortcutCommand::PreparedHandoff,
+                        ),
+                    ]);
+                }
                 groups.push(ShortcutGroup {
                     title: "PROGRAM",
                     items: program_items,
@@ -226,6 +239,12 @@ impl LincApp {
                         Shortcut::hint(k.fault_prev.label(), "PREV"),
                         Shortcut::hint(k.fault_next.label(), "NEXT"),
                     ],
+                });
+                // The view commands are page furniture, not editing work: they
+                // sit after the program's own commands.
+                groups.push(ShortcutGroup {
+                    title: "VIEW",
+                    items: view_items,
                 });
             }
             Page::Machine => {
@@ -377,6 +396,23 @@ impl LincApp {
                     )
                 };
                 let recent_focus = !self.files.usb_focused && self.files.recent_shown;
+                // PREPARE reads a program into the editor: a USB row is copied
+                // into NC_FILES instead, and a folder is opened.
+                let prepare_available = !self.files.usb_focused
+                    && if self.files.recent_shown {
+                        self.prefs
+                            .preferences
+                            .recent_files
+                            .get(self.files.recent_selected)
+                            .is_some()
+                    } else {
+                        !self.files.nc_parent_selected
+                            && self
+                                .files
+                                .nc_entries
+                                .get(self.files.nc_selected)
+                                .is_some_and(|entry| !entry.is_dir)
+                    };
                 let enter = if recent_focus {
                     // A recent row is a file path: there is no folder to open
                     // and nothing to copy into.
@@ -388,17 +424,21 @@ impl LincApp {
                 } else {
                     "LOAD"
                 };
+                let mut browse_items = vec![
+                    Shortcut::hint("\u{2190}/\u{2192}", "PANE"),
+                    Shortcut::run(
+                        square.clone(),
+                        right_pane,
+                        ShortcutCommand::FilesToggleRecent,
+                    ),
+                    Shortcut::run("Enter", enter, ShortcutCommand::FilesActivate),
+                ];
+                if prepare_available {
+                    browse_items.push(Shortcut::run("P", "PREPARE", ShortcutCommand::FilesPrepare));
+                }
                 groups.push(ShortcutGroup {
                     title: "BROWSE",
-                    items: vec![
-                        Shortcut::hint("\u{2190}/\u{2192}", "PANE"),
-                        Shortcut::run(
-                            square.clone(),
-                            right_pane,
-                            ShortcutCommand::FilesToggleRecent,
-                        ),
-                        Shortcut::run("Enter", enter, ShortcutCommand::FilesActivate),
-                    ],
+                    items: browse_items,
                 });
                 // Copy, duplicate, rename and delete act on the focused pane's
                 // directory row; the recent list is not one, so only NEW is

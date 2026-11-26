@@ -121,7 +121,7 @@ impl LincApp {
             });
             return;
         }
-        let content = self.program.editor.text();
+        let content = self.program.loaded().editor.text();
         let accepted = self.try_send(MachineCommand::SaveProgram {
             path: path.clone(),
             expected_revision: self.snapshot.program.revision,
@@ -133,10 +133,10 @@ impl LincApp {
             return;
         }
         // The buffer now has a home: the next Ctrl+S writes it without asking.
-        self.program.editor.path = Some(path);
+        self.program.loaded_mut().editor.path = Some(path);
         // Both backends write the file before answering, so an accepted save is
         // a save: the dirty marker must not survive it.
-        self.program.editor.mark_saved();
+        self.program.loaded_mut().editor.mark_saved();
         self.overlay.modal = None;
         // Save-as writes a file the interpreter has never been shown, so the
         // interlock must not open on the strength of the old verdict.
@@ -153,6 +153,17 @@ impl LincApp {
         if let Some(Modal::SaveProgramAs(dialog)) = &mut self.overlay.modal {
             update(dialog);
         }
+    }
+
+    /// The prepared document's file name, for the question that discards it.
+    fn prepared_program_name(&self) -> String {
+        self.program
+            .prepared
+            .as_ref()
+            .and_then(|prepared| prepared.path.as_ref().or(prepared.editor.path.as_ref()))
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "The prepared program".to_string())
     }
 
     /// The manual tool-change prompt, on every page.
@@ -287,16 +298,26 @@ impl LincApp {
                 ui.set_max_width(520.0);
                 match &modal {
                 Modal::ConfirmDiscard(pending) => {
-                    ui.label(RichText::new("UNSAVED CHANGES").size(theme::font_size(18.0)).strong().color(theme::FG));
-                    ui.add_space(6.0);
-                    ui.label("The program buffer has unsaved changes. Leaving, loading another file or quitting will discard them.");
+                    let prepared_question = !pending.discards_loaded_buffer();
+                    if prepared_question {
+                        ui.label(RichText::new("UNSAVED CHANGES IN THE PREPARED PROGRAM").size(theme::font_size(18.0)).strong().color(theme::FG));
+                        ui.add_space(6.0);
+                        ui.label(format!(
+                            "{} has unsaved changes. Closing or replacing it will discard them.",
+                            self.prepared_program_name()
+                        ));
+                    } else {
+                        ui.label(RichText::new("UNSAVED CHANGES").size(theme::font_size(18.0)).strong().color(theme::FG));
+                        ui.add_space(6.0);
+                        ui.label("The program buffer has unsaved changes. Leaving, loading another file or quitting will discard them.");
+                    }
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
                         if theme::danger_button(ui, "DISCARD", true).clicked() {
                             action = Some(pending.clone());
                         }
-                        let saving = self.editing_allowed();
-                        if theme::accent_button(ui, "SAVE", saving).clicked() {
+                        let saving = self.loaded_editing_allowed();
+                        if !prepared_question && theme::accent_button(ui, "SAVE", saving).clicked() {
                             save_and_continue = true;
                         }
                         let cancel = theme::action_button(ui, "CANCEL", true);
@@ -310,10 +331,10 @@ impl LincApp {
                     // A greyed SAVE with no reason reads as a broken dialog. A
                     // save needs the panel in EDIT, PROTECT off, an idle
                     // interpreter and a live panel; say which one is missing.
-                    if !self.editing_allowed() {
+                    if !prepared_question && !self.loaded_editing_allowed() {
                         ui.add_space(6.0);
                         ui.label(
-                            RichText::new(self.save_block_reason())
+                            RichText::new(self.loaded_save_block_reason())
                                 .size(theme::font_size(10.0))
                                 .color(theme::MUTED),
                         );
@@ -455,7 +476,7 @@ impl LincApp {
                     let (limit, what) = if *mdi {
                         (self.mdi.len().max(1), "Buffer line")
                     } else {
-                        (self.program.editor.line_count().max(1), "Line number")
+                        (self.program.doc().editor.line_count().max(1), "Line number")
                     };
                     ui.label(format!("{what} (1-{limit}):"));
                     ui.add_space(6.0);
@@ -777,10 +798,9 @@ impl LincApp {
         }
         if let Some(action) = action {
             self.overlay.modal = None;
-            // DISCARD is the operator agreeing to lose the edits, so drop them
-            // before the pending action runs. Carrying a dirty buffer through
-            // the navigation brought the same prompt back on the next visit.
-            self.discard_editor_changes();
+            if action.discards_loaded_buffer() {
+                self.discard_editor_changes();
+            }
             self.perform_pending(action);
         }
         if save_and_continue {
@@ -788,11 +808,11 @@ impl LincApp {
                 Modal::ConfirmDiscard(pending) => Some(pending.clone()),
                 _ => None,
             };
-            let before = self.program.editor.dirty;
-            self.save_program();
-            if !self.program.editor.dirty || !before {
-                self.overlay.modal = None;
-                if let Some(pending) = pending {
+            if let Some(pending) = pending.filter(PendingAction::discards_loaded_buffer) {
+                let before = self.program.loaded().editor.dirty;
+                self.save_loaded_program();
+                if !self.program.loaded().editor.dirty || !before {
+                    self.overlay.modal = None;
                     self.perform_pending(pending);
                 }
             }

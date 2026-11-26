@@ -303,7 +303,7 @@ const PREVIEW_HEIGHT: f32 = 260.0;
 /// that has not been written yet) is drawn in the current-line colour, so the
 /// operator can see where the offset sits in the machine envelope.
 fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
-    let preview = app.program.last_valid_preview.clone();
+    let preview = app.program.loaded().last_valid_preview.clone();
     let highlight = selected_highlight(app);
     let mut zoom = app.offsets.preview_zoom;
     let mut pan = app.offsets.preview_pan;
@@ -328,6 +328,7 @@ fn offset_preview(app: &mut LincApp, ui: &mut Ui, height: f32) {
         false,
         true,
         false,
+        true,
         true,
         true,
         highlight,

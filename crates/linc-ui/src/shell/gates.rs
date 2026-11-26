@@ -153,21 +153,79 @@ impl LincApp {
         )
     }
 
+    /// Whether the program the editor shows may be typed into.
+    ///
+    /// The loaded program keeps the controller's own rule: the panel in EDIT,
+    /// an idle interpreter, PROTECT off and a live link. The prepared program
+    /// is not the controller's: it is a file being written for the next cycle,
+    /// so it needs the link and PROTECT off and nothing about the mode or the
+    /// run. Undo, redo, the page's line commands and the editor's own
+    /// interactivity all read this one answer.
     pub fn editing_allowed(&self) -> bool {
+        if self.front_is_prepared() {
+            self.prepared_editing_allowed()
+        } else {
+            self.loaded_editing_allowed()
+        }
+    }
+
+    /// Whether the editor is showing the prepared document. `front` is only
+    /// `Prepared` while there is one, but the pair is checked here so a stale
+    /// front cannot unlock an empty buffer.
+    pub(super) fn front_is_prepared(&self) -> bool {
+        self.program.front == DocumentFront::Prepared && self.program.prepared.is_some()
+    }
+
+    /// The loaded program's editing gate: the controller's own rule.
+    pub(super) fn loaded_editing_allowed(&self) -> bool {
         self.snapshot.program_editing_allowed() && !self.panel_offline()
     }
 
-    pub fn program_dirty(&self) -> bool {
-        self.program.editor.dirty
+    /// The prepared program's editing gate: a live panel link with PROTECT off.
+    /// The panel mode and the interpreter's state are the loaded program's
+    /// business; the link itself is the same test the backend makes, so a stale
+    /// or dropped link locks typing rather than letting it run into a refusal.
+    fn prepared_editing_allowed(&self) -> bool {
+        !self.panel_offline() && !self.program_protected()
     }
 
-    /// Why `SAVE` is disabled, in the order the operator can act on.
+    /// The prepared document's write gate: everything typing needs, plus the
+    /// panel mode the backend also checks. Typing does not need a known mode;
+    /// a write does, because the backend refuses one.
+    pub(super) fn prepared_write_allowed(&self) -> bool {
+        self.prepared_editing_allowed() && self.snapshot.panel.mode.is_valid()
+    }
+
+    pub fn program_dirty(&self) -> bool {
+        self.program.loaded().editor.dirty
+    }
+
+    /// Why `SAVE` is disabled for the document in front.
+    pub(super) fn save_block_reason(&self) -> String {
+        if self.front_is_prepared() {
+            return self.prepared_save_block_reason();
+        }
+        self.loaded_save_block_reason()
+    }
+
+    fn prepared_save_block_reason(&self) -> String {
+        if self.program_protected() {
+            return "SAVE needs PROGRAM PROTECT off.".into();
+        }
+        if !self.snapshot.panel.mode.is_valid() {
+            return "SAVE needs a known panel mode.".into();
+        }
+        "SAVE needs the panel link; it is offline.".into()
+    }
+
+    /// Why `SAVE` is disabled for the loaded program, in the order the operator
+    /// can act on.
     ///
     /// The panel mode comes first because the controller refuses a save outside
     /// EDIT outright; the rest are the checks the backend repeats on every
     /// write. A dialog that greys the button without naming the reason looks
     /// like a bug rather than a gate.
-    pub(super) fn save_block_reason(&self) -> String {
+    pub(super) fn loaded_save_block_reason(&self) -> String {
         let mode = self.snapshot.panel.mode.mode();
         if mode != Some(PanelMode::Edit) {
             let name = mode.map(PanelMode::label).unwrap_or("UNKNOWN");
@@ -250,7 +308,20 @@ impl LincApp {
             );
             return;
         }
-        if self.program.editor.dirty {
+        // The prepared buffer is asked about first so that a dirty loaded
+        // buffer cannot hide it: a single question about the loaded program
+        // would end the session and drop the prepared text without one.
+        if self
+            .program
+            .prepared
+            .as_ref()
+            .is_some_and(|prepared| prepared.editor.dirty)
+        {
+            // Quitting drops the prepared buffer with the session, so it is
+            // asked about like the loaded one. The question names the prepared
+            // file; SAVE cannot apply to it from here.
+            self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::QuitPrepared));
+        } else if self.program.loaded().editor.dirty {
             self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::Quit));
         } else if self.profile.config.safety.confirm_quit {
             self.overlay.modal = Some(Modal::ConfirmQuit);
@@ -265,6 +336,19 @@ impl LincApp {
             PendingAction::OpenFiles => self.open_files(),
             PendingAction::LoadProgram(path) => self.load_program(path),
             PendingAction::Quit => self.chrome.quit_requested = true,
+            // DISCARD on the prepared question drops that buffer, then the quit
+            // ladder runs again: a dirty loaded buffer still gets its own
+            // question before the session ends.
+            PendingAction::QuitPrepared => {
+                if self.program.prepared.take().is_some() {
+                    self.program.front = DocumentFront::Loaded;
+                }
+                if self.program.loaded().editor.dirty {
+                    self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::Quit));
+                } else {
+                    self.chrome.quit_requested = true;
+                }
+            }
             PendingAction::NewFile => {
                 self.program = ProgramUi {
                     graph_view: if self.profile.variant == MachineVariant::Lathe {
@@ -277,6 +361,9 @@ impl LincApp {
                 self.nav.page = Page::Program;
             }
             PendingAction::OpenRecent(path) => self.load_program(path),
+            PendingAction::PrepareProgram(path) => self.open_prepared(path),
+            PendingAction::ClosePrepared => self.close_prepared(),
+            PendingAction::HandoffPrepared => self.handoff_prepared(),
         }
     }
 

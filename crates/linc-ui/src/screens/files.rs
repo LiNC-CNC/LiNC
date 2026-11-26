@@ -163,6 +163,7 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     let mut toggle_recent = false;
     let mut enter = false;
     let mut delete_pressed = false;
+    let mut prepare = false;
     ui.input_mut(|input| {
         if input.consume_key(egui::Modifiers::NONE, egui::Key::C) {
             copy_side = true;
@@ -178,6 +179,9 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::E) {
             eject_media = true;
+        }
+        if input.consume_key(egui::Modifiers::NONE, egui::Key::P) {
+            prepare = true;
         }
         if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
             if on_parent {
@@ -283,6 +287,9 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     if clicked == Some(ShortcutCommand::FilesToggleRecent) {
         toggle_recent = true;
     }
+    if clicked == Some(ShortcutCommand::FilesPrepare) {
+        prepare = true;
+    }
     if usb {
         app.files.usb_selected = selected;
         app.files.usb_parent_selected = on_parent;
@@ -317,6 +324,15 @@ fn handle_keys(app: &mut LincApp, ui: &mut Ui) {
     }
     if let Some(path) = load {
         load_selected(app, &path);
+    }
+    // PREPARE is the right pane's second verb: a USB row is copied, not read
+    // into the editor, and the recent list is a list of files like the folder.
+    if prepare && !usb && !on_parent {
+        if let Some(entry) = entries.get(selected) {
+            if !entry.is_dir {
+                prepare_selected(app, &entry.path);
+            }
+        }
     }
     if copy_enter && copy_to_nc_allowed(app) {
         copy_usb_to_nc(app);
@@ -1200,6 +1216,43 @@ fn file_list(app: &mut LincApp, ui: &mut Ui, pane: Pane) {
 }
 
 fn load_selected(app: &mut LincApp, path: &Path) {
+    if let Some(reason) = program_file_refusal(app, path) {
+        app.toast(reason, theme::ERROR);
+        return;
+    }
+    if app.snapshot.task.interp != InterpState::Idle || app.snapshot.task.running {
+        app.toast("cannot load while running", theme::ERROR);
+        return;
+    }
+    app.request_load(path.to_path_buf());
+}
+
+/// `P`: read the selected program into the prepared document. The file is not
+/// handed to the controller, so the machine state does not gate it. The
+/// controller's own program is refused: there is nothing to prepare about the
+/// text the machine is already holding.
+fn prepare_selected(app: &mut LincApp, path: &Path) {
+    if let Some(reason) = program_file_refusal(app, path) {
+        app.toast(reason, theme::ERROR);
+        return;
+    }
+    let loaded = app
+        .program
+        .loaded()
+        .path
+        .clone()
+        .or_else(|| app.snapshot.program.path.clone());
+    if loaded.is_some_and(|loaded| same_file(&loaded, path)) {
+        app.toast("the loaded program cannot be prepared", theme::WARNING);
+        return;
+    }
+    app.request_prepare_program(path.to_path_buf());
+}
+
+/// Why Files will not act on `path` as a program: the extension must be one
+/// the profile loads and the file must sit under NC_FILES. LOAD and PREPARE
+/// share these two rules; only LOAD then asks the machine whether it is idle.
+fn program_file_refusal(app: &LincApp, path: &Path) -> Option<String> {
     let extension = path
         .extension()
         .map(|extension| format!(".{}", extension.to_string_lossy().to_ascii_lowercase()))
@@ -1212,21 +1265,21 @@ fn load_selected(app: &mut LincApp, path: &Path) {
         .iter()
         .any(|allowed| allowed.eq_ignore_ascii_case(&extension))
     {
-        app.toast(
-            format!("not a configured G-code extension: {extension}"),
-            theme::ERROR,
-        );
-        return;
+        return Some(format!("not a configured G-code extension: {extension}"));
     }
     if !path.starts_with(app.profile.nc_files_root()) {
-        app.toast("file is outside NC_FILES", theme::ERROR);
-        return;
+        return Some("file is outside NC_FILES".into());
     }
-    if app.snapshot.task.interp != InterpState::Idle || app.snapshot.task.running {
-        app.toast("cannot load while running", theme::ERROR);
-        return;
+    None
+}
+
+/// Whether two paths name the same file. The controller canonicalises what it
+/// opens, while the listing shows the path it walked.
+pub(crate) fn same_file(first: &Path, second: &Path) -> bool {
+    match (std::fs::canonicalize(first), std::fs::canonicalize(second)) {
+        (Ok(first), Ok(second)) => first == second,
+        _ => first == second,
     }
-    app.request_load(path.to_path_buf());
 }
 
 fn copy_nc_to_usb(app: &mut LincApp) {

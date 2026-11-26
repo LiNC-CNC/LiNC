@@ -56,68 +56,79 @@ impl LincApp {
     /// and LEFT fields read this, and so does nothing else: a wrong estimate
     /// costs the operator a glance, never a move.
     pub(super) fn tick_cycle_time(&mut self) {
+        let crate::state::ProgramUi {
+            loaded,
+            cycle,
+            loop_progress,
+            ..
+        } = &mut self.program;
         let input = CycleInput {
             program: &self.snapshot.program,
-            preview: &self.program.preview,
+            preview: &loaded.preview,
             // The toolpath has already followed the cut through the preview's
             // unrolled order, so the estimate reads the same cursor the loop
             // readout does rather than looking for the cut a second time.
-            cursor: self.program.loop_progress.cursor,
+            cursor: loop_progress.cursor,
             tip: self.snapshot.tool_tip,
             rates: &self.profile.machine_ini,
             // Read fresh every frame: the feed and rapid override the planner is
             // applying are part of how long the moves left will take, and the
             // operator can turn them at any moment.
             overrides: linc_core::cycletime::Overrides::from_feed_state(&self.snapshot.feed),
-            generation: self.program.preview_generation,
+            generation: loaded.preview_generation,
             // An edited buffer is a preview of text the controller is not
             // running, and its timing is not the program's.
-            preview_matches: !self.program.editor.dirty,
+            preview_matches: !loaded.editor.dirty,
         };
-        self.program.cycle.tick(&input, &mut self.cycle_store);
+        cycle.tick(&input, &mut self.cycle_store);
     }
 
     pub(super) fn sync_program(&mut self) {
         let revision = self.snapshot.program.revision;
-        if revision != self.program.program_revision_seen {
+        if revision != self.program.loaded().program_revision_seen {
             let new_text = self.snapshot.program.content.clone();
             let new_path = self.snapshot.program.path.clone();
             let text_changed = new_text
                 .as_ref()
-                .map(|text| text.as_str() != self.program.editor.text())
+                .map(|text| text.as_str() != self.program.loaded().editor.text())
                 .unwrap_or(false);
-            if self.program.editor.dirty && text_changed && new_path == self.program.loaded_path {
+            if self.program.loaded().editor.dirty
+                && text_changed
+                && new_path == self.program.loaded().path
+            {
                 self.program.external_change = true;
             } else if let Some(text) = new_text {
-                let same_as_editor = text.as_str() == self.program.editor.text();
+                let same_as_editor = text.as_str() == self.program.loaded().editor.text();
+                let loaded = self.program.loaded_mut();
                 if same_as_editor {
-                    self.program.editor.mark_saved();
+                    loaded.editor.mark_saved();
                 } else {
-                    self.program
+                    loaded
                         .editor
                         .set_loaded(new_path.clone().unwrap_or_default(), text.to_string());
                 }
-                self.program.loaded_path = new_path;
-                self.program.program_revision_seen = revision;
+                loaded.path = new_path;
+                loaded.program_revision_seen = revision;
                 self.program.external_change = false;
-                self.refresh_preview();
-                self.program.selected_line = self.snapshot.program.current_line.max(1);
+                self.refresh_loaded_preview();
+                self.program.loaded_mut().selected_line = self.snapshot.program.current_line.max(1);
             } else {
                 // The controller has no program any more: it was unloaded (or
                 // closed from another HMI). Clear LiNC's own copy, or the editor
                 // and the 3D view keep showing a program the machine cannot run -
                 // text that is still editable and saveable over nothing. The
-                // unsaved-buffer case is left alone: with no `loaded_path` there
-                // is no file to have been unloaded.
-                if self.program.loaded_path.is_some() {
-                    self.program.editor = Default::default();
-                    self.program.loaded_path = None;
-                    self.program.selected_line = 1;
+                // unsaved-buffer case is left alone: with no `path` there is no
+                // file to have been unloaded.
+                if self.program.loaded().path.is_some() {
+                    let loaded = self.program.loaded_mut();
+                    loaded.editor = Default::default();
+                    loaded.path = None;
+                    loaded.selected_line = 1;
                     self.program.external_change = false;
                     self.program.follow_current = false;
-                    self.refresh_preview();
+                    self.refresh_loaded_preview();
                 }
-                self.program.program_revision_seen = revision;
+                self.program.loaded_mut().program_revision_seen = revision;
             }
         }
         // Only while a program is actually running: otherwise a stale
@@ -130,10 +141,11 @@ impl LincApp {
         if self.program.follow_current
             && self.snapshot.task.running
             && executed > 0
-            && executed != self.program.selected_line
+            && executed != self.program.loaded().selected_line
         {
-            self.program.selected_line = executed;
-            self.program.code_scroll_to_line = Some(self.program.selected_line);
+            let loaded = self.program.loaded_mut();
+            loaded.selected_line = executed;
+            loaded.code_scroll_to_line = Some(executed);
         }
         // Re-arm the follow only when a run starts. Doing it on every poll
         // overrode a line the operator had just picked with Ctrl+G or the
@@ -175,8 +187,9 @@ impl LincApp {
             return;
         }
         self.program.completed_at = Some(program.current_line);
-        self.program.selected_line = 1;
-        self.program.code_scroll_to_line = Some(1);
+        let loaded = self.program.loaded_mut();
+        loaded.selected_line = 1;
+        loaded.code_scroll_to_line = Some(1);
         self.program.follow_current = true;
     }
 

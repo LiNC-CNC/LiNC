@@ -1439,14 +1439,7 @@ impl MachineBackend for SimBackend {
                     return Err(MachineError::RevisionConflict);
                 }
                 let canonical = canonical_write_under(self.profile.nc_files_root(), &path)?;
-                let parent = canonical.parent().ok_or(MachineError::UnsafePath)?;
-                let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-                use std::io::Write as _;
-                temporary.write_all(content.as_bytes())?;
-                temporary.as_file().sync_all()?;
-                temporary
-                    .persist(&canonical)
-                    .map_err(|error| MachineError::Io(error.error.to_string()))?;
+                crate::command::write_program_file(&canonical, &content)?;
                 let name = canonical
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
@@ -1457,6 +1450,25 @@ impl MachineBackend for SimBackend {
                     content,
                     self.snapshot.program.current_line,
                 );
+                Ok(())
+            }
+            MachineCommand::SaveProgramFile { path, content } => {
+                crate::command::check_program_file_write(&self.snapshot)?;
+                crate::command::check_write_target_not_loaded(&self.snapshot, &path)?;
+                let canonical = canonical_write_under(self.profile.nc_files_root(), &path)?;
+                crate::command::write_program_file(&canonical, &content)?;
+                Ok(())
+            }
+            MachineCommand::LoadPreparedProgram { path, content } => {
+                crate::command::check_prepared_handoff(&self.snapshot)?;
+                crate::command::check_write_target_not_loaded(&self.snapshot, &path)?;
+                let canonical = canonical_write_under(self.profile.nc_files_root(), &path)?;
+                crate::command::write_program_file(&canonical, &content)?;
+                let name = canonical
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| canonical.display().to_string());
+                self.apply_program(Some(canonical), name, content, 1);
                 Ok(())
             }
             MachineCommand::SetWorkOffset {
@@ -2707,6 +2719,319 @@ enabled = true
             .unwrap_err();
         assert_eq!(error, MachineError::UnsafePath);
         assert!(!outside.exists(), "the link target is not written");
+    }
+
+    /// A prepared file is written while the machine runs: the file changes on
+    /// disk and the controller's program keeps its path, text and revision.
+    #[test]
+    fn save_program_file_writes_without_touching_the_loaded_program() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        let root = backend.profile().nc_files_root().to_path_buf();
+        let loaded = root.join("RUNNING.NC");
+        std::fs::write(&loaded, "G0 X0\n").unwrap();
+        let prepared = root.join("NEXT.NC");
+        std::fs::write(&prepared, "G0 X1\n").unwrap();
+        backend
+            .send(MachineCommand::LoadProgram {
+                path: loaded.clone(),
+                expected_revision: None,
+            })
+            .unwrap();
+        backend.snapshot.program.running = true;
+        backend.snapshot.task.running = true;
+        backend.snapshot.task.interp = InterpState::Reading;
+        let before = backend.snapshot().program;
+
+        backend
+            .send(MachineCommand::SaveProgramFile {
+                path: prepared.clone(),
+                content: "G0 X2\n".into(),
+            })
+            .expect("the prepared file is writable while the machine runs");
+
+        assert_eq!(std::fs::read_to_string(&prepared).unwrap(), "G0 X2\n");
+        let after = backend.snapshot().program;
+        assert_eq!(after.path, before.path);
+        assert_eq!(after.content, before.content);
+        assert_eq!(after.revision, before.revision);
+        assert_eq!(after.running, before.running);
+    }
+
+    #[test]
+    fn save_program_file_needs_protect_off_and_a_live_panel() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        let root = backend.profile().nc_files_root().to_path_buf();
+        let path = root.join("NEXT.NC");
+        std::fs::write(&path, "G0 X1\n").unwrap();
+
+        backend.snapshot.panel.program_protect = true;
+        let error = backend
+            .send(MachineCommand::SaveProgramFile {
+                path: path.clone(),
+                content: "G0 X2\n".into(),
+            })
+            .unwrap_err();
+        assert_eq!(error, MachineError::ProgramProtected);
+
+        backend.snapshot.panel.program_protect = false;
+        backend.snapshot.panel.connected = false;
+        let error = backend
+            .send(MachineCommand::SaveProgramFile {
+                path: path.clone(),
+                content: "G0 X2\n".into(),
+            })
+            .unwrap_err();
+        assert_eq!(error, MachineError::PanelOffline);
+
+        backend.snapshot.panel.connected = true;
+        backend.snapshot.panel.program_protect_known = false;
+        let error = backend
+            .send(MachineCommand::SaveProgramFile {
+                path: path.clone(),
+                content: "G0 X2\n".into(),
+            })
+            .unwrap_err();
+        assert_eq!(
+            error,
+            MachineError::ProgramProtected,
+            "an unknown protect state counts as on"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "G0 X1\n",
+            "a refused write leaves the file alone"
+        );
+    }
+
+    /// The file the controller holds is never the file a prepared save writes,
+    /// however the target is spelled.
+    #[test]
+    fn save_program_file_refuses_the_loaded_program_path() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        let root = backend.profile().nc_files_root().to_path_buf();
+        let loaded = root.join("PART.NC");
+        std::fs::write(&loaded, "G0 X0\n").unwrap();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        backend
+            .send(MachineCommand::LoadProgram {
+                path: loaded.clone(),
+                expected_revision: None,
+            })
+            .unwrap();
+
+        let dotted = root.join("sub").join("..").join("PART.NC");
+        let error = backend
+            .send(MachineCommand::SaveProgramFile {
+                path: dotted,
+                content: "G0 X9\n".into(),
+            })
+            .unwrap_err();
+        assert_eq!(error, MachineError::LoadedProgramPath);
+
+        let link = root.join("alias.ngc");
+        std::os::unix::fs::symlink(&loaded, &link).unwrap();
+        let error = backend
+            .send(MachineCommand::SaveProgramFile {
+                path: link,
+                content: "G0 X9\n".into(),
+            })
+            .unwrap_err();
+        assert_eq!(error, MachineError::LoadedProgramPath);
+        assert_eq!(
+            std::fs::read_to_string(&loaded).unwrap(),
+            "G0 X0\n",
+            "the loaded program's file is untouched"
+        );
+    }
+
+    #[test]
+    fn save_program_file_stays_inside_nc_files() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        let root = backend.profile().nc_files_root().to_path_buf();
+        let outside = root.parent().unwrap().join("escape.ngc");
+        let error = backend
+            .send(MachineCommand::SaveProgramFile {
+                path: outside.clone(),
+                content: "G0 X0\n".into(),
+            })
+            .unwrap_err();
+        assert_eq!(error, MachineError::UnsafePath);
+        assert!(!outside.exists());
+    }
+
+    /// The handoff writes the buffer's text and opens that file: the prepared
+    /// program becomes the loaded one.
+    #[test]
+    fn handoff_writes_the_prepared_text_and_opens_it() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        let root = backend.profile().nc_files_root().to_path_buf();
+        let loaded = root.join("RUNNING.NC");
+        std::fs::write(&loaded, "G0 X0\n").unwrap();
+        backend
+            .send(MachineCommand::LoadProgram {
+                path: loaded.clone(),
+                expected_revision: None,
+            })
+            .unwrap();
+        let revision = backend.snapshot().program.revision;
+
+        let prepared = root.join("NEXT.NC");
+        std::fs::write(&prepared, "G0 X1\n").unwrap();
+        backend
+            .send(MachineCommand::LoadPreparedProgram {
+                path: prepared.clone(),
+                content: "G0 X2\nG1 X3\n".into(),
+            })
+            .expect("the handoff is accepted at idle");
+
+        assert_eq!(
+            std::fs::read_to_string(&prepared).unwrap(),
+            "G0 X2\nG1 X3\n"
+        );
+        let snapshot = backend.snapshot();
+        assert_eq!(snapshot.program.path.as_deref(), Some(prepared.as_path()));
+        assert_eq!(snapshot.program.display_name, "NEXT.NC");
+        assert_eq!(
+            snapshot.program.content.as_ref().map(|text| text.as_str()),
+            Some("G0 X2\nG1 X3\n")
+        );
+        assert_ne!(
+            snapshot.program.revision, revision,
+            "the opened program is a new revision"
+        );
+        assert_eq!(snapshot.program.current_line, 1);
+        assert!(!snapshot.program.running);
+    }
+
+    /// The buffer's text wins over whatever the file held: the version the
+    /// operator checked is the version that opens.
+    #[test]
+    fn handoff_writes_the_text_it_was_handed_even_after_the_file_changed() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        let root = backend.profile().nc_files_root().to_path_buf();
+        let prepared = root.join("NEXT.NC");
+        std::fs::write(&prepared, "G0 X1\n").unwrap();
+        // Something else rewrote the file after the buffer was read.
+        std::fs::write(&prepared, "G0 X9\n").unwrap();
+
+        backend
+            .send(MachineCommand::LoadPreparedProgram {
+                path: prepared.clone(),
+                content: "G0 X1\n".into(),
+            })
+            .expect("a clean buffer still writes its own text");
+
+        assert_eq!(std::fs::read_to_string(&prepared).unwrap(), "G0 X1\n");
+        assert_eq!(
+            backend
+                .snapshot()
+                .program
+                .content
+                .as_ref()
+                .map(|text| text.as_str()),
+            Some("G0 X1\n")
+        );
+    }
+
+    /// The handoff never reaches an interpreter that is mid-program.
+    #[test]
+    fn handoff_is_refused_while_the_program_runs() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        let root = backend.profile().nc_files_root().to_path_buf();
+        let loaded = root.join("RUNNING.NC");
+        std::fs::write(&loaded, "G0 X0\n").unwrap();
+        backend
+            .send(MachineCommand::LoadProgram {
+                path: loaded.clone(),
+                expected_revision: None,
+            })
+            .unwrap();
+        backend.snapshot.program.running = true;
+        backend.snapshot.task.running = true;
+        backend.snapshot.task.interp = InterpState::Reading;
+
+        let prepared = root.join("NEXT.NC");
+        std::fs::write(&prepared, "G0 X1\n").unwrap();
+        let error = backend
+            .send(MachineCommand::LoadPreparedProgram {
+                path: prepared.clone(),
+                content: "G0 X2\n".into(),
+            })
+            .unwrap_err();
+
+        assert_eq!(error, MachineError::ProgramRunning);
+        assert_eq!(
+            std::fs::read_to_string(&prepared).unwrap(),
+            "G0 X1\n",
+            "a refused handoff writes nothing"
+        );
+        assert_eq!(
+            backend.snapshot().program.path.as_deref(),
+            Some(loaded.as_path())
+        );
+    }
+
+    /// An interpreter that is not idle is not a handoff target even when no
+    /// run flag is set.
+    #[test]
+    fn handoff_needs_an_idle_interpreter() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        let root = backend.profile().nc_files_root().to_path_buf();
+        let prepared = root.join("NEXT.NC");
+        std::fs::write(&prepared, "G0 X1\n").unwrap();
+        backend.snapshot.task.interp = InterpState::Reading;
+
+        let error = backend
+            .send(MachineCommand::LoadPreparedProgram {
+                path: prepared.clone(),
+                content: "G0 X2\n".into(),
+            })
+            .unwrap_err();
+
+        assert_eq!(error, MachineError::NotIdle);
+        assert_eq!(std::fs::read_to_string(&prepared).unwrap(), "G0 X1\n");
+    }
+
+    /// PROTECT refuses the handoff with its own reason, and the file and the
+    /// loaded program are left alone.
+    #[test]
+    fn handoff_under_protect_reports_the_protect_reason() {
+        let (_dir, profile) = profile_fixture();
+        let mut backend = SimBackend::new(profile, PanelMode::Auto);
+        let root = backend.profile().nc_files_root().to_path_buf();
+        let loaded = root.join("RUNNING.NC");
+        std::fs::write(&loaded, "G0 X0\n").unwrap();
+        backend
+            .send(MachineCommand::LoadProgram {
+                path: loaded.clone(),
+                expected_revision: None,
+            })
+            .unwrap();
+        let prepared = root.join("NEXT.NC");
+        std::fs::write(&prepared, "G0 X1\n").unwrap();
+        backend.snapshot.panel.program_protect = true;
+
+        let error = backend
+            .send(MachineCommand::LoadPreparedProgram {
+                path: prepared.clone(),
+                content: "G0 X2\n".into(),
+            })
+            .unwrap_err();
+
+        assert_eq!(error, MachineError::ProgramProtected);
+        assert_eq!(std::fs::read_to_string(&prepared).unwrap(), "G0 X1\n");
+        assert_eq!(
+            backend.snapshot().program.path.as_deref(),
+            Some(loaded.as_path())
+        );
     }
 
     fn run_probe(

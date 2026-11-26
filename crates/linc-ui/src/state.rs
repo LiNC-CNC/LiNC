@@ -155,6 +155,11 @@ pub enum ShortcutCommand {
     UndoEdit,
     RedoEdit,
     UnloadProgram,
+    /// Close the prepared document and give the editor back to the loaded
+    /// program.
+    ClosePrepared,
+    /// Write the prepared buffer and open it as the loaded program.
+    PreparedHandoff,
     SaveMdi,
     GoToLineMdi,
     ClearMdiInput,
@@ -180,6 +185,9 @@ pub enum ShortcutCommand {
     FilesDelete,
     FilesEject,
     FilesToggleRecent,
+    /// `P` on Files: read the selected program into the prepared document
+    /// without handing it to the controller.
+    FilesPrepare,
     ToolsSearch,
     ToolsEdit,
     ToolsLoad,
@@ -356,6 +364,32 @@ pub enum PendingAction {
     Quit,
     NewFile,
     OpenRecent(PathBuf),
+    /// Read `path` into the prepared document, replacing the one already
+    /// there.
+    PrepareProgram(PathBuf),
+    /// Close the prepared document and give the editor back to the loaded
+    /// program.
+    ClosePrepared,
+    /// Write the prepared buffer and open it as the loaded program, replacing
+    /// the loaded buffer's unsaved changes.
+    HandoffPrepared,
+    /// End the session, after a question about the prepared buffer rather than
+    /// the loaded one.
+    QuitPrepared,
+}
+
+impl PendingAction {
+    /// Whether the unsaved-changes dialog's answers act on the controller's
+    /// loaded buffer. A question the prepared document raises - replacing it,
+    /// closing it, or quitting with it open - decides that buffer alone:
+    /// DISCARD must not throw away loaded work nobody was asked about. A
+    /// handoff asks about the loaded buffer because the handoff replaces it.
+    pub(crate) fn discards_loaded_buffer(&self) -> bool {
+        !matches!(
+            self,
+            Self::PrepareProgram(_) | Self::ClosePrepared | Self::QuitPrepared
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1575,22 +1609,97 @@ impl CycleClock {
     }
 }
 
-pub struct ProgramUi {
+/// One program buffer and the state that follows it: the text, the preview
+/// parsed from that text, the faults the preview found, and the operator's place
+/// in it.
+///
+/// The Program page holds at most two: the controller's loaded program and one
+/// prepared program. Everything that belongs to a single program lives here, so
+/// the page's camera, layout and run bookkeeping stay in [`ProgramUi`].
+pub struct Document {
     pub editor: Editor,
-    pub view: ProgramView,
     pub preview: Preview,
     pub last_valid_preview: Preview,
     pub preview_due: Option<Instant>,
     pub editor_revision_seen: u64,
+    /// `snapshot.program.revision` this buffer was last synchronised with. Only
+    /// the loaded document ever compares it.
     pub program_revision_seen: u64,
-    pub loaded_path: Option<PathBuf>,
-    pub search_needle: String,
-    pub search_matches: Vec<usize>,
-    pub search_index: usize,
+    /// The file this document was opened from.
+    pub path: Option<PathBuf>,
     pub selected_line: usize,
     /// Line whose caret should be placed in the editor on the next frame. A jump
     /// can only move the highlight; the text cursor lives in `egui`'s edit state.
     pub cursor_line: Option<usize>,
+    pub code_scroll_to_line: Option<usize>,
+    /// Work offset the preview was parsed with, so corner labels can show work
+    /// coordinates without guessing the active system.
+    pub preview_offset: Option<linc_core::model::AxisMap<f64>>,
+    /// `snapshot.offsets.revision` the preview was drawn against, so a touch-off
+    /// or DRO entry rebuilds it.
+    pub preview_offsets_seen: u64,
+    /// The offset rows the preview was parsed against. The controller changes
+    /// them without an HMI write (startup publication, a program's own `G10`),
+    /// and a stale frame shifts the tool marker by the whole offset.
+    pub preview_offsets_rows: Vec<f64>,
+    /// Bumped whenever the preview is rebuilt, so loop counters for the old
+    /// program cannot be read against the new one's loops.
+    pub preview_generation: u64,
+    /// The prepared file's whole-program time for the generation it was built
+    /// from. Rebuilding the plan walks every segment, so it is cached here and
+    /// read per frame instead of rebuilt per frame.
+    pub cycle_plan: Option<(u64, linc_core::cycletime::MoveSeconds)>,
+    /// Every block-level fault in the buffer, in file order: the list the error
+    /// keys walk and the editor marks in red. Rebuilt with the preview, so it is
+    /// the same text the graph was drawn from.
+    pub issues: Vec<linc_core::lint::LintIssue>,
+    /// Which of [`Document::issues`] the operator is on. Kept across rebuilds so
+    /// typing above the fault does not throw the selection away.
+    pub issue_index: usize,
+}
+
+impl Default for Document {
+    fn default() -> Self {
+        Self {
+            editor: Editor::new(),
+            preview: Preview::empty(),
+            last_valid_preview: Preview::empty(),
+            preview_due: None,
+            editor_revision_seen: 0,
+            program_revision_seen: 0,
+            path: None,
+            selected_line: 1,
+            cursor_line: None,
+            code_scroll_to_line: None,
+            preview_offset: None,
+            preview_offsets_seen: 0,
+            preview_offsets_rows: Vec::new(),
+            preview_generation: 0,
+            cycle_plan: None,
+            issues: Vec::new(),
+            issue_index: 0,
+        }
+    }
+}
+
+/// Which document the Program page's editor is showing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DocumentFront {
+    Loaded,
+    Prepared,
+}
+
+pub struct ProgramUi {
+    /// The program the controller holds.
+    pub loaded: Document,
+    /// The program being prepared for the next cycle, when there is one.
+    pub prepared: Option<Document>,
+    /// Which of the two the editor shows.
+    pub front: DocumentFront,
+    pub view: ProgramView,
+    pub search_needle: String,
+    pub search_matches: Vec<usize>,
+    pub search_index: usize,
     pub graph_zoom: f32,
     pub graph_pan: egui::Vec2,
     /// Orbit of the 3D toolpath: yaw about the vertical, pitch above the plane.
@@ -1600,23 +1709,12 @@ pub struct ProgramUi {
     pub fit_requested: bool,
     /// Keep the toolpath framed on the program until the operator pans/zooms.
     pub graph_auto_fit: bool,
-    /// Work offset the preview was parsed with, so corner labels can show work
-    /// coordinates without guessing the active system.
-    pub preview_offset: Option<linc_core::model::AxisMap<f64>>,
     pub follow_current: bool,
     /// Top row the program listing was drawn at. Kept so an idle listing can
     /// scroll one line at a time when the highlighted line leaves the window,
     /// instead of re-centring on every move.
     pub listing_first: std::cell::Cell<isize>,
     pub focus_editor: bool,
-    pub code_scroll_to_line: Option<usize>,
-    /// `snapshot.offsets.revision` the preview was drawn against, so a touch-off
-    /// or DRO entry rebuilds it.
-    pub preview_offsets_seen: u64,
-    /// The offset rows the preview was parsed against. The controller changes
-    /// them without an HMI write (startup publication, a program's own `G10`),
-    /// and a stale frame shifts the tool marker by the whole offset.
-    pub preview_offsets_rows: Vec<f64>,
     pub external_change: bool,
     /// Rising-edge detector, so follow-current is re-armed when a program
     /// starts but not again on every poll after the operator selects a line.
@@ -1628,28 +1726,76 @@ pub struct ProgramUi {
     pub completed_at: Option<usize>,
     /// A program load is in flight; navigation waits for the backend verdict.
     pub pending_load: bool,
+    /// The handoff is in flight: the backend has the press, and another one
+    /// would be a second open of the same file.
+    pub pending_handoff: bool,
+    /// Whether the prepared buffer held unsaved changes when the handoff was
+    /// accepted. An error result puts the marker back.
+    pub handoff_was_dirty: bool,
+    /// The file and text the handoff was sent with. The result is only applied
+    /// to a prepared document that is still the one handed off.
+    pub handoff_sent: Option<(PathBuf, String)>,
+    /// A prepared save is in flight: the backend has the text, and a second
+    /// press would write the same file twice.
+    pub pending_prepared_save: bool,
+    /// Whether the prepared buffer held unsaved changes when its save was
+    /// accepted. An error result puts the marker back.
+    pub prepared_save_was_dirty: bool,
+    /// The text the prepared save was sent with. The saved baseline moves only
+    /// when the buffer still holds it.
+    pub prepared_save_sent: Option<String>,
     /// How the run has moved through the program's loops.
     pub loop_progress: LoopProgress,
-    /// Every block-level fault in the buffer, in file order: the list the error
-    /// keys walk and the editor marks in red. Rebuilt with the preview, so it is
-    /// the same text the graph was drawn from.
-    pub issues: Vec<linc_core::lint::LintIssue>,
     /// The first move the machine cannot reach, with its line and the limit it
     /// crosses, spelled like the limit banner (`X+`). `None` when every move of
     /// the preview lies inside the travel box — the case the 3D view shows red
     /// and the interlock has to refuse.
     pub travel_violation: Option<(usize, String)>,
-    /// Which of [ProgramUi::issues] the operator is on. Kept across rebuilds so
-    /// typing above the fault does not throw the selection away.
-    pub issue_index: usize,
-    /// What the controller's own interpreter last said about this buffer. The
-    /// load gate fills it; the name panel shows it as the machine's verdict.
+    /// What the controller's own interpreter last said about the loaded buffer.
+    /// The load gate fills it; the name panel shows it as the machine's verdict.
     pub machine_check: Option<linc_core::verify::MachineCheck>,
     /// Elapsed cycle time and the estimated time to program end.
     pub cycle: CycleClock,
-    /// Bumped whenever the preview is rebuilt, so loop counters for the old
-    /// program cannot be read against the new one's loops.
-    pub preview_generation: u64,
+}
+
+impl ProgramUi {
+    /// The run's progress for display. A program that reached its last command
+    /// reads 100 %, even when the controller stopped one short of the last
+    /// (often blank) line and reports 94 %.
+    pub fn progress(&self, program: &linc_core::model::ProgramState) -> f32 {
+        if self.completed_at.is_some() {
+            1.0
+        } else {
+            program.progress.clamp(0.0, 1.0)
+        }
+    }
+
+    /// The program the editor shows: the prepared one when it is in front, else
+    /// the loaded one.
+    pub fn doc(&self) -> &Document {
+        match self.front {
+            DocumentFront::Prepared => self.prepared.as_ref().unwrap_or(&self.loaded),
+            DocumentFront::Loaded => &self.loaded,
+        }
+    }
+
+    pub fn doc_mut(&mut self) -> &mut Document {
+        match self.front {
+            DocumentFront::Prepared => self.prepared.as_mut().unwrap_or(&mut self.loaded),
+            DocumentFront::Loaded => &mut self.loaded,
+        }
+    }
+
+    /// The controller's loaded program. The program interlock, the snapshot
+    /// sync and the questions about unsaved changes belong to this document,
+    /// whichever one is in front.
+    pub fn loaded(&self) -> &Document {
+        &self.loaded
+    }
+
+    pub fn loaded_mut(&mut self) -> &mut Document {
+        &mut self.loaded
+    }
 }
 
 impl Default for ProgramUi {
@@ -1658,23 +1804,22 @@ impl Default for ProgramUi {
             program_was_running: false,
             completed_at: None,
             pending_load: false,
+            pending_handoff: false,
+            handoff_was_dirty: false,
+            handoff_sent: None,
+            pending_prepared_save: false,
+            prepared_save_was_dirty: false,
+            prepared_save_sent: None,
             loop_progress: LoopProgress::default(),
             cycle: CycleClock::default(),
-            preview_generation: 0,
-            editor: Editor::new(),
+            loaded: Document::default(),
+            prepared: None,
+            front: DocumentFront::Loaded,
             view: ProgramView::Split,
-            preview: Preview::empty(),
-            last_valid_preview: Preview::empty(),
             travel_violation: None,
-            preview_due: None,
-            editor_revision_seen: 0,
-            program_revision_seen: 0,
-            loaded_path: None,
             search_needle: String::new(),
             search_matches: Vec::new(),
             search_index: 0,
-            selected_line: 1,
-            cursor_line: None,
             graph_zoom: 1.0,
             graph_pan: egui::Vec2::ZERO,
             graph_yaw: linc_view::DEFAULT_YAW,
@@ -1682,15 +1827,9 @@ impl Default for ProgramUi {
             graph_view: ViewMode::Iso3d,
             fit_requested: true,
             graph_auto_fit: true,
-            preview_offset: None,
             follow_current: true,
             listing_first: std::cell::Cell::new(1),
             focus_editor: false,
-            code_scroll_to_line: None,
-            preview_offsets_seen: 0,
-            preview_offsets_rows: Vec::new(),
-            issues: Vec::new(),
-            issue_index: 0,
             machine_check: None,
             external_change: false,
         }
@@ -2984,6 +3123,12 @@ pub struct Keymap {
     pub goto_line: Binding,
     /// Page-local to Program: start the loaded program at the current line.
     pub program_run_from_line: Binding,
+    /// Page-local to Program: close the prepared document, asking first when
+    /// it holds unsaved changes.
+    pub prepared_close: Binding,
+    /// Page-local to Program: write the prepared buffer and open it as the
+    /// loaded program. The strip's handoff chip is the same command.
+    pub prepared_handoff: Binding,
     /// Page-local to Program: walk the syntax faults, wrapping at both ends.
     /// Ctrl+PageDown forward, Ctrl+PageUp back; the manual screens keep the same
     /// two chords for the spindle speed.
@@ -3160,6 +3305,16 @@ impl Keymap {
             program_run_from_line: binding(
                 &keys.program_run_from_line,
                 Binding::new(Key::R, ctrl),
+                &mut rejected,
+            ),
+            prepared_close: binding(
+                &keys.prepared_close,
+                Binding::new(Key::W, ctrl),
+                &mut rejected,
+            ),
+            prepared_handoff: binding(
+                &keys.prepared_handoff,
+                Binding::new(Key::N, ctrl),
                 &mut rejected,
             ),
             files_delete: binding(
@@ -3750,6 +3905,25 @@ mod page_key_tests {
         assert!(keymap.diagnostics.modifiers.ctrl);
         assert_eq!(keymap.help.key, egui::Key::H);
         assert!(keymap.help.modifiers.ctrl);
+    }
+
+    /// The prepared document's two chords ship in base.toml and parse into the
+    /// keymap; the tools page's Ctrl+N row is a different page's binding.
+    #[test]
+    fn the_prepared_keys_ship_in_base_toml() {
+        let keymap = Keymap::from_config(&linc_core::config::KeysConfig::spec_default());
+        assert!(keymap.rejected.is_empty(), "{:?}", keymap.rejected);
+        assert_eq!(keymap.prepared_close.label(), "Ctrl+W");
+        assert_eq!(keymap.prepared_handoff.label(), "Ctrl+N");
+        assert_eq!(keymap.prepared_close.key, egui::Key::W);
+        assert_eq!(keymap.prepared_handoff.key, egui::Key::N);
+        let base = include_str!("../../../configs/base.toml");
+        for line in [
+            "prepared_close = \"Ctrl+W\"",
+            "prepared_handoff = \"Ctrl+N\"",
+        ] {
+            assert!(base.contains(line), "configs/base.toml must carry {line}");
+        }
     }
 }
 

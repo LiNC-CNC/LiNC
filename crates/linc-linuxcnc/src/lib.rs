@@ -1555,17 +1555,36 @@ impl NmlBackend {
                 }
                 let canonical = contained_nc_write_target(self.profile.nc_files_root(), &path)
                     .ok_or(MachineError::UnsafePath)?;
-                let parent = canonical.parent().ok_or(MachineError::UnsafePath)?;
-                let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-                use std::io::Write;
-                temp.write_all(content.as_bytes())?;
-                temp.as_file().sync_all()?;
-                temp.persist(&canonical)
-                    .map_err(|error| MachineError::Io(error.error.to_string()))?;
+                linc_core::command::write_program_file(&canonical, &content)?;
                 // The interpreter keeps the program it opened: the write
                 // changed the file on disk, not what CYCLE START runs. Open
                 // the file just written so the save is the program AUTO
                 // starts, the way the simulator's save replaces its program.
+                self.open_program(canonical)?;
+                Ok(())
+            }
+            MachineCommand::SaveProgramFile { path, content } => {
+                let snapshot = self.refresh();
+                linc_core::command::check_program_file_write(&snapshot)?;
+                linc_core::command::check_write_target_not_loaded(&snapshot, &path)?;
+                let canonical = contained_nc_write_target(self.profile.nc_files_root(), &path)
+                    .ok_or(MachineError::UnsafePath)?;
+                linc_core::command::write_program_file(&canonical, &content)?;
+                // No `open_program`: the controller keeps the program it
+                // opened, so this write cannot disturb what AUTO runs.
+                Ok(())
+            }
+            MachineCommand::LoadPreparedProgram { path, content } => {
+                let snapshot = self.refresh();
+                linc_core::command::check_prepared_handoff(&snapshot)?;
+                linc_core::command::check_write_target_not_loaded(&snapshot, &path)?;
+                let canonical = contained_nc_write_target(self.profile.nc_files_root(), &path)
+                    .ok_or(MachineError::UnsafePath)?;
+                linc_core::command::write_program_file(&canonical, &content)?;
+                // The write changed the file on disk; the interpreter still
+                // holds the old program. Open the text just written through
+                // the load sequence, so the live offsets are captured before
+                // the reset and CYCLE START runs what the operator checked.
                 self.open_program(canonical)?;
                 Ok(())
             }

@@ -44,14 +44,14 @@ impl LincApp {
     /// the arrows and page keys in a read-only view, where there is no text
     /// cursor to move.
     pub fn step_selected_line(&mut self, step: isize) {
-        let count = self.program.editor.line_count();
+        let doc = self.program.doc_mut();
+        let count = doc.editor.line_count();
         if count == 0 {
             return;
         }
-        let selected =
-            (self.program.selected_line as isize + step).clamp(1, count as isize) as usize;
-        self.program.selected_line = selected;
-        self.program.code_scroll_to_line = Some(selected);
+        let selected = (doc.selected_line as isize + step).clamp(1, count as isize) as usize;
+        doc.selected_line = selected;
+        doc.code_scroll_to_line = Some(selected);
         // Choosing a line is the operator taking over; the tool must not drag
         // the selection straight back on the next frame.
         self.program.follow_current = false;
@@ -60,11 +60,12 @@ impl LincApp {
     /// Select a line in the G-code view: highlight it, scroll to it and, when
     /// the program is editable, put the text cursor there as well.
     pub fn jump_to_line(&mut self, line: usize) {
-        let count = self.program.editor.line_count().max(1);
+        let doc = self.program.doc_mut();
+        let count = doc.editor.line_count().max(1);
         let line = line.clamp(1, count);
-        self.program.selected_line = line;
-        self.program.code_scroll_to_line = Some(line);
-        self.program.cursor_line = Some(line);
+        doc.selected_line = line;
+        doc.code_scroll_to_line = Some(line);
+        doc.cursor_line = Some(line);
         self.program.follow_current = false;
         if self.editing_allowed() {
             self.program.focus_editor = true;
@@ -86,6 +87,7 @@ impl LincApp {
     pub(super) fn run_from_line_choice(&self) -> (u32, String) {
         let line = self
             .program
+            .loaded()
             .selected_line
             .clamp(1, self.snapshot.program.line_count.max(1));
         let block = self
@@ -101,14 +103,171 @@ impl LincApp {
     }
 
     pub fn request_load(&mut self, path: PathBuf) {
-        if self.program.editor.dirty {
+        // LOAD of the file being prepared is the handoff: the buffer's text is
+        // the version that opens, and the prepared document is consumed by it
+        // instead of leaving two documents on the same file.
+        if self.is_prepared_path(&path) {
+            self.request_handoff_prepared();
+            return;
+        }
+        if self.program.loaded().editor.dirty {
             self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::LoadProgram(path)));
         } else {
             self.load_program(path);
         }
     }
 
+    /// Whether `path` is the file the prepared document was read from.
+    fn is_prepared_path(&self, path: &Path) -> bool {
+        self.program
+            .prepared
+            .as_ref()
+            .and_then(|prepared| prepared.path.as_deref())
+            .is_some_and(|prepared| crate::screens::files::same_file(prepared, path))
+    }
+
+    /// Read `path` into the prepared document, replacing the one already there
+    /// only after the unsaved-changes question.
+    pub fn request_prepare_program(&mut self, path: PathBuf) {
+        if self.program.pending_handoff || self.program.pending_prepared_save {
+            self.toast(
+                "a write is in flight; try again when it lands",
+                theme::WARNING,
+            );
+            return;
+        }
+        if self
+            .program
+            .prepared
+            .as_ref()
+            .is_some_and(|prepared| prepared.editor.dirty)
+        {
+            self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::PrepareProgram(path)));
+        } else {
+            self.open_prepared(path);
+        }
+    }
+
+    /// Read `path` into the prepared document. This is not a load: the file is
+    /// read here and the controller is never asked to open it, so the action
+    /// works in every machine state. A read that fails reports why and leaves
+    /// the prepared document as it was.
+    pub fn open_prepared(&mut self, path: PathBuf) {
+        // The same rules LOAD applies, so any caller of this public entry point
+        // gets them: a configured G-code extension, a file under NC_FILES, and
+        // never the program the controller holds.
+        let extension = path
+            .extension()
+            .map(|extension| format!(".{}", extension.to_string_lossy().to_ascii_lowercase()))
+            .unwrap_or_default();
+        if !self
+            .profile
+            .config
+            .files
+            .load_extensions
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(&extension))
+        {
+            self.toast(
+                format!("not a configured G-code extension: {extension}"),
+                theme::ERROR,
+            );
+            return;
+        }
+        if !path.starts_with(self.profile.nc_files_root()) {
+            self.toast("file is outside NC_FILES", theme::ERROR);
+            return;
+        }
+        if self
+            .program
+            .loaded()
+            .path
+            .as_deref()
+            .is_some_and(|loaded| crate::screens::files::same_file(loaded, &path))
+        {
+            self.toast("the loaded program cannot be prepared", theme::WARNING);
+            return;
+        }
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) => {
+                let name = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string());
+                self.toast(format!("cannot prepare {name}: {error}"), theme::ERROR);
+                return;
+            }
+        };
+        let mut prepared = Document::default();
+        prepared.editor.set_loaded(path.clone(), text);
+        prepared.path = Some(path);
+        // A prepared file starts at its top. Without this the shared editor id
+        // would carry the previous document's cursor, and the focused editor
+        // would feed that line back as the prepared document's place.
+        prepared.cursor_line = Some(1);
+        self.program.prepared = Some(prepared);
+        self.program.front = DocumentFront::Prepared;
+        self.refit_after_document_change();
+        self.refresh_preview();
+        self.set_page(Page::Program);
+        // The operator prepared this file to edit it: the next keystroke
+        // belongs to the editor, not to the page's navigation.
+        if self.editing_allowed() {
+            self.program.focus_editor = true;
+        }
+    }
+
+    /// Close the prepared document, asking first when it has unsaved changes.
+    pub fn request_close_prepared(&mut self) {
+        if self.program.prepared.is_none() {
+            return;
+        }
+        if self.program.pending_handoff || self.program.pending_prepared_save {
+            self.toast(
+                "a write is in flight; try again when it lands",
+                theme::WARNING,
+            );
+            return;
+        }
+        if self
+            .program
+            .prepared
+            .as_ref()
+            .is_some_and(|prepared| prepared.editor.dirty)
+        {
+            self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::ClosePrepared));
+        } else {
+            self.close_prepared();
+        }
+    }
+
+    /// Give the editor back to the loaded program. The prepared buffer is
+    /// dropped here, which only a confirmed discard or a clean buffer reaches.
+    pub fn close_prepared(&mut self) {
+        if self.program.prepared.take().is_none() {
+            return;
+        }
+        self.program.front = DocumentFront::Loaded;
+        self.refit_after_document_change();
+        // The loaded document's preview stayed current while the prepared file
+        // was in front, so re-parsing it here would only reset the run's
+        // remaining-time cursor.
+    }
+
+    /// Frame the graph on the document that has just come to the front: a new
+    /// program's bounds are not the old one's.
+    fn refit_after_document_change(&mut self) {
+        self.program.graph_zoom = 1.0;
+        self.program.graph_pan = Vec2::ZERO;
+        self.program.fit_requested = true;
+    }
+
     pub fn load_program(&mut self, path: PathBuf) {
+        if self.is_prepared_path(&path) {
+            self.handoff_prepared();
+            return;
+        }
         // The load gate and the cycle-start gate ask the same question from two
         // ends: a file the check refuses never reaches the interpreter, and
         // `cycle_start_refusal` refuses the press on the interlock it leaves
@@ -241,16 +400,17 @@ impl LincApp {
     /// interpreter does not have it.
     fn refuse_load(&mut self, path: PathBuf, reason: String) {
         let text = std::fs::read_to_string(&path).unwrap_or_default();
-        self.program.editor.set_loaded(path.clone(), text);
-        self.program.loaded_path = Some(path);
+        let loaded = self.program.loaded_mut();
+        loaded.editor.set_loaded(path.clone(), text);
+        loaded.path = Some(path);
         self.program.pending_load = false;
-        self.refresh_preview();
-        self.sync_issues();
-        self.program.issue_index = 0;
-        if let Some(line) = self.program.issues.first().map(|issue| issue.line) {
-            self.program.selected_line = line;
-            self.program.cursor_line = Some(line);
-            self.program.code_scroll_to_line = Some(line);
+        self.refresh_loaded_preview();
+        self.program.loaded_mut().issue_index = 0;
+        if let Some(line) = self.program.loaded().issues.first().map(|issue| issue.line) {
+            let loaded = self.program.loaded_mut();
+            loaded.selected_line = line;
+            loaded.cursor_line = Some(line);
+            loaded.code_scroll_to_line = Some(line);
         }
         self.set_page(Page::Program);
         self.toast_for(reason, theme::ERROR, 12);
@@ -266,6 +426,12 @@ impl LincApp {
             self.prefs.preferences.remember_file(&text, 12);
             self.prefs.dirty = true;
         }
+        self.finish_program_commit();
+    }
+
+    /// The editor-side half of a program change, shared by a load and a
+    /// handoff: back to Program, fitted and at the first line.
+    fn finish_program_commit(&mut self) {
         // Reset the view only when the machine is idle; the navigation itself
         // must always happen, or a load confirmed during a busy interpreter
         // leaves the operator in Files looking at the file they just loaded.
@@ -284,15 +450,153 @@ impl LincApp {
         // A new program starts at its first line: the old selection is a line
         // of a file that is no longer loaded, and leaving it highlighted made
         // the graph and the gutter point at the wrong block.
-        self.program.selected_line = 1;
-        self.program.code_scroll_to_line = Some(1);
+        self.program.loaded_mut().selected_line = 1;
+        self.program.loaded_mut().code_scroll_to_line = Some(1);
         self.program.completed_at = None;
         self.set_page(Page::Program);
         // The interpreter holds the file and the buffer is clean: the interlock
         // may open, and saying so here keeps it from waiting for the next edit.
         self.program.machine_check = None;
-        self.sync_issues();
-        self.sync_program_ok();
+        self.refresh_loaded_preview();
+    }
+
+    /// Hand the prepared document to the controller, asking first when the
+    /// loaded document still holds unsaved changes.
+    pub fn request_handoff_prepared(&mut self) {
+        if self.program.prepared.is_none() {
+            return;
+        }
+        if self.program.loaded().editor.dirty {
+            self.overlay.modal = Some(Modal::ConfirmDiscard(PendingAction::HandoffPrepared));
+        } else {
+            self.handoff_prepared();
+        }
+    }
+
+    /// Send the handoff, if one is not already in flight.
+    ///
+    /// The backend writes the prepared buffer's text and then opens that file.
+    /// The press is recorded as pending until the result arrives; the prepared
+    /// buffer's dirty marker goes with the acceptance and comes back if the
+    /// result is an error.
+    pub fn handoff_prepared(&mut self) {
+        if self.program.pending_handoff {
+            return;
+        }
+        if self.program.pending_prepared_save {
+            self.toast("the prepared save is still in flight", theme::WARNING);
+            return;
+        }
+        let Some(prepared) = self.program.prepared.as_ref() else {
+            return;
+        };
+        let Some(path) = prepared.path.clone() else {
+            return;
+        };
+        let content = prepared.editor.text();
+        let was_dirty = prepared.editor.dirty;
+        self.program.pending_handoff = true;
+        self.program.handoff_was_dirty = was_dirty;
+        self.program.handoff_sent = Some((path.clone(), content.clone()));
+        let command = MachineCommand::LoadPreparedProgram {
+            path: path.clone(),
+            content: content.clone(),
+        };
+        if self.try_send(command) {
+            if self.program.pending_handoff {
+                if self.handoff_landed(&path, &content) {
+                    // A synchronous backend has already opened it; there is no
+                    // result event to wait for.
+                    self.commit_handoff();
+                } else if let Some(prepared) = self.program.prepared.as_mut() {
+                    prepared.editor.dirty = false;
+                }
+            }
+        } else {
+            // Refused before it reached the controller: no result event will
+            // come, and the buffer keeps the marker it had.
+            self.program.pending_handoff = false;
+            self.program.handoff_sent = None;
+        }
+    }
+
+    /// Whether the controller already reports the handed-off file as its
+    /// program, which is how a synchronous backend confirms the handoff.
+    fn handoff_landed(&self, path: &Path, content: &str) -> bool {
+        let program = &self.snapshot.program;
+        !program.running
+            && program
+                .path
+                .as_deref()
+                .is_some_and(|loaded| crate::screens::files::same_file(loaded, path))
+            && program
+                .content
+                .as_ref()
+                .is_some_and(|text| text.as_str() == content)
+    }
+
+    /// The backend accepted the handoff: the prepared document is now the
+    /// loaded one, and the editor follows it.
+    pub(super) fn commit_handoff(&mut self) {
+        self.program.pending_handoff = false;
+        let sent = self.program.handoff_sent.take();
+        if let (Some((sent_path, sent_text)), Some(mut prepared)) =
+            (sent.clone(), self.program.prepared.take())
+        {
+            if prepared
+                .path
+                .as_deref()
+                .is_some_and(|path| crate::screens::files::same_file(path, &sent_path))
+            {
+                if prepared.editor.text() == sent_text {
+                    prepared.editor.mark_saved();
+                }
+                self.program.loaded = prepared;
+            } else {
+                // The prepared document changed under the press; the controller
+                // opened the sent file, so adopt the snapshot's text instead.
+                self.program.prepared = Some(prepared);
+            }
+        }
+        // Keep the controller's own spelling of the path when the snapshot
+        // already names the opened file, the same path a load would carry.
+        if let Some(path) = self.snapshot.program.path.clone() {
+            if self
+                .program
+                .loaded()
+                .path
+                .as_deref()
+                .is_some_and(|loaded| crate::screens::files::same_file(loaded, &path))
+            {
+                self.program.loaded_mut().path = Some(path);
+            }
+        }
+        // The snapshot's revision is the newest the UI knows about. The loaded
+        // document was just replaced on purpose, so it must not be mistaken for
+        // an external change; the opened file's own revision arrives next.
+        self.program.loaded_mut().program_revision_seen = self.snapshot.program.revision;
+        if let Some(path) = self.program.loaded().path.clone() {
+            let text = path.to_string_lossy().to_string();
+            self.prefs.preferences.remember_file(&text, 12);
+            self.prefs.dirty = true;
+        }
+        self.program.front = DocumentFront::Loaded;
+        self.finish_program_commit();
+    }
+
+    /// The handoff failed: the prepared buffer keeps its text and gets its
+    /// dirty marker back, and the loaded program is left as it was.
+    pub(super) fn abandon_handoff(&mut self) {
+        self.program.pending_handoff = false;
+        let sent = self.program.handoff_sent.take();
+        if let Some(prepared) = self.program.prepared.as_mut() {
+            // Text typed after the press is not in the refusal's file, so the
+            // marker stays even when the buffer was clean when it went out.
+            let typed_since = sent
+                .as_ref()
+                .is_some_and(|(_, text)| prepared.editor.text() != *text);
+            prepared.editor.dirty = self.program.handoff_was_dirty || typed_since;
+        }
     }
 
     pub fn cycle_program_view(&mut self) {
@@ -307,12 +611,118 @@ impl LincApp {
         self.nav.page = Page::Program;
     }
 
+    /// `SAVE` / the save chord: the document in front.
+    ///
+    /// The prepared document has its own file-only write; the loaded program
+    /// keeps the controller's save, including the save-as dialog when the
+    /// buffer has no file yet.
     pub fn save_program(&mut self) {
-        if !self.program.editor.dirty {
+        if self.front_is_prepared() {
+            self.save_prepared_program();
+        } else {
+            self.save_loaded_program();
+        }
+    }
+
+    /// `SAVE` on the prepared document: write its file and leave the
+    /// controller alone.
+    ///
+    /// The write is the backend's file-only verb, so the loaded program, its
+    /// running text and the interlock are untouched. The dirty marker goes on
+    /// acceptance and comes back with an error result, the way the handoff's
+    /// does; a synchronous backend has no result event, so the file itself is
+    /// the confirmation.
+    fn save_prepared_program(&mut self) {
+        if self.program.pending_prepared_save {
+            return;
+        }
+        if self.program.pending_handoff {
+            self.toast("the handoff is still in flight", theme::WARNING);
+            return;
+        }
+        let Some(prepared) = self.program.prepared.as_ref() else {
+            return;
+        };
+        if !prepared.editor.dirty {
             self.toast("no changes to save", theme::MUTED);
             return;
         }
-        if !self.editing_allowed() {
+        if !self.prepared_write_allowed() {
+            let reason = self.save_block_reason();
+            self.toast(reason, theme::ERROR);
+            return;
+        }
+        // A prepared document always has a path: it was read from a file, and
+        // nothing creates one without. There is no save-as for it.
+        let Some(path) = prepared.path.clone() else {
+            return;
+        };
+        let content = prepared.editor.text();
+        self.program.pending_prepared_save = true;
+        self.program.prepared_save_was_dirty = true;
+        self.program.prepared_save_sent = Some(content.clone());
+        let command = MachineCommand::SaveProgramFile {
+            path: path.clone(),
+            content: content.clone(),
+        };
+        if !self.try_send(command) {
+            // Refused before it reached the controller: no result event will
+            // come, and the buffer keeps the marker it had.
+            self.program.pending_prepared_save = false;
+            return;
+        }
+        if !self.program.pending_prepared_save {
+            // A result event arrived inside the send and has settled the
+            // marker already.
+            return;
+        }
+        // The write was accepted. The marker goes with the acceptance and an
+        // error result puts it back. A synchronous backend sends no result
+        // event, so its answer is the file itself; this runs once per operator
+        // save, not per frame.
+        if let Some(prepared) = self.program.prepared.as_mut() {
+            prepared.editor.dirty = false;
+        }
+        if std::fs::read_to_string(&path).is_ok_and(|written| written == content) {
+            self.commit_prepared_save();
+        } else {
+            self.toast("save queued", theme::ACCENT);
+        }
+    }
+
+    /// The backend accepted the prepared write.
+    pub(super) fn commit_prepared_save(&mut self) {
+        self.program.pending_prepared_save = false;
+        let sent = self.program.prepared_save_sent.take();
+        if let (Some(sent), Some(prepared)) = (sent, self.program.prepared.as_mut()) {
+            if prepared.editor.text() == sent {
+                // The file now holds this text; the next edit is dirty against
+                // it, and an undo back to it is clean again.
+                prepared.editor.mark_saved();
+            }
+        }
+        self.toast("program saved", theme::SUCCESS);
+    }
+
+    /// The prepared write failed: the buffer keeps its text and gets its dirty
+    /// marker back.
+    pub(super) fn abandon_prepared_save(&mut self) {
+        self.program.pending_prepared_save = false;
+        let sent = self.program.prepared_save_sent.take();
+        if let Some(prepared) = self.program.prepared.as_mut() {
+            let typed_since = sent
+                .as_ref()
+                .is_some_and(|text| prepared.editor.text() != *text);
+            prepared.editor.dirty = self.program.prepared_save_was_dirty || typed_since;
+        }
+    }
+
+    pub(super) fn save_loaded_program(&mut self) {
+        if !self.program.loaded().editor.dirty {
+            self.toast("no changes to save", theme::MUTED);
+            return;
+        }
+        if !self.loaded_editing_allowed() {
             let reason = if self.program_protected() {
                 "PROTECT ON — EDITING LOCKED"
             } else if self.panel_offline() {
@@ -325,6 +735,7 @@ impl LincApp {
         }
         let Some(path) = self
             .program
+            .loaded()
             .editor
             .path
             .clone()
@@ -341,7 +752,7 @@ impl LincApp {
             }));
             return;
         };
-        let content = self.program.editor.text();
+        let content = self.program.loaded().editor.text();
         self.send(MachineCommand::SaveProgram {
             path,
             expected_revision: self.snapshot.program.revision,
@@ -357,7 +768,7 @@ impl LincApp {
             .map(|current| current.as_str() == content)
             .unwrap_or(false)
         {
-            self.program.editor.mark_saved();
+            self.program.loaded_mut().editor.mark_saved();
             self.toast("program saved", theme::SUCCESS);
         } else if !self.program_protected() {
             self.toast("save queued", theme::ACCENT);
@@ -376,37 +787,44 @@ impl LincApp {
         match self.snapshot.program.content.clone() {
             Some(text) => {
                 let path = self.snapshot.program.path.clone();
-                self.program
+                let loaded = self.program.loaded_mut();
+                loaded
                     .editor
                     .set_loaded(path.clone().unwrap_or_default(), (*text).clone());
-                self.program.loaded_path = path;
+                loaded.path = path;
             }
             None => {
                 // Nothing is loaded, so an empty buffer is what the controller
                 // would run.
-                self.program.editor = linc_core::editor::Editor::new();
-                self.program.loaded_path = None;
+                let loaded = self.program.loaded_mut();
+                loaded.editor = linc_core::editor::Editor::new();
+                loaded.path = None;
             }
         }
-        self.program.program_revision_seen = self.snapshot.program.revision;
-        self.program.selected_line = 1;
-        self.program.cursor_line = Some(1);
-        self.program.code_scroll_to_line = Some(1);
+        self.program.loaded_mut().program_revision_seen = self.snapshot.program.revision;
+        let loaded = self.program.loaded_mut();
+        loaded.selected_line = 1;
+        loaded.cursor_line = Some(1);
+        loaded.code_scroll_to_line = Some(1);
         self.program.completed_at = None;
         self.program.follow_current = true;
-        self.refresh_preview();
+        self.refresh_loaded_preview();
     }
 
     pub fn mark_editor_changed(&mut self) {
-        // The interpreter's verdict was about the text before this keystroke.
-        // Keeping it would leave a stale red line under a block that is already
-        // fixed, and a stale "the machine refused it" beside a repaired file.
-        self.program.machine_check = None;
+        // The interpreter's verdict was about the loaded text before this
+        // keystroke. Keeping it would leave a stale red line under a block that
+        // is already fixed, and a stale "the machine refused it" beside a
+        // repaired file. An edit to the prepared document says nothing about the
+        // text the machine holds, so that verdict stands.
+        if self.program.front == DocumentFront::Loaded {
+            self.program.machine_check = None;
+        }
         self.sync_program_ok();
         if !self.profile.config.program.live_preview {
             return;
         }
-        self.program.preview_due = Some(
+        self.program.doc_mut().preview_due = Some(
             Instant::now() + Duration::from_millis(self.profile.config.program.preview_debounce_ms),
         );
     }

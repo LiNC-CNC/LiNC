@@ -7,7 +7,7 @@
 //! the speed of a spindle that is already turning. Neither can express a
 //! distance, an absolute speed, a free jog or a spindle start.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -259,6 +259,28 @@ pub enum MachineCommand {
         expected_revision: u64,
         content: String,
     },
+    /// Write `content` to `path` and change nothing else.
+    ///
+    /// This is the save a prepared document needs: the controller does not run
+    /// that file, so the write neither opens the program nor asks for the
+    /// panel's EDIT position. It still needs a live panel, a valid panel mode
+    /// and protect known off, and it refuses the loaded program's own path.
+    SaveProgramFile {
+        path: PathBuf,
+        content: String,
+    },
+    /// Write `content` to `path`, then open that file as the loaded program.
+    ///
+    /// This is the handoff: the prepared buffer becomes the controller's
+    /// program in one press. The write happens first so the text the operator
+    /// checked is the text that opens, and the open runs the same sequence a
+    /// load does, capturing the live offsets before the interpreter resets.
+    /// It needs the prepared write's gate plus an interpreter that is idle and
+    /// not running; it never starts, pauses or resumes the machine.
+    LoadPreparedProgram {
+        path: PathBuf,
+        content: String,
+    },
     SetWorkOffset {
         index: u8,
         values: AxisMap<f64>,
@@ -338,6 +360,12 @@ pub enum MachineCommand {
     ClearTrail,
 }
 
+/// The result label of a prepared-file write. The shell matches result events on
+/// it, so the string lives here beside the label that sends it.
+pub const PREPARED_SAVE_LABEL: &str = "Save prepared program";
+/// The result label of the prepared handoff, for the same reason.
+pub const PREPARED_LOAD_LABEL: &str = "Load prepared program";
+
 impl MachineCommand {
     pub fn label(&self) -> &'static str {
         match self {
@@ -353,6 +381,8 @@ impl MachineCommand {
             Self::LoadProgram { .. } => "Load program",
             Self::UnloadProgram => "Unload program",
             Self::SaveProgram { .. } => "Save program",
+            Self::SaveProgramFile { .. } => PREPARED_SAVE_LABEL,
+            Self::LoadPreparedProgram { .. } => PREPARED_LOAD_LABEL,
             Self::SetWorkOffset { .. } => "Set work offset",
             Self::ActivateWorkOffset { .. } => "Activate work offset",
             Self::SetG92Offset { .. } => "Set G92 offset",
@@ -406,6 +436,127 @@ fn spindle_for_trim(
         return Err(MachineError::SpindleStopped);
     }
     Ok(spindle)
+}
+
+/// Rules for writing a program file without opening it, shared by the
+/// simulator and the machine backend so the two cannot drift.
+///
+/// This is the save policy minus the EDIT-position and idle conditions: a
+/// prepared document is written while the machine runs and in any valid panel
+/// mode. The panel still has to be live and its mode valid, and protect has to
+/// be known off - an unknown protect state counts as on.
+pub fn check_program_file_write(snapshot: &MachineSnapshot) -> Result<(), MachineError> {
+    if !snapshot.panel.connected || snapshot.panel.communication_error {
+        return Err(MachineError::PanelOffline);
+    }
+    if !snapshot.panel.mode.is_valid() {
+        return Err(MachineError::InvalidPanelMode);
+    }
+    if snapshot.panel.protect_effective() {
+        return Err(MachineError::ProgramProtected);
+    }
+    Ok(())
+}
+
+/// Rules for handing the prepared program to the controller: the prepared
+/// write's gate plus an interpreter that is idle and not running.
+pub fn check_prepared_handoff(snapshot: &MachineSnapshot) -> Result<(), MachineError> {
+    check_program_file_write(snapshot)?;
+    if snapshot.task.running {
+        return Err(MachineError::ProgramRunning);
+    }
+    if snapshot.task.interp != InterpState::Idle {
+        return Err(MachineError::NotIdle);
+    }
+    Ok(())
+}
+
+/// Replace `canonical` with `content` in one step: a sibling temporary file,
+/// flushed to disk and renamed over the target, so an interrupted write leaves
+/// the old program whole.
+///
+/// Both backends write program files through this, so the durability rules
+/// cannot drift between the simulator and the machine.
+pub fn write_program_file(canonical: &Path, content: &str) -> Result<(), MachineError> {
+    let parent = canonical.parent().ok_or(MachineError::UnsafePath)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    use std::io::Write as _;
+    temporary.write_all(content.as_bytes())?;
+    temporary.as_file().sync_all()?;
+    temporary
+        .persist(canonical)
+        .map_err(|error| MachineError::Io(error.error.to_string()))?;
+    Ok(())
+}
+
+/// Refuse a prepared-file write that would land on the program the controller
+/// holds.
+///
+/// Both sides are resolved through the filesystem, so a different spelling of
+/// the loaded path - a symlinked name, or a path carrying a `..` parent
+/// component - is refused rather than the running program's file rewritten.
+pub fn check_write_target_not_loaded(
+    snapshot: &MachineSnapshot,
+    target: &Path,
+) -> Result<(), MachineError> {
+    let Some(loaded) = snapshot.program.path.as_deref() else {
+        return Ok(());
+    };
+    let target = resolved_for_compare(target);
+    let loaded = resolved_for_compare(loaded);
+    let same = match (target, loaded) {
+        (Some(target), Some(loaded)) => target == loaded,
+        // A file the controller holds can be gone from disk while the
+        // interpreter still runs it. Compare the names it would be recreated
+        // under rather than letting an unresolvable path pass.
+        (target, loaded) => match (
+            lexical_absolute(target.as_deref()),
+            lexical_absolute(loaded.as_deref()),
+        ) {
+            (Some(target), Some(loaded)) => target == loaded,
+            _ => false,
+        },
+    };
+    if same {
+        return Err(MachineError::LoadedProgramPath);
+    }
+    Ok(())
+}
+
+/// Resolve a path for comparison: the file itself when it exists, otherwise its
+/// parent plus its name, so a target that has not been written yet still
+/// compares against the directory it will land in.
+fn resolved_for_compare(path: &Path) -> Option<PathBuf> {
+    if let Ok(canonical) = path.canonicalize() {
+        return Some(canonical);
+    }
+    let parent = path.parent()?;
+    let name = path.file_name()?;
+    std::fs::canonicalize(parent)
+        .ok()
+        .map(|parent| parent.join(name))
+}
+
+/// The path with `.` and `..` removed against the current directory, for the
+/// comparison when neither side resolves on disk.
+fn lexical_absolute(path: Option<&Path>) -> Option<PathBuf> {
+    let path = path?;
+    let base = if path.is_absolute() {
+        PathBuf::new()
+    } else {
+        std::env::current_dir().ok()?
+    };
+    let mut out = PathBuf::new();
+    for component in base.join(path).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    Some(out)
 }
 
 /// Rules for a spindle speed step, shared by the simulator and the machine
@@ -525,6 +676,8 @@ pub enum MachineError {
     NetworkBusy,
     #[error("path is outside NC_FILES or is not a regular file")]
     UnsafePath,
+    #[error("the write target is the program the controller has loaded")]
+    LoadedProgramPath,
 }
 
 impl From<std::io::Error> for MachineError {
@@ -565,6 +718,7 @@ impl MachineError {
             Self::RevisionConflict => "REVISION CONFLICT",
             Self::NetworkBusy => "NETWORK BUSY",
             Self::UnsafePath => "UNSAFE PATH",
+            Self::LoadedProgramPath => "LOADED PROGRAM",
         }
     }
 }
@@ -667,6 +821,52 @@ mod tests {
         assert_eq!(
             check_spindle_speed(&snapshot, 1200.0, 0.0),
             Err(MachineError::NotIdle)
+        );
+    }
+
+    #[test]
+    fn a_prepared_file_write_needs_a_live_panel_and_protect_off() {
+        use crate::model::{MachineVariant, PanelMode, PanelModeValidity};
+        let mut snapshot = MachineSnapshot::empty(MachineVariant::Mill);
+        snapshot.panel.connected = true;
+        snapshot.panel.mode = PanelModeValidity::Valid(PanelMode::Auto);
+        snapshot.panel.program_protect = false;
+        snapshot.panel.program_protect_known = true;
+
+        assert_eq!(check_program_file_write(&snapshot), Ok(()));
+
+        snapshot.panel.connected = false;
+        assert_eq!(
+            check_program_file_write(&snapshot),
+            Err(MachineError::PanelOffline)
+        );
+        snapshot.panel.connected = true;
+        snapshot.panel.communication_error = true;
+        assert_eq!(
+            check_program_file_write(&snapshot),
+            Err(MachineError::PanelOffline),
+            "a stale panel is the same as no panel"
+        );
+        snapshot.panel.communication_error = false;
+
+        snapshot.panel.mode = PanelModeValidity::Unknown;
+        assert_eq!(
+            check_program_file_write(&snapshot),
+            Err(MachineError::InvalidPanelMode)
+        );
+        snapshot.panel.mode = PanelModeValidity::Valid(PanelMode::Auto);
+
+        snapshot.panel.program_protect = true;
+        assert_eq!(
+            check_program_file_write(&snapshot),
+            Err(MachineError::ProgramProtected)
+        );
+        snapshot.panel.program_protect = false;
+        snapshot.panel.program_protect_known = false;
+        assert_eq!(
+            check_program_file_write(&snapshot),
+            Err(MachineError::ProgramProtected),
+            "an unknown protect state counts as on"
         );
     }
 

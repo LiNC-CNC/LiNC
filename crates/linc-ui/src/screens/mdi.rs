@@ -117,7 +117,13 @@ pub fn pane(app: &mut LincApp, ui: &mut Ui, height: f32) {
                 .max_rect(band.modal)
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
-        common::modal_pane_in(app, &mut modal_ui, 8, "mdi-modal", band.modal);
+        common::modal_pane_in(
+            &mut modal_ui,
+            &app.snapshot.program.modal,
+            8,
+            "mdi-modal",
+            band.modal,
+        );
     });
 }
 
@@ -646,7 +652,7 @@ fn block_segments(app: &LincApp, block: &str, start: [f64; 3]) -> Vec<PathSegmen
     }
     // The same work offset the program preview is drawn with, so a `G54` block
     // lands where the program's own `G54` move lands.
-    let offset = app.program.preview_offset.clone();
+    let offset = app.program.loaded().preview_offset.clone();
     // The block inherits the machine's modal groups. `parse_preview` starts every
     // parse absolute, in G21, XY, so without these words a `G0 X10` typed while
     // the machine sits in G91 would be drawn as a move to X10 rather than a
@@ -672,6 +678,7 @@ fn modal_fingerprint(app: &LincApp) -> u64 {
     for axis in ["X", "Y", "Z"] {
         let value = app
             .program
+            .loaded()
             .preview_offset
             .as_ref()
             .and_then(|offset| offset.get(axis).copied())
@@ -765,7 +772,7 @@ fn modal_seed(app: &LincApp) -> String {
 /// has one. The block is added to none of it: the overlay must not rescale the
 /// view the program is framed in.
 fn reference_bounds(app: &LincApp) -> Bounds3 {
-    let program = app.program.last_valid_preview.bounds;
+    let program = app.program.loaded().last_valid_preview.bounds;
     let mut bounds = program.unwrap_or(default_bounds());
     let mut any = program.is_some();
     for point in app.snapshot.live_trail.as_slice() {
