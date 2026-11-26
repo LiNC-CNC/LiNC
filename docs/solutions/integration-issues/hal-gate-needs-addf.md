@@ -82,13 +82,19 @@ Two fixes, each with a test behind it:
   keeps it across a rebuilt snapshot.
 - `addf and2.cycle_permit servo-thread` and `addf and2.resume_permit
   servo-thread` in `hal/linc.hal`, plus the same line for the gate in
-  `hal/linc-lathe.hal` and `hal/baiermill-pb-postgui.hal`.
+  `hal/linc-lathe.hal` and `hal/baiermill-pb-postgui.hal`. Those instance names
+  are gone now: CYCLE START belongs to the HMI, and the gates this record
+  describes were deleted. The scheduling lesson they carried is not; see
+  Prevention.
 
 `crates/linc-core/tests/program_gate_hal.rs` now carries both checks:
 `every_and2_these_files_create_is_added_to_a_thread` parses each `loadrt and2
 names=` list and requires every instance in an `addf` (mutation-checked: delete
-the line and the test fails), and the existing gate tests require the interlock
-to reach `halui.program.run`.
+the line and the test fails), and `no_hal_file_wires_the_panel_key_into_halui`
+holds the ownership rule that replaced the gates: no HAL file may carry the
+panel key into the controller's run input. `the_baiermill_postgui_file_cannot_
+carry_the_net` guards the file whose repository copy is a mirror of the
+machine's, which is its own record.
 
 ## Why This Works
 
@@ -100,19 +106,16 @@ which for an AND gate is FALSE.
 
 ## Prevention
 
-- Any new HAL function gets three lines, never two: `loadrt … names=<instance>`,
-  the `net` that uses it, and `addf <instance> <thread>`.
-- Prove it with the counter: `halcmd show pin and2.<name>` and watch `.time`
-  advance, or `halcmd show thread | grep <instance>`. A gate whose `.time` is 0
-  is not a gate.
-- Every `LincOutput` variant a UI path writes must be published by something —
-  by the writer call itself, or by the backend loop reading
-  `snapshot.hal.<field>`. A variant parked in a "the worker owns these" arm that
-  no worker handles is dropped without a trace.
-- Do not let the simulation backend stand as the only evidence that a HAL output
-  works: it stores levels the real backend has to publish. `linc_get_hal` reports
-  `program_ok` either way, so a green sim run is not proof.
-- When cycle start is inert, read the chain, not the state: `halui.mode.is-auto`,
-  `halui.program.is-paused`, `and2.cycle_gate`, `and2.cycle_run`,
-  `and2.cycle_permit`, `halui.program.run` — and the `.time` counter of each
-  function in it.
+- The rules this record produced now live in two artifacts: the HAL wiring
+  section of `CODING_STANDARDS.md` (three lines per function, prove it from the
+  instance's own counter, publish every output an HMI path writes), and
+  `crates/linc-core/tests/program_gate_hal.rs`, which fails when an `and2`
+  instance these files create is missing from a thread.
+- Keep the evidence habit: TRUE/FALSE says what a function last computed, not
+  whether anything calls it. Only `.time` answers that, so a gate whose counter
+  is 0 is not a gate.
+- A green simulation is evidence about the HMI, not about the backend: the sim
+  stores levels the real backend still has to publish.
+- When cycle start is inert, read the chain and the counters along it rather
+  than the state at one pin. The instance names in this record have since been
+  removed, so read the chain the profile actually loads.

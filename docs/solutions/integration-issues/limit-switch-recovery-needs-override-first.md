@@ -76,5 +76,8 @@ switch, and the four-step cap bounds a welded switch to 20 mm.
   not let a UI path send the NML commands itself.
 - Use `JointStatus.override_limits` per joint, not
   `halui.joint.0.override-limits`, which describes joint 0 only.
-- Run `tools/check-hal-nets.py` after touching HAL wiring, and verify the
-  simulated `linc.machine-on` pin is true before testing recovery in the sim.
+- Run `baiermill-linc/tools/check-hal-nets.py` after touching HAL wiring on the
+  BaierMill, and verify the simulated `linc.machine-on` pin is true before
+  testing recovery in the sim. The checker lives in the machine-config
+  repository, not in this one: the file set a machine runs is not the file set
+  this repository holds.
