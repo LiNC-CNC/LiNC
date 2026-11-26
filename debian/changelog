@@ -1,3 +1,33 @@
+linc (0.5.0-1) unstable; urgency=medium
+
+  * Background program editing. The Program page holds the loaded program
+    and one prepared file at a time. PREPARE (P) in Files reads a program
+    without reaching the controller, so the next job can be edited and saved
+    while the current one cuts; the editor, toolpath, MODAL pane, faults and
+    estimated time follow the prepared file. Ctrl+W closes it, Ctrl+N or LOAD
+    on the prepared file hands it over: the buffer is written, then opened as
+    the loaded program, with the same syntax and controller gate as LOAD.
+    A prepared save refuses the loaded path and, during a run, any target on
+    the machine's SUBROUTINE_PATH.
+  * The EXT (G92) shift. A global offset that moves every work system at once
+    now has X/Y/Z cards on the Offsets page, editable in place with Ctrl+X/Y/Z
+    and cleared with 0. The top bar names a non-zero shift (EXT XY), the work
+    coordinates card marks G54 - EXT, the preview is seeded with the live
+    register and implements G52, and a probe run is refused while a shift is
+    set. A write adds the register back before subtracting, so a second edit
+    lands on the typed value instead of compounding.
+  * The interpreter's `rs274 -g` check runs on a worker thread. A load waits
+    for the verdict without holding the frame, and the program interlock stays
+    shut while the check is in flight.
+  * Machine fixes from the mill: cycle start is routed through the gate on
+    every start path, the machine is powered back on when the E-stop is
+    released, the panel drops a link after five dropped frames and the panel
+    cycle is selectable from the profile. Homing pages hold no shortcuts of
+    their own, the NML hold only fires when the interpreter stops, and the HAL
+    gates are added only when their component exists.
+
+ -- Hans Baier <foss@hans-baier.de>  Thu, 26 Nov 2026 16:10:00 +0700
+
 linc (0.4.0-1) unstable; urgency=medium
 
   * A modelled cycle time: the bar's remainder is planned from the program's
